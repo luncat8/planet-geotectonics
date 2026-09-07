@@ -1,0 +1,10 @@
+const { assert } = require('./helpers.js');
+const Quat = require('../js/quat.js');
+const q = new Float64Array([0, 0, 0, 1]), omega = new Float64Array([0, 0, 0.01]);
+const point = new Float64Array([1, 0, 0]), out = new Float64Array(3);
+for (let i = 0; i < 10000; i++) Quat.integrate(q, 0, omega, 0, 0.1);
+Quat.rotate(out, 0, q, 0, point, 0);
+assert.ok(Math.abs(out[0] - Math.cos(10)) < 1e-12);
+assert.ok(Math.abs(out[1] - Math.sin(10)) < 1e-12);
+assert.ok(Math.abs(Math.hypot(...q) - 1) < 1e-15);
+console.log('PASS quaternion: analytic rotation after 10,000 steps');

@@ -1,0 +1,18 @@
+
+1. The GPU/CPU parity criterion is likely unachievable as written (H2).
+"Same seed … within tolerance for 1000 frames" at 1e-5 relative will fail even with perfect kernels, because a coupled chaotic system amplifies float64-vs-float32 rounding exponentially. Unless the CPU accumulates in Float32Array for every hot path (worth deciding explicitly in §0 — it also halves memory), expect divergence within tens to hundreds of frames. Suggest redefining parity as:
+
+     exact/1e-5 agreement for a short window (e.g. 50–100 frames) starting from an identical serialized state, and
+     statistical agreement (plate count, speed histogram, area-age distribution) after 1000 frames.
+
+This also gives you the mechanism for free: reuse the Phase E checkpoint blobs as the parity harness input — dump state, load into both paths, run N frames, compare. State that explicitly in H2.
+
+3. diag.js has no phase. Tests in C (mass balance), E (invariants), and the risk table all lean on diag, but no task creates it. Assign the scaffolding (counters, history ring, invariant asserts) to Phase B — you'll want it the moment plates move.
+
+7. Add a determinism test in Phase A. "Same seed run twice → bit-identical state" is nearly free to implement, and everything downstream (GPU parity, checkpoint resume, debugging user reports) depends on it. It also catches stray Math.random() and iteration-order dependence immediately, not in H2.
+
+8. Save/load format (E3). Add a version tag and per-array lengths to the header, not just level/seed/t — otherwise every format tweak silently corrupts old blobs.
+
+9. tests/alloc.js flakiness. process.memoryUsage deltas without GC are noisy. Require node --expose-gc, call global.gc() before and after the 1000 frames, then assert delta ≈ 0. Also: any sort() with an inline comparator allocates a closure — worth a note in the conventions since it's the classic violation of your own rule.
+
+
