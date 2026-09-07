@@ -35,3 +35,13 @@
 	cell areas vary 0.68..1.21 of the mean; neighbour distances vary +-10 %.
 	hill-climb from a cached cell is exact for locating a point in a Voronoi cell and needs
 	<= 3 steps for sub-cell motion.
+
+## foundation tests and precision
+
+	the original cap bench uses an artificial priority override for the moving cap over the
+	stationary background. nearest-distance raster ownership does not have that behavior.
+	test transport with cap columns alone, then test competing plates in contact scenarios.
+	L5 real kernels: IoU 0.9699 at 1000 Myr / dt 0.1, 0.9661 at 100 Myr / dt 0.01.
+	keep unit positions in Float64 from mesh construction, not round-tripped via cellA f32.
+	GC-delimited heap deltas measure retained memory, not transient allocations. Warm up
+	first and track arrayBuffers separately; inspect hot-path code/profiles as well.
