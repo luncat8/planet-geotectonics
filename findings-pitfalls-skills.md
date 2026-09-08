@@ -173,3 +173,106 @@
 	L5 with surface coupling remains above the 40 frames/s node floor (about 45-52 frames/s in
 	repeated smoke runs); mantle harmonic evaluation and the graph gradient are the dominant kernels.
 	Keep the per-frame HUD text at 2 Hz and use typed-array scratch buffers instead of per-cell arrays.
+
+## damage calibration (why kDam is 100x design)
+
+	design §11's kDam 0.05 / kDamT 0.02 saturate: at L4 the 0.8 threshold covers 70-95 % of
+	every plate's own cells, so the corridor is the plate and every plate fragments every
+	cycle. Calibrate against the corridor *fraction* instead of absolute damage
+	(experiments/corridor-scan.js): kDam 5e-4, kDamT 1e-3, kHeal 5e-3 with a 0.6 threshold hold
+	the corridor at 15-60 % of a plate, and healing can actually close one. 0.6 is the best of
+	0.4-0.8; below it the corridor splits plates that are merely sheared, above it nothing
+	splits. Two further gates are load-bearing: corridor damage resets to 0.5*splitDamage
+	(otherwise the same plate re-rifts next cycle) and splitAge 40 Myr bars a newborn plate.
+	minPlateCells 40 (design §11) at L5 multiplies fragments to the 128-plate cap (plate counts
+	64 and 89 in a 500 Myr L4 sweep); 100 holds at 16 -> 30 map-start and 20 -> 33 hot-start.
+	Components under minCells must be re-absorbed, never dropped: a dropped component's columns
+	keep no owner, are never advected again, and both ledgers leak.
+
+## rigid-body opening geometry (split and merge rigs)
+
+	the signed mean opening across a cut is identically zero for two rigid pieces on a sphere:
+	for a symmetric polar cap the two centroids and the relative omega are mutually orthogonal,
+	so R*((w1-w2) x r) . t cancels exactly even at 3.5 cm/yr of real spreading. Measured on the
+	split rig: +43000 and -43000 m/Myr on the two halves of the same cut. A rift criterion must
+	use the positive length-weighted part (openSum/openLen >= vRift), never the signed mean.
+	The same fact kills a naive merge rig: two counter-rotating hemispheres have one half in
+	ridge and the other in trench, so the closing normal speed averages to zero and they never
+	suture. Drive a merge rig with a dead transform instead.
+	a part that inherits the parent's omega does not open either way. Fit omega per part from
+	uMantle (Plates.dragFit, area-weighted rigid least squares reusing the K10 solve); against
+	a prescribed rigid field at W = 25000/R the fit returns the exact omega (M 3.40e14,
+	rhs 2.09e5, |omega| 6.16e-10). Cache fits per label per cycle: two dragFit passes plus a
+	mask clear per candidate pair made a 500 Myr L4 run ~25x slower.
+	s.uMantle is a physical velocity R*(omega x r), not omega itself. Prescribing an omega in a
+	test means writing u = R*(Omega x r).
+
+## plate census and the 65535 compaction hazard
+
+	plateCells is only filled by K5 (Edges.velocities). A rig that prescribes omega skips K5,
+	plateCells[0] stays 0, retire() removes a plate that owns cells, compactPlates() writes
+	remap[0] = -1 into every live s.plate[i] -- a Uint16Array turns -1 into 65535 -- and K3
+	then reads world[65535] out of bounds. NaN positions follow, and Columns.climb's for(;;)
+	never converges because every NaN comparison is false, so the frame hangs instead of
+	failing. Judge plates from cellPlate, which K4 rewrites every frame, and make retire()
+	return early when the census is empty. A test rig that appears to hang is not always a
+	test bug.
+
+## checkpoint format
+
+	store primitives only and recompute the derived buffers: rebuild() after a load recovers
+	world from b and q, and Sim.raster recovers z/vel/owner. world on a dead column is scratch
+	in both directions -- rebuild zeroes it, an uninterrupted run keeps stale values -- so a
+	round-trip comparison must restrict itself to alive columns or it fails on data that was
+	never meant to survive. Share one SCALARS/ARRAYS table between save and load, so a field
+	cannot be saved but not restored. Validate magic, version, header arithmetic, level, V,
+	capacities, every declared length and the exact data length before touching live state, or
+	a truncated file half-restores and the next frame reads garbage.
+	snapshot times come from s.t, which accumulates in float (20.000000000000014), so a ring
+	that "should" hold four snapshots of a 80 Myr run holds three. Assert structure, not counts.
+
+## performance after events
+
+	L5, node, 300 steps at dt 0.1, same session and machine: base 16.93 ms/step (59.1 frames/s),
+	with Phase E 17.24 ms/step (58.0 frames/s). The events kernel costs 0.116 ms/step at a
+	1 Myr cadence and diag 0.09 ms more (it now checks damage and plate ids). Always compare
+	against the base commit measured at the same moment: a 64.2 -> 58.0 frames/s "regression"
+	was a loaded machine, and three orphaned test processes from a timed-out run were the
+	whole 2x slowdown -- every kernel including untouched ones read 2x slower.
+
+## ore geography is a production rule, not an end state (acceptance 5)
+
+	design §10 acceptance 5 asks for > 60 % of oArc mass within 2 cells of a subduction edge.
+	Measured on the final world of an 800 Myr L4 hot start it is 48 %, and it keeps falling:
+	a deposit is a fossil record and the plate carries it away from the trench that made it
+	(at 5 cm/yr, 100 Myr is 5000 km, far more than 2 cells). The same is true of oVms, which
+	is created only on oceanic crust and then stays put while arcs bury that crust in felsic
+	crust (63 % still oceanic at 800 Myr).
+	So test the factories, not the map: call the owning kernel once, diff the potential, and
+	assert every increment landed where the rule says. Measured shares are then exactly 1.000
+	with zero violations (oArc at trenchDist <= 2 on an overriding plate, oVms on oceanic
+	crust, oOro on continental, oBas on thick sediment). Report the end-state share as the
+	drift number it is.
+	Two traps in that diff. Events.compact renumbers the column table, so a diff across a frame
+	with deaths compares different columns -- skip such frames or call the kernel directly.
+	And a column can own several cells, so s.cell[i] is not necessarily the cell the kernel
+	acted on; reduce trenchDist to the minimum over the cells the column owns.
+
+## statistical geography tests need a control
+
+	"placer is downslope of an orogenic maximum" is invisible in a full world: after 800 Myr
+	almost every continental column is orogenic, so the top-100 sources and an arbitrary
+	control differ by only 1.1x in the placer found downhill of them. The mechanism is still
+	exactly right -- build a rig instead. One 80 km felsic summit in a 60 km plateau, only the
+	summit orogenic, 100 frames of Surface.step: placer appears (0.052), only in cells
+	reachable downhill from the summit, only where z < 300 m, and exactly zero when the summit
+	is not orogenic. Size the rig to the erosion rate: 400 frames grinds an 8 km cone down to
+	sea level and the test then proves nothing.
+
+## cost of the ore pass
+
+	L5 node, same session: 58.0 frames/s before Phase F, 56.1 after (17.81 ms/step). Two things
+	made it cheap. Diag.ores summed six classes with s[fields[k]] inside the column loop -- a
+	megamorphic property load that cost 2.07 ms/step until the six arrays were hoisted into
+	locals (0.28 ms). And the belt dilation belongs in the edge pass that finds the belt, not
+	in a per-column ring scan: belt edges are few, continental columns are many.

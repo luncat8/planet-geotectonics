@@ -7,7 +7,7 @@ A no-build, offline-friendly planetary tectonics simulator in development.
 Open `index.html` directly in a browser. No dependencies, network requests or server are
 needed. Alternatively, serve this directory with `python3 -m http.server 8000 --bind 0.0.0.0`.
 
-## Current implementation: Phase D surface coupling
+## Current implementation: Phase F metallogeny
 
 - Icosahedral grid with flat adjacency/geometry tables and deterministic land mask.
 - Fixed-capacity column and plate arrays; seeded Voronoi plates, `q = identity`, `b = r`.
@@ -23,11 +23,26 @@ needed. Alternatively, serve this directory with `python3 -m http.server 8000 --
   symmetric gravitational collapse of thick continental crust.
 - Deterministic one-hop erosion and sediment routing with mobile buffers and exact crust-plus-
   sediment mass accounting.
-- Canvas map with plate, boundary-type, elevation and coverage views, plus a column probe.
+- Damage accumulation from strain and plume heating; at a 1 Myr cadence plates split along a
+  rift corridor into components with their own least-squares-fitted rotation, small fragments
+  are re-absorbed, slow or continent-colliding boundaries suture, and plates merge by rebasing
+  the loser's columns into the winner's frame.
+- Planetary cooling `Tm(t)` scaling the mantle speed, crust production and damage healing;
+  hot-start and map-start initial states.
+- Checkpoints: a ring of full states every 20 Myr, plus save/load to one validated binary
+  blob, so a run can be resumed from a file.
+- Metallogeny: six saturating potentials per column (VMS, mafic, arc, orogenic, basin, placer)
+  scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
+  fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
+  placer is liberated by erosion and rides the sediment load downhill.
+- Deposit extraction on demand: a one-cell blur of each potential, its ranked local maxima,
+  and a context tag per deposit, dumped as JSON.
+- Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
+  views, plus a column probe and a plate-lineage/split/merge readout.
 - Performance counter: smoothed fps, physics step time and per-kernel milliseconds, text
   rebuilt twice a second.
 
-Plate split/merge, planetary cooling, ores, checkpoints and WebGPU are **not implemented** yet.
+Parameter calibration, WebGPU and polish are **not implemented** yet.
 See `0.2-plan.md` and `0.1.5-final-design.md`.
 
 ## Test
@@ -45,5 +60,12 @@ loading, a natural contact-deletion finiteness run, and 16-plate 500 Myr (dt 0.1
 consumed and spawned area both match the analytic `4WR²` flux, with exact `hMaf`/`hFel`
 ledgers and a stable column count; a rifted continent whose margins thin 35 → 13 km within
 three cells and then form oceanic crust. Phase D: calibrated isostasy, a cone-to-basin erosion
-ledger, routing stability and 10,000-frame thick-plateau collapse; plus L5 throughput with the
-per-kernel breakdown.
+ledger, routing stability and 10,000-frame thick-plateau collapse. Phase E: a prescribed
+damage corridor splitting into exactly two plates with column world positions preserved to
+1e-9, direct merge and retire rigs, a checkpoint round trip with malformed-blob rejection, and
+a hot-start 1500 Myr run (plus 300 Myr at both dt endpoints) asserting finite state, 1 %
+invariants, 6-40 plates and per-epoch speed statistics; plus L5 throughput with the per-kernel
+breakdown and a retained-memory smoke test. Phase F: each potential's production site asserted
+exactly by diffing one kernel call, a placer rig that erodes a single orogenic summit, bounded
+potentials over an 800 Myr hot start, ranked deterministic deposit extraction and a checkpoint
+round trip.

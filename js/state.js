@@ -2,10 +2,12 @@ var StateParams = typeof module !== 'undefined' && module.exports ? require('./p
 var StateGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
 var StateMantle = typeof module !== 'undefined' && module.exports ? require('./mantle.js') : Mantle;
 var StateDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
-function State(grid, seed) {
+// hot: hot-start world (design §9) — no continents, Tm = TmHot, young oceanic crust everywhere.
+function State(grid, seed, hot) {
 	this.grid = grid;
 	this.colCap = Math.ceil(grid.V * 1.5);
 	this.plateCap = StateParams.plateCap;
+	this.hotStart = hot === undefined ? StateParams.hotStart : (hot ? 1 : 0);
 	// Nominal column footprint. Cell areas vary 0.68..1.21 of the mean, so the mass ledgers use
 	// this constant: a column always represents the same crust volume wherever it sits.
 	this.A0ref = 4 * Math.PI * StateParams.radius * StateParams.radius / grid.V;
@@ -17,6 +19,15 @@ function State(grid, seed) {
 	this.hSed = new Float64Array(this.colCap);
 	this.age = new Float64Array(this.colCap);
 	this.damage = new Float64Array(this.colCap);
+	// Metallogeny (design §8): six saturating potentials per column, scaled by the column's
+	// fertility, which is drawn once at birth and never changes afterwards.
+	this.fert = new Float64Array(this.colCap);
+	this.oVms = new Float64Array(this.colCap);
+	this.oMaf = new Float64Array(this.colCap);
+	this.oArc = new Float64Array(this.colCap);
+	this.oOro = new Float64Array(this.colCap);
+	this.oBas = new Float64Array(this.colCap);
+	this.oPla = new Float64Array(this.colCap);
 	this.zDyn = new Float64Array(this.colCap);
 	this.zDynNext = new Float64Array(this.colCap);
 	this.collapseDelta = new Float64Array(this.colCap);
@@ -36,8 +47,35 @@ function State(grid, seed) {
 	this.plateCells = new Uint32Array(this.plateCap);
 	this.plateSpawned = new Uint32Array(this.plateCap);
 	this.plateLost = new Uint32Array(this.plateCap);
+	this.plateBirth = new Float64Array(this.plateCap);
+	this.plateParent = new Int32Array(this.plateCap);
+	this.plateDead = new Uint8Array(this.plateCap);
+	this.plateRemap = new Int32Array(this.plateCap);
 	this.subRate = new Float64Array(this.plateCap);
 	this.subCount = new Uint32Array(this.plateCap);
+	// Recycling feed for arc potentials: the plate-mean inventory of the columns it subducts.
+	this.arcFeed = new Float64Array(this.plateCap);
+	this.arcFeedN = new Uint32Array(this.plateCap);
+	// Plate pairs are keyed [lo * plateCap + hi]: suture timers plus the per-cycle census.
+	this.sutureTime = new Float32Array(this.plateCap * this.plateCap);
+	this.pairScratch = new Float32Array(this.plateCap * this.plateCap);
+	this.pairLen = new Float32Array(this.plateCap * this.plateCap);
+	this.pairVel = new Float32Array(this.plateCap * this.plateCap);
+	this.pairOk = new Uint8Array(this.plateCap * this.plateCap);
+	this.corridor = new Uint8Array(grid.V);
+	// Collision/continental-transform belt, dilated one ring, for the orogenic potential.
+	this.belt = new Uint8Array(grid.V);
+	this.oreSum = new Float64Array(6);
+	this.compLabel = new Int32Array(grid.V);
+	this.fitM = new Float64Array(9);
+	this.fitRhs = new Float64Array(3);
+	this.fitOmega = new Float64Array(64 * 3);
+	this.openSum = new Float64Array(64);
+	this.openLen = new Float64Array(64);
+	this.openFitted = new Uint8Array(64);
+	this.compSize = new Int32Array(64);
+	this.compPlate = new Int32Array(64);
+	this.queue = new Int32Array(grid.V);
 	this.count = new Uint32Array(grid.V);
 	this.offset = new Uint32Array(grid.V + 1);
 	this.cursor = new Uint32Array(grid.V);
@@ -96,6 +134,9 @@ function State(grid, seed) {
 	this.histPlates = new Uint16Array(StateParams.histCap);
 	this.histChanges = new Uint32Array(StateParams.histCap);
 	this.histCols = new Uint32Array(StateParams.histCap);
+	this.ckptCap = StateParams.ckptCap;
+	this.ckpt = new Array(this.ckptCap);
+	this.ckptT = new Float64Array(this.ckptCap);
 	this.reset(seed === undefined ? grid.seed : seed);
 }
 State.prototype.reset = function (seed) {
@@ -105,20 +146,37 @@ State.prototype.reset = function (seed) {
 	this.gaps = 0; this.maxClimb = 0; this.fixedOmega = 0; this.prescribedOmega = 0; this.finite = 1;
 	this.meanSpeed = 0; this.maxSpeed = 0; this.typeChanges = 0;
 	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
-	this.Tm = 1; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0;
-	this.spawns = 0; this.deaths = 0; this.overlaps = 0; this.lastEvent = -Infinity;
+	// Tm0 is the cooling baseline: the exponential always decays from the world's own start
+	// temperature, so a hot start cools through the same curve a map start sits on today.
+	this.Tm0 = this.hotStart ? StateParams.TmHot : StateParams.Tm0;
+	this.Tm = this.Tm0; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0;
+	// lastEvent starts at 0, not -Infinity: plateCells is only meaningful after the first K5
+	// pass, and the event cadence would otherwise retire every plate on the opening frame.
+	this.spawns = 0; this.deaths = 0; this.overlaps = 0; this.splits = 0; this.merges = 0;
+	this.lastEvent = 0; this.ckptI = 0; this.ckptN = 0; this.ckpt.fill(null); this.ckptT.fill(0);
+	this.ckptDue = StateParams.ckptEvery;
 	this.producedFel = 0; this.producedMaf = 0; this.erodedFel = 0; this.erodedMaf = 0;
 	this.subductedMaf = 0; this.subductedSed = 0;
 	this.subductedArea = 0; this.massFel = 0; this.massMaf = 0; this.massSed = 0;
 	this.massFel0 = 0; this.massMaf0 = 0; this.massSed0 = 0;
 	this.body.fill(0); this.world.fill(0); this.area.fill(0);
 	this.hFel.fill(0); this.hMaf.fill(0); this.hSed.fill(0); this.age.fill(0);
+	this.fert.fill(0); this.oVms.fill(0); this.oMaf.fill(0);
+	this.oArc.fill(0); this.oOro.fill(0); this.oBas.fill(0); this.oPla.fill(0);
 	this.damage.fill(0); this.zDyn.fill(0); this.zDynNext.fill(0); this.collapseDelta.fill(0); this.alive.fill(0);
 	this.plate.fill(0); this.cell.fill(-1); this.consumedBy.fill(-1);
 	this.loserList.fill(-1); this.loserStart.fill(0); this.loserCursor.fill(0);
 	this.q.fill(0); this.omega.fill(0); this.omegaTarget.fill(0);
 	this.M.fill(0); this.rhs.fill(0); this.seeds.fill(0); this.plateCells.fill(0);
+	this.plateBirth.fill(0); this.plateParent.fill(-1); this.plateDead.fill(0); this.plateRemap.fill(0);
+	this.sutureTime.fill(0); this.pairLen.fill(0); this.pairVel.fill(0); this.pairOk.fill(1);
+	this.pairScratch.fill(0); this.corridor.fill(0); this.compLabel.fill(-1); this.queue.fill(0);
+	this.compSize.fill(0); this.compPlate.fill(-1);
+	this.fitM.fill(0); this.fitRhs.fill(0); this.fitOmega.fill(0);
+	this.openSum.fill(0); this.openLen.fill(0); this.openFitted.fill(0);
 	this.subRate.fill(0); this.subCount.fill(0);
+	this.arcFeed.fill(0); this.arcFeedN.fill(0);
+	this.belt.fill(0); this.oreSum.fill(0);
 	this.plateSpawned.fill(0); this.plateLost.fill(0);
 	this.count.fill(0); this.offset.fill(0); this.cursor.fill(0); this.entries.fill(0);
 	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.wet.fill(0);
@@ -136,7 +194,8 @@ State.prototype.reset = function (seed) {
 	this.plumePos.fill(0); this.plumeBirth.fill(0); this.plumeLife.fill(0); this.plumeStr.fill(0);
 	this.scratch.fill(0); this.histT.fill(0); this.histMeanV.fill(0); this.histMaxV.fill(0);
 	this.histGaps.fill(0); this.histPlates.fill(0); this.histChanges.fill(0); this.histCols.fill(0);
-	var random = StateGrid.mulberry32(this.seed), g = this.grid;
+	var random = StateGrid.mulberry32(this.seed), g = this.grid, hot = this.hotStart;
+	var mafNew = StateMantle.hMafNew(this.Tm0);
 	for (var p = 0; p < this.plateCount; p++) {
 		this.q[p * 4 + 3] = 1;
 		var y = random() * 2 - 1, a = random() * Math.PI * 2, r = Math.sqrt(1 - y * y);
@@ -150,6 +209,13 @@ State.prototype.reset = function (seed) {
 			best = dot; winner = p;
 		}
 		this.plate[i] = winner; this.cell[i] = i; this.area[i] = g.A0[i]; this.alive[i] = 1;
+		this.fert[i] = StateParams.fertLo + (1 - StateParams.fertLo) * random();
+		if (hot) {
+			// Hot start (design §9): no continents at all. Felsic crust can only come from arcs,
+			// so the continents in a long run are a result, not an input.
+			this.hFel[i] = 0; this.hMaf[i] = mafNew; this.age[i] = random() * 20;
+			continue;
+		}
 		this.hFel[i] = g.land[i] > 0.5 ? 35000 : 0;
 		this.hMaf[i] = this.hFel[i] ? 0 : 7000;
 		this.age[i] = this.hFel[i] ? 500 : random() * 120;

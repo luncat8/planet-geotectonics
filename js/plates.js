@@ -45,6 +45,26 @@ var Plates = {
 			}
 		}
 	},
+	// Least-squares rigid fit of the mantle flow under a masked set of cells: drag only, so it
+	// is the rotation a piece of lithosphere would take if it were free of every boundary force.
+	// Events uses it to ask whether the flow under two halves of a plate is actually pulling
+	// them apart before it cuts the plate along a damaged corridor.
+	dragFit: function (s, label, want, out, off) {
+		var g = s.grid, R = PlateParams.radius, m = s.fitM, b = s.fitRhs;
+		m.fill(0); b.fill(0);
+		for (var c = 0; c < g.V; c++) {
+			if (label[c] !== want) continue;
+			var cb = c * 3, x = g.pos[cb], y = g.pos[cb + 1], z = g.pos[cb + 2], A = g.A0[c];
+			m[0] += A * (1 - x * x); m[1] += -A * x * y; m[2] += -A * x * z;
+			m[3] += -A * y * x; m[4] += A * (1 - y * y); m[5] += -A * y * z;
+			m[6] += -A * z * x; m[7] += -A * z * y; m[8] += A * (1 - z * z);
+			var ux = s.uMantle[cb], uy = s.uMantle[cb + 1], uz = s.uMantle[cb + 2], f = A / R;
+			b[0] += f * (y * uz - z * uy); b[1] += f * (z * ux - x * uz); b[2] += f * (x * uy - y * ux);
+		}
+		var eps = 1e-4 * g.A0[0];
+		m[0] += eps; m[4] += eps; m[8] += eps;
+		Plates.solve3(m, 0, b, 0, out, off);
+	},
 	solve3: function (m, p, b, o, out, w) {
 		var a00 = m[p], a01 = m[p + 1], a02 = m[p + 2];
 		var a10 = m[p + 3], a11 = m[p + 4], a12 = m[p + 5];

@@ -13,6 +13,8 @@ function Renderer(canvas, state) {
 		this.palette[p * 3 + 2] = 155 + 80 * Math.cos(a + 4.2);
 	}
 }
+// Layer names for the six metallogenic potentials (design §8), read straight off the state.
+Renderer.ORE = ['oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
 Renderer.prototype.draw = function (layer) {
 	var s = this.state, g = s.grid, data = this.image.data, colors = this.colors;
 	for (var c = 0; c < g.V; c++) {
@@ -20,6 +22,23 @@ Renderer.prototype.draw = function (layer) {
 		colors[b] = 20; colors[b + 1] = 26; colors[b + 2] = 39;
 		if (owner < 0) continue;
 		if (layer === 'owner') { colors[b] = 78; colors[b + 1] = 197; colors[b + 2] = 167; continue; }
+		var ore = Renderer.ORE.indexOf(layer);
+		if (ore >= 0) {
+			// Potentials share one ramp; the class is named by the probe and the HUD, not by hue.
+			var v = Math.min(1, s[Renderer.ORE[ore]][owner]);
+			colors[b] = 24 + 231 * v;
+			colors[b + 1] = 30 + 190 * v * v;
+			colors[b + 2] = 44 + 40 * v;
+			continue;
+		}
+		if (layer === 'damage') {
+			// The rift corridor: cells whose column has weakened past the split threshold glow.
+			var d = s.damage[owner], hot = d > Params.splitDamage;
+			colors[b] = 30 + 225 * Math.min(1, d);
+			colors[b + 1] = 30 + (hot ? 90 : 40) * Math.min(1, d);
+			colors[b + 2] = 46;
+			continue;
+		}
 		if (layer === 'type') {
 			var kind = 0;
 			for (var k = 0; k < g.ringN[c]; k++) {

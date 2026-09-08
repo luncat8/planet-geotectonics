@@ -307,7 +307,7 @@ Grid.prototype.build = function () {
 	}
 
 	return {
-		level: level, V: V, W: W, H: H, cellA: cellA, cellB: cellB,
+		level: level, seed: seed, V: V, W: W, H: H, cellA: cellA, cellB: cellB,
 		pos: flatPos, A0: A0, ring: flatRing, ringN: ringN, nbrDist: nbrDist, edgeLen: edgeLen, faceN: faceN,
 		gradInv: gradInv, land: land,
 		nbrA: nbrA, nbrB: nbrB, indices: indices,

@@ -6,6 +6,7 @@ var SimContact = typeof module !== 'undefined' && module.exports ? require('./co
 var SimColumnUpdate = typeof module !== 'undefined' && module.exports ? require('./column-update.js') : ColumnUpdate;
 var SimSurface = typeof module !== 'undefined' && module.exports ? require('./surface.js') : Surface;
 var SimEvents = typeof module !== 'undefined' && module.exports ? require('./events.js') : Events;
+var SimCheckpoint = typeof module !== 'undefined' && module.exports ? require('./checkpoint.js') : Checkpoint;
 var SimDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
 var SimParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var SimPerf = typeof module !== 'undefined' && module.exports ? require('./perf.js') : Perf;
@@ -54,6 +55,12 @@ var Sim = {
 		at = SimPerf.lap(K.RASTER, at);
 		if (!s.fixedOmega) Sim.physics(s, dt, at);
 		s.frame++; s.t += dt;
+		// The ring holds whole worlds for scrubbing, so it is a deliberate retained allocation:
+		// set ckptCap = 0 for a run that must not keep snapshots (tests/alloc.js does).
+		if (s.ckptCap > 0 && s.t >= s.ckptDue) {
+			SimCheckpoint.push(s);
+			s.ckptDue = s.t + SimParams.ckptEvery;
+		}
 		SimPerf.step(SimPerf.clock() - start);
 	},
 	// Boot: solve K10 once with dt = τ_ω so the first painted frame already has velocities and
@@ -73,6 +80,13 @@ var Sim = {
 	},
 	advance: function (s, dt, frames) {
 		for (var i = 0; i < frames; i++) Sim.step(s, dt);
+	},
+	// Fast-forward without a renderer in the loop: headless runs and the browser's
+	// "run to" both step the same code the frame loop uses.
+	runTo: function (s, dt, myr) {
+		var frames = 0;
+		while (s.t < myr - dt * 0.5) { Sim.step(s, dt); frames++; }
+		return frames;
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Sim;
