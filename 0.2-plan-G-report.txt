@@ -1,0 +1,17 @@
+## What landed this session
+
+**Orchestrator finished** (`sim-gpu.js`): full `encodeFrame` in CPU kernel order, `step()` with census-driven events applied one cycle late, upload/readback plans, checkpoint bridge, device-hash determinism. Several design fixes while finishing it:
+- **`colHigh`/spawn-bump/free-list are GPU-owned** between events — the per-frame globals write no longer clobbers the device-atomically-grown watermark; dispatches over-provision to `colCap`.
+- **Zeroing policy matches CPU semantics**: per-frame counters reset each frame, run-cumulative ledgers zero only at upload (the per-frame zeroing would have broken the mass-balance identity), mass/ore sums rewritten by census `kSums`.
+- **Scan jobs baked per entry point** (queue writes can't vary params mid-submit): bins/spawn/gather each get `kScanBlocks/Tops/Apply<Job>` around one shared body.
+- Race guard so a still-in-flight `mapAsync` never gets a second copy issued.
+
+**`tests/wgsl.js` — 2,516 node-side checks**, and it earned its keep immediately, catching: the undefined `ldU*`/`stU*` accessor family (~180 call sites), `spawnFlag`/`spawnSlot` missing from the layout, `A_PAIRQK`/`A_GMASSED` name drift, `kZdynCopy` missing from its entry list, and (via a new net) the spaced-helper defect `addU M(` — plus an ore clamp bug (`clamp(round(v·1e6), 0, 1)` clamped the word, not the input) found by round-trip probes.
+
+**Parity harness** (`tests/gpu-harness.html` + `tests/gpu-parity.js`): identical-seed CPU vs GPU — boot state, eight coupled frames field-by-field (floats normalized, integer decisions exact, crust within its mm quantum), 60 Myr ensemble with events (GPU one cycle late, quiesced), same-device bit-determinism over two runs, and a wall-clock bench stage. `?level=5&seed=7` turns it into the L5 timing rig. No Chrome here, so it SKIPs with the exact command.
+
+**H4 renderer** (`render-gpu.js`): fullscreen-triangle fragment pass sampling lookup + arenas directly — all 12 layers, same palettes, zero readback. Wired into the page behind a **GPU** toggle using a second canvas (a canvas keeps its first context type forever); save/deposits snapshot the arenas into the CPU state first.
+
+**H5 memory**: measured from the schema at L7 — S 58.3, C 25.3, X 43.8, B 6.5, M 0.9 MiB; every arena under the 128 MiB binding limit (now asserted in the test).
+
+**Plan §H improved in place** (fixed `A_ZDYN`+`kZdynCopy` instead of the offset swap, direct field re-upload instead of the `kPatch` interpreter, baked scan jobs, zeroing policy, GPU-owned watermarks, dump-dom driver) — G4's pitfalls file gained a "porting to WebGPU" section with the concrete failure classes. Remaining after your browser run: globe view and timestamp-query per-kernel timing (both optional polish), then Phase I.
