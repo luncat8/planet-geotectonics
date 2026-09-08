@@ -1,5 +1,6 @@
 var ColumnQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : Quat;
 var ColumnParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
+var ColumnGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
 var Columns = {
 	climb: function (s, c, x, y, z) {
 		var g = s.grid, pos = g.pos, steps = 0;
@@ -21,6 +22,7 @@ var Columns = {
 	},
 	move: function (s) {
 		for (var i = 0; i < s.n; i++) {
+			if (!s.alive[i]) continue;
 			var b = i * 3;
 			ColumnQuat.rotate(s.world, b, s.q, s.plate[i] * 4, s.body, b);
 			s.cell[i] = Columns.climb(s, s.cell[i], s.world[b], s.world[b + 1], s.world[b + 2]);
@@ -28,13 +30,13 @@ var Columns = {
 	},
 	bin: function (s) {
 		s.count.fill(0);
-		for (var i = 0; i < s.n; i++) s.count[s.cell[i]]++;
+		for (var i = 0; i < s.n; i++) if (s.alive[i]) s.count[s.cell[i]]++;
 		s.offset[0] = 0;
 		for (var c = 0; c < s.grid.V; c++) {
 			s.offset[c + 1] = s.offset[c] + s.count[c]; s.cursor[c] = s.offset[c];
 		}
 		// Ascending column traversal gives each bin a deterministic index order without a sort.
-		for (var i = 0; i < s.n; i++) s.entries[s.cursor[s.cell[i]]++] = i;
+		for (var i = 0; i < s.n; i++) if (s.alive[i]) s.entries[s.cursor[s.cell[i]]++] = i;
 	},
 	raster: function (s) {
 		var g = s.grid, radius = ColumnParams.radius;
@@ -51,16 +53,17 @@ var Columns = {
 					best = d; owner = i;
 				}
 			}
-			var threshold = 2 * Math.sin(ColumnParams.rGap * g.nbrDist[c] / radius * 0.5);
+			var threshold = ColumnGrid.chord(ColumnParams.rGap * g.nbrDist[c]);
 			if (best > threshold * threshold) owner = -1;
 			s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
 			s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
 			if (owner < 0) { s.gaps++; s.z[c] = NaN; continue; }
-			// Static isostatic preview only; evolving surface processes belong to Phase D.
+			// Static isostatic preview (design §7.1); erosion and flexure belong to Phase D.
 			var ci = Math.max(0, Math.min(1, (s.hFel[owner] - 5000) / 15000));
 			ci = ci * ci * (3 - 2 * ci);
 			var therm = (1 - ci) * 350 * Math.sqrt(Math.min(s.age[owner], 80)) + ci * 2091;
-			s.z[c] = -3342 + s.hFel[owner] / 6 + s.hMaf[owner] * 350 / 3300 - therm;
+			s.z[c] = -3342 + s.hFel[owner] / 6 + (s.hMaf[owner] * 350 + s.hSed[owner] * 900) / 3300
+				- therm + s.zDyn[owner];
 		}
 	}
 };

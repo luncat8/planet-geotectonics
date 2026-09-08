@@ -1,18 +1,30 @@
 var StateParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var StateGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
 var StateMantle = typeof module !== 'undefined' && module.exports ? require('./mantle.js') : Mantle;
+var StateDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
 function State(grid, seed) {
 	this.grid = grid;
 	this.colCap = Math.ceil(grid.V * 1.5);
 	this.plateCap = StateParams.plateCap;
+	// Nominal column footprint. Cell areas vary 0.68..1.21 of the mean, so the mass ledgers use
+	// this constant: a column always represents the same crust volume wherever it sits.
+	this.A0ref = 4 * Math.PI * StateParams.radius * StateParams.radius / grid.V;
 	this.body = new Float64Array(this.colCap * 3);
 	this.world = new Float64Array(this.colCap * 3);
 	this.area = new Float64Array(this.colCap);
 	this.hFel = new Float64Array(this.colCap);
 	this.hMaf = new Float64Array(this.colCap);
+	this.hSed = new Float64Array(this.colCap);
 	this.age = new Float64Array(this.colCap);
+	this.damage = new Float64Array(this.colCap);
+	this.zDyn = new Float64Array(this.colCap);
+	this.alive = new Uint8Array(this.colCap);
 	this.plate = new Uint16Array(this.colCap);
 	this.cell = new Int32Array(this.colCap);
+	this.consumedBy = new Int32Array(this.colCap);
+	this.loserList = new Int32Array(this.colCap);
+	this.loserStart = new Int32Array(this.colCap + 1);
+	this.loserCursor = new Int32Array(this.colCap + 1);
 	this.q = new Float64Array(this.plateCap * 4);
 	this.omega = new Float64Array(this.plateCap * 3);
 	this.omegaTarget = new Float64Array(this.plateCap * 3);
@@ -20,6 +32,10 @@ function State(grid, seed) {
 	this.rhs = new Float64Array(this.plateCap * 3);
 	this.seeds = new Float64Array(this.plateCap * 3);
 	this.plateCells = new Uint32Array(this.plateCap);
+	this.plateSpawned = new Uint32Array(this.plateCap);
+	this.plateLost = new Uint32Array(this.plateCap);
+	this.subRate = new Float64Array(this.plateCap);
+	this.subCount = new Uint32Array(this.plateCap);
 	this.count = new Uint32Array(grid.V);
 	this.offset = new Uint32Array(grid.V + 1);
 	this.cursor = new Uint32Array(grid.V);
@@ -28,8 +44,16 @@ function State(grid, seed) {
 	this.distance = new Float64Array(grid.V);
 	this.z = new Float64Array(grid.V);
 	this.cellPlate = new Uint16Array(grid.V);
+	this.gapFrames = new Uint16Array(grid.V);
+	this.gapTime = new Float32Array(grid.V);
+	this.spawnSlot = new Int32Array(grid.V);
+	this.gapPlate = new Uint16Array(grid.V);
+	this.gapDonor = new Int32Array(grid.V * 3);
+	this.gapDonorN = new Uint8Array(grid.V);
+	this.gapScan = new Int32Array(43);   // 1 + 6 + 6*6, the widest two-hop cell list
 	this.uMantle = new Float64Array(grid.V * 3);
 	this.vel = new Float64Array(grid.V * 3);
+	this.wEq = new Float64Array(grid.V * 3);
 	this.relN = new Float64Array(grid.V * 6);
 	this.relT = new Float64Array(grid.V * 6);
 	this.edgeType = new Int8Array(grid.V * 6);
@@ -56,30 +80,42 @@ function State(grid, seed) {
 	this.histGaps = new Uint32Array(StateParams.histCap);
 	this.histPlates = new Uint16Array(StateParams.histCap);
 	this.histChanges = new Uint32Array(StateParams.histCap);
+	this.histCols = new Uint32Array(StateParams.histCap);
 	this.reset(seed === undefined ? grid.seed : seed);
 }
 State.prototype.reset = function (seed) {
 	this.seed = seed >>> 0;
 	this.t = 0; this.frame = 0; this.n = this.grid.V;
 	this.plateCount = Math.min(StateParams.plateCount, this.n);
-	this.gaps = 0; this.maxClimb = 0; this.fixedOmega = 0; this.finite = 1;
+	this.gaps = 0; this.maxClimb = 0; this.fixedOmega = 0; this.prescribedOmega = 0; this.finite = 1;
 	this.meanSpeed = 0; this.maxSpeed = 0; this.typeChanges = 0;
 	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
-	this.Tm = 1; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0; this.produced = 0; this.subducted = 0;
+	this.Tm = 1; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0;
+	this.spawns = 0; this.deaths = 0; this.overlaps = 0; this.lastEvent = -Infinity;
+	this.producedFel = 0; this.producedMaf = 0; this.subductedMaf = 0; this.subductedSed = 0;
+	this.subductedArea = 0; this.massFel = 0; this.massMaf = 0; this.massSed = 0;
+	this.massFel0 = 0; this.massMaf0 = 0; this.massSed0 = 0;
 	this.body.fill(0); this.world.fill(0); this.area.fill(0);
-	this.hFel.fill(0); this.hMaf.fill(0); this.age.fill(0);
-	this.plate.fill(0); this.cell.fill(-1); this.q.fill(0); this.omega.fill(0); this.omegaTarget.fill(0);
+	this.hFel.fill(0); this.hMaf.fill(0); this.hSed.fill(0); this.age.fill(0);
+	this.damage.fill(0); this.zDyn.fill(0); this.alive.fill(0);
+	this.plate.fill(0); this.cell.fill(-1); this.consumedBy.fill(-1);
+	this.loserList.fill(-1); this.loserStart.fill(0); this.loserCursor.fill(0);
+	this.q.fill(0); this.omega.fill(0); this.omegaTarget.fill(0);
 	this.M.fill(0); this.rhs.fill(0); this.seeds.fill(0); this.plateCells.fill(0);
+	this.subRate.fill(0); this.subCount.fill(0);
+	this.plateSpawned.fill(0); this.plateLost.fill(0);
 	this.count.fill(0); this.offset.fill(0); this.cursor.fill(0); this.entries.fill(0);
 	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.climbHistogram.fill(0);
-	this.cellPlate.fill(65535); this.uMantle.fill(0); this.vel.fill(0);
+	this.cellPlate.fill(65535); this.gapFrames.fill(0); this.gapTime.fill(0); this.spawnSlot.fill(-1);
+	this.gapPlate.fill(0); this.gapDonor.fill(-1); this.gapDonorN.fill(0); this.gapScan.fill(0);
+	this.uMantle.fill(0); this.vel.fill(0); this.wEq.fill(0);
 	this.relN.fill(0); this.relT.fill(0); this.edgeType.fill(0); this.polarity.fill(0);
 	this.trenchDist.fill(3); this.ext.fill(0); this.plumeT.fill(0);
 	this.waveDir0.fill(0); this.waveAxis.fill(0); this.waveDir.fill(0);
 	this.wavePeriod.fill(0); this.waveFreq.fill(0); this.wavePhase.fill(0); this.waveAmp.fill(0);
 	this.plumePos.fill(0); this.plumeBirth.fill(0); this.plumeLife.fill(0); this.plumeStr.fill(0);
 	this.scratch.fill(0); this.histT.fill(0); this.histMeanV.fill(0); this.histMaxV.fill(0);
-	this.histGaps.fill(0); this.histPlates.fill(0); this.histChanges.fill(0);
+	this.histGaps.fill(0); this.histPlates.fill(0); this.histChanges.fill(0); this.histCols.fill(0);
 	var random = StateGrid.mulberry32(this.seed), g = this.grid;
 	for (var p = 0; p < this.plateCount; p++) {
 		this.q[p * 4 + 3] = 1;
@@ -93,12 +129,21 @@ State.prototype.reset = function (seed) {
 			if (dot <= best) continue;
 			best = dot; winner = p;
 		}
-		this.plate[i] = winner; this.cell[i] = i; this.area[i] = g.A0[i];
+		this.plate[i] = winner; this.cell[i] = i; this.area[i] = g.A0[i]; this.alive[i] = 1;
 		this.hFel[i] = g.land[i] > 0.5 ? 35000 : 0;
 		this.hMaf[i] = this.hFel[i] ? 0 : 7000;
 		this.age[i] = this.hFel[i] ? 500 : random() * 120;
 	}
 	this.body.set(g.pos); this.world.set(g.pos);
 	StateMantle.init(this);
+	this.rebase();
+};
+// Re-anchor the source/sink ledgers on the current columns and zero the accumulators, so the
+// balance identity holds from here on. reset() ends with it; tests that hand-edit columns or
+// that want to exclude a settling phase call it before measuring.
+State.prototype.rebase = function () {
+	StateDiag.mass(this);
+	this.massFel0 = this.massFel; this.massMaf0 = this.massMaf; this.massSed0 = this.massSed;
+	this.producedFel = 0; this.producedMaf = 0; this.subductedMaf = 0; this.subductedSed = 0;
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = State;

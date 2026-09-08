@@ -2,11 +2,13 @@ const { assert, Grid, State } = require('./helpers.js');
 const Columns = require('../js/columns.js');
 const Mantle = require('../js/mantle.js');
 const Plates = require('../js/plates.js');
+const Edges = require('../js/edges.js');
 const Params = require('../js/params.js');
 const g = new Grid(5, 7).build();
 const s = new State(g, 7);
 const R = Params.radius, Ox = 0.012, Oy = -0.007, Oz = 0.004;
 Columns.move(s); Columns.bin(s); Columns.raster(s);
+Edges.velocities(s);   // plateCells, as in the frame pipeline
 for (let c = 0; c < g.V; c++) {
 	const b = c * 3, x = g.pos[b], y = g.pos[b + 1], z = g.pos[b + 2];
 	s.uMantle[b] = R * (Oy * z - Oz * y);

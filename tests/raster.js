@@ -5,11 +5,12 @@ for (const dt of [0.1, 0.01]) {
 	const s = new State(g, 7);
 	s.n = 0; s.plateCount = 1; s.q.fill(0); s.q[3] = 1; s.omega.fill(0); s.fixedOmega = 1;
 	s.omega[2] = 50000 / 6371000;
+	s.alive.fill(0);
 	for (let c = 0; c < g.V; c++) {
 		if (g.pos[c * 3] < cosCap) continue;
 		const i = s.n++;
 		s.body.set(g.pos.subarray(c * 3, c * 3 + 3), i * 3);
-		s.cell[i] = c; s.plate[i] = 0;
+		s.cell[i] = c; s.plate[i] = 0; s.alive[i] = 1;
 	}
 	const start = performance.now();
 	Sim.advance(s, dt, 10000);
