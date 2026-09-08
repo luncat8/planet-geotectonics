@@ -6,9 +6,10 @@ var Mantle = {
 		t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
 		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
 	},
-	Tm: function (t) {
+	// tm0 is the world's start temperature: 1 for a map start, TmHot for a hot start.
+	Tm: function (t, tm0) {
 		var p = MantleParams;
-		return p.Tfloor + (p.Tm0 - p.Tfloor) * Math.exp(-t / p.tauCool);
+		return p.Tfloor + ((tm0 === undefined ? p.Tm0 : tm0) - p.Tfloor) * Math.exp(-t / p.tauCool);
 	},
 	hMafNew: function (Tm) {
 		return 7000 * (1 + 1.5 * Math.max(0, Tm - 1));
@@ -48,7 +49,7 @@ var Mantle = {
 	init: function (s) {
 		var p = MantleParams, n = p.nWave;
 		s.rng = (s.seed ^ 0xC6A4A793) >>> 0;
-		s.Tm = Mantle.Tm(s.t);
+		s.Tm = Mantle.Tm(s.t, s.Tm0);
 		for (var w = 0; w < n; w++) {
 			var a = w * 3, y = Mantle.rand(s) * 2 - 1, th = Mantle.rand(s) * Math.PI * 2, r = Math.sqrt(1 - y * y);
 			s.waveDir0[a] = r * Math.cos(th); s.waveDir0[a + 1] = y; s.waveDir0[a + 2] = r * Math.sin(th);
@@ -81,7 +82,7 @@ var Mantle = {
 		s.plumeStr[i] = 0.4 + Mantle.rand(s) * 0.8;
 	},
 	update: function (s) {
-		var p = MantleParams, g = s.grid, speed = p.U0 * Math.pow(s.Tm = Mantle.Tm(s.t), 2.5), scale = s.mantleScale * speed;
+		var p = MantleParams, g = s.grid, speed = p.U0 * Math.pow(s.Tm = Mantle.Tm(s.t, s.Tm0), 2.5), scale = s.mantleScale * speed;
 		var sig = p.plumeRad / p.radius, invSig = 1 / (sig * sig);
 		Mantle.precess(s);
 		for (var i = 0; i < s.plumeCount; i++) {

@@ -82,6 +82,9 @@ var Surface = {
 				s.hMaf[o] -= takeMaf;
 				var eroded = takeSed + takeFel + takeMaf;
 				local += eroded; localFel += takeSed + takeFel;
+				// Placer load is liberated in proportion to what the source column holds, so
+				// oPla can only end up downslope of an oOro/oArc maximum (acceptance 5).
+				localPla += p.kPlacer * eroded * 0.5 * (s.oOro[o] + s.oArc[o]);
 				s.erodedFel += takeFel * s.A0ref; s.erodedMaf += takeMaf * s.A0ref;
 				s.producedFel -= takeFel * s.A0ref; s.producedMaf -= takeMaf * s.A0ref;
 			}
@@ -97,8 +100,21 @@ var Surface = {
 		}
 		for (var c3 = 0; c3 < g.V; c3++) {
 			var stay = s.mobile[c3] + s.inflow[c3], stayFel = s.mobileFel[c3] + s.inflowFel[c3], stayPla = s.mobilePla[c3] + s.inflowPla[c3];
-			if (s.owner[c3] >= 0) {
-				s.hSed[s.owner[c3]] += stay;
+			var o3 = s.owner[c3];
+			if (o3 >= 0) {
+				s.hSed[o3] += stay;
+				// Basin and placer potentials from what actually lands here, only in a
+				// submerged or low cell; mFel is the non-mafic share of the deposit.
+				if (stay > 0 && s.z[c3] < p.zBasin) {
+					// A deposit is a dose, not a rate: one frame can dump kilometres of
+					// sediment that sat mobile in a gap, so the dose is capped at 1 before
+					// the (1 − o) factor or a single event overshoots saturation.
+					s.oBas[o3] += (1 - s.oBas[o3])
+						* Math.min(1, p.kB * stayFel * s.fert[o3]);
+					if (stayPla > 0) {
+						s.oPla[o3] += (1 - s.oPla[o3]) * Math.min(1, p.kB * stayPla * s.fert[o3]);
+					}
+				}
 				s.mobile[c3] = 0; s.mobileFel[c3] = 0; s.mobilePla[c3] = 0;
 			} else {
 				s.mobile[c3] = stay; s.mobileFel[c3] = stayFel; s.mobilePla[c3] = stayPla;
@@ -107,9 +123,22 @@ var Surface = {
 			s.outflow[c3] = 0; s.outflowFel[c3] = 0; s.outflowPla[c3] = 0;
 		}
 	},
+	// Basin potential for sediment that is thick and under water. This is a K9 job, not a K8
+	// one: it reads the elevation and shore line this kernel has just computed, and K8 runs
+	// before it, where a freshly loaded world would still read a stale, empty `wet`.
+	basins: function (s, dt) {
+		var p = SurfaceParams, gain = p.kB2 * dt;
+		for (var i = 0; i < s.n; i++) {
+			if (!s.alive[i] || s.hSed[i] <= p.hBas) continue;
+			var cell = s.cell[i];
+			if (cell < 0 || !s.wet[cell]) continue;
+			s.oBas[i] += (1 - s.oBas[i]) * gain * s.fert[i];
+		}
+	},
 	step: function (s, dt) {
 		Surface.updateDynamics(s, dt);
 		Surface.elevation(s);
+		if (dt > 0) Surface.basins(s, dt);
 		if (dt > 0) {
 			Surface.route(s, dt);
 			// Deposits change z immediately for rendering. The slope is refreshed at the start of

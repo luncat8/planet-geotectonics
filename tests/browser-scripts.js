@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
-for (const file of ['geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'perf', 'sim', 'render']) {
+for (const file of ['geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'perf', 'sim', 'render']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
 vm.runInContext(`
@@ -20,6 +20,16 @@ Sim.advance(state, 0.1, 10);
 renderer.draw('z'); renderer.draw('owner'); renderer.draw('type'); renderer.draw('sediment');
 Sim.advance(state, 0.1, 190);
 renderer.draw('plate'); renderer.draw('type'); renderer.draw('z'); renderer.draw('owner');
+renderer.draw('damage'); renderer.draw('sediment');
+for (const ore of Renderer.ORE) renderer.draw(ore);
+const deposits = Extract.deposits(state, 0.01, 4, new Float64Array(state.grid.V));
+if (!Array.isArray(deposits)) throw new Error('extraction returns a list');
+if (JSON.parse(Extract.json(state, 0.01, 2, new Float64Array(state.grid.V))).format !== 'pgt-deposits') {
+	throw new Error('deposit json carries its format tag');
+}
+var blob = Checkpoint.save(state);
+Checkpoint.load(state, blob);
+Sim.raster(state);
 `, context);
 assert.equal(context.state.frame, 200);
 assert.equal(context.image.data.length, 1024 * 512 * 4);

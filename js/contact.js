@@ -23,6 +23,12 @@ var Contact = {
 		if (ci !== cj) return ci < cj ? i : j;
 		return i < j ? i : j;
 	},
+	// Two columns of equal nominal area merge into one: potentials average, they do not sum.
+	meanOre: function (s, w, l) {
+		s.oVms[w] = 0.5 * (s.oVms[w] + s.oVms[l]); s.oMaf[w] = 0.5 * (s.oMaf[w] + s.oMaf[l]);
+		s.oArc[w] = 0.5 * (s.oArc[w] + s.oArc[l]); s.oOro[w] = 0.5 * (s.oOro[w] + s.oOro[l]);
+		s.oBas[w] = 0.5 * (s.oBas[w] + s.oBas[l]); s.oPla[w] = 0.5 * (s.oPla[w] + s.oPla[l]);
+	},
 	// Overlaps: the nearest foreign column inside rContact·d that is closing in. The pair's own
 	// relative velocity is the test, not the cell-edge type, so it does not care how the two
 	// columns happen to fall into cells.
@@ -140,6 +146,19 @@ var Contact = {
 			s.gapDonorN[c] = (i0 >= 0) + (i1 >= 0) + (i2 >= 0);
 		}
 	},
+	// The fastest opening rate around a gap cell, read from the ridge flanks that bound it:
+	// the gap cell itself has no owner yet, so its own edges were never classified.
+	spread: function (s, c) {
+		var g = s.grid, best = 0;
+		for (var k = -1; k < g.ringN[c]; k++) {
+			var bin = k < 0 ? c : g.ring[c * 6 + k];
+			for (var j = 0; j < g.ringN[bin]; j++) {
+				var e = bin * 6 + j;
+				if (s.edgeType[e] === ContactEdges.DIVERGENT && s.relN[e] > best) best = s.relN[e];
+			}
+		}
+		return best;
+	},
 	scan: function (s, dt) {
 		Contact.overlaps(s);
 		Contact.gaps(s, dt);
@@ -161,6 +180,7 @@ var Contact = {
 		var start = s.loserStart, cursor = s.loserCursor, list = s.loserList;
 		var i, w;
 		start.fill(0);
+		s.arcFeed.fill(0); s.arcFeedN.fill(0);
 		for (i = 0; i < s.n; i++) {
 			w = s.consumedBy[i];
 			if (w >= 0) start[w + 1]++;
@@ -181,6 +201,7 @@ var Contact = {
 					s.hSed[w] += s.hSed[l];
 					s.subductedMaf += s.hMaf[l] * A0;
 					if (s.age[l] > s.age[w]) s.age[w] = s.age[l];
+					Contact.meanOre(s, w, l);
 				} else {
 					// Felsic crust is too buoyant to subduct: it accretes onto the overriding
 					// plate, which keeps Σ hFel sourced only by arc production.
@@ -189,11 +210,21 @@ var Contact = {
 					s.subductedSed += (1 - p.sedScrape) * s.hSed[l] * A0;
 					s.subductedMaf += s.hMaf[l] * A0;
 					s.subductedArea += A0;
+					// What goes down the trench is the arc's raw material (design §8 recycling
+					// enrichment), booked per overriding plate for Contact.arcs.
+					var q = s.plate[w];
+					s.arcFeed[q] += s.oVms[l] + s.oBas[l] + s.hSed[l] / 1000;
+					s.arcFeedN[q]++;
 				}
-				s.alive[l] = 0;
-				s.cell[l] = -1;
-				s.deaths++;
-				s.plateLost[s.plate[l]]++;
+			s.alive[l] = 0;
+			s.cell[l] = -1;
+			// A dead slot must read as empty: spawn below takes a share of its donors, and a
+			// stale thickness on a consumed column would be handed out a second time.
+			s.hFel[l] = 0; s.hMaf[l] = 0; s.hSed[l] = 0; s.damage[l] = 0;
+			s.fert[l] = 0; s.oVms[l] = 0; s.oMaf[l] = 0; s.oArc[l] = 0;
+			s.oOro[l] = 0; s.oBas[l] = 0; s.oPla[l] = 0;
+			s.deaths++;
+			s.plateLost[s.plate[l]]++;
 			}
 		}
 		// Cells of a deleted column are gaps for the rest of this frame; the next raster gives
@@ -233,6 +264,13 @@ var Contact = {
 			s.hMaf[o] += p.arcMafShare * dh;
 			s.producedFel += dh * A0;
 			s.producedMaf += p.arcMafShare * dh * A0;
+			// Porphyry/epithermal potential, enriched by what this plate is subducting.
+			var q = s.plate[o], fed = s.arcFeedN[q];
+			var feed = fed ? p.kRec * s.arcFeed[q] / fed : 0;
+			// The recycling feed carries hSed in kilometres, so the per-frame gain is not
+			// bounded by construction; cap the dose at 1 to keep the potential at most 1.
+			s.oArc[o] += (1 - s.oArc[o])
+				* Math.min(1, p.kA * s.Tm * rate * (1 + feed) * s.fert[o] * dt);
 		}
 	},
 	spawn: function (s) {
@@ -240,20 +278,33 @@ var Contact = {
 		for (var c = 0; c < g.V; c++) {
 			var slot = s.spawnSlot[c];
 			if (slot < 0) continue;
-			var b = c * 3, w = slot * 3, plate = s.gapPlate[c], K = s.gapDonorN[c];
-			var meanFel = 0;
-			for (k = 0; k < K; k++) meanFel += s.hFel[s.gapDonor[c * 3 + k]];
+			var b = c * 3, w = slot * 3, plate = s.gapPlate[c];
+			// A donor can be consumed by this frame's APPLY between scan and spawn. It has
+			// nothing left to give, so it is dropped from the share as well as from the mean.
+			var K = 0, meanFel = 0;
+			for (k = 0; k < s.gapDonorN[c]; k++) {
+				d = s.gapDonor[c * 3 + k];
+				if (!s.alive[d]) { s.gapDonor[c * 3 + k] = -1; continue; }
+				s.gapDonor[c * 3 + K] = d;
+				meanFel += s.hFel[d];
+				K++;
+			}
 			ContactQuat.rotateInv(s.body, w, s.q, plate * 4, g.pos, b);
 			s.world[w] = g.pos[b]; s.world[w + 1] = g.pos[b + 1]; s.world[w + 2] = g.pos[b + 2];
 			s.plate[slot] = plate; s.cell[slot] = c; s.area[slot] = g.A0[c];
 			s.plateSpawned[plate]++;
 			s.age[slot] = 0; s.zDyn[slot] = 0; s.alive[slot] = 1; s.consumedBy[slot] = -1;
-			if (meanFel / K < p.hRiftBreakup) {
-				// Oceanic crust from the mantle; the donors keep their crust untouched.
+			s.fert[slot] = p.fertLo + (1 - p.fertLo) * (Contact.hash(c, s.frame) >>> 8) / 0xffffff;
+			s.oVms[slot] = 0; s.oMaf[slot] = 0; s.oArc[slot] = 0;
+			s.oOro[slot] = 0; s.oBas[slot] = 0; s.oPla[slot] = 0;
+			if (!K || meanFel / K < p.hRiftBreakup) {
+				// Oceanic crust from the mantle; the donors keep their crust untouched. VMS is a
+				// one-shot at birth scaled by the spreading rate the ridge flanks are opening at.
 				s.hFel[slot] = 0; s.hSed[slot] = 0;
 				s.hMaf[slot] = ContactMantle.hMafNew(s.Tm);
 				s.damage[slot] = 0;
 				s.producedMaf += s.hMaf[slot] * A0;
+				s.oVms[slot] = p.kV * s.Tm * Math.min(1, Contact.spread(s, c) / p.vRef) * s.fert[slot];
 				continue;
 			}
 			// Rifting stretches existing crust: the newborn takes 1/(K+1) of each donor, and the
@@ -267,6 +318,8 @@ var Contact = {
 			}
 			s.hFel[slot] = newFel; s.hSed[slot] = newSed; s.hMaf[slot] = 0;
 			s.damage[slot] = p.riftDamage;
+			// Rifted continental crust carries its Ni-Cu-PGE endowment with it.
+			s.oMaf[slot] = p.kM2 * s.fert[slot];
 		}
 		s.n += s.spawns;
 	},

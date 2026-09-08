@@ -7,9 +7,12 @@ var Params = Object.freeze({
 	kArc: 65, arcMafShare: 0.3, zTrench: 3000, tauDyn: 10, kFlex: 0.05, kCollapse: 0.02,
 	zPlume: 1000, tauPlume: 50, kLip: 30,
 	kEro: 0.05, slopeRef: 0.01, deltaZ: 20, kPlacer: 0.2,
-	kDam: 0.05, kDamT: 0.02, kHeal: 0.005, extRef: 0.01, splitDamage: 0.8, minPlateCells: 40,
+	kDam: 5e-4, kDamT: 1e-3, kHeal: 0.005, extRef: 0.01, splitDamage: 0.6, minPlateCells: 100,
+	mergeTime: 20, vRift: 10000, splitAge: 40,
 	Tm0: 1, TmHot: 1.6, tauCool: 2500, Tfloor: 0.35, kPlume: 0.01, plumeRad: 500000,
 	kV: 0.3, kM: 0.2, kM2: 0.15, kA: 0.02, kRec: 3, kO: 0.02, kB: 2e-4, kB2: 0.002, kDecay: 0.002,
-	nWave: 8, nPhi: 4, nPlume: 4, histCap: 256, hotStart: 0, eventCadence: 1
+	fertLo: 0.5, hOro: 45000, hBas: 2000, zBasin: 300,
+	nWave: 8, nPhi: 4, nPlume: 4, histCap: 256, hotStart: 0, eventCadence: 1,
+	ckptCap: 16, ckptEvery: 20
 });
 if (typeof module !== 'undefined' && module.exports) module.exports = Params;
