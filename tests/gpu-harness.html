@@ -1,0 +1,294 @@
+<!doctype html>
+<!-- gpu-harness.html — WebGPU parity battery, plan §H tests. Loads the classic scripts exactly
+     like index.html, then runs CPU and GPU sims from identical seeds and compares: boot state,
+     eight coupled frames field-by-field (floats in normalized units, integer decisions exact,
+     crust within the millimetre quantum), a 60 Myr ensemble, and same-device bit determinism
+     over two independent runs. Open directly (file://) for the manual view, or let
+     tests/gpu-parity.js drive it headless — the result JSON lands in <pre id="result">. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>pgt gpu harness</title>
+<style>
+	body { background: #14181d; color: #cfd8e3; font: 13px/1.45 monospace; margin: 16px; }
+	pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<pre id="log">starting…</pre>
+<pre id="result">PENDING</pre>
+<script src="../js/geodesics.js"></script>
+<script src="../js/params.js"></script>
+<script src="../js/quat.js"></script>
+<script src="../js/mantle.js"></script>
+<script src="../js/diag.js"></script>
+<script src="../js/state.js"></script>
+<script src="../js/columns.js"></script>
+<script src="../js/edges.js"></script>
+<script src="../js/plates.js"></script>
+<script src="../js/contact.js"></script>
+<script src="../js/column-update.js"></script>
+<script src="../js/surface.js"></script>
+<script src="../js/events.js"></script>
+<script src="../js/checkpoint.js"></script>
+<script src="../js/extract.js"></script>
+<script src="../js/perf.js"></script>
+<script src="../js/sim.js"></script>
+<script src="../js/gpu/layout.js"></script>
+<script src="../js/gpu/common.wgsl.js"></script>
+<script src="../js/gpu/scan.wgsl.js"></script>
+<script src="../js/gpu/mantle.wgsl.js"></script>
+<script src="../js/gpu/plates.wgsl.js"></script>
+<script src="../js/gpu/columns.wgsl.js"></script>
+<script src="../js/gpu/bin.wgsl.js"></script>
+<script src="../js/gpu/raster.wgsl.js"></script>
+<script src="../js/gpu/edges.wgsl.js"></script>
+<script src="../js/gpu/contact.wgsl.js"></script>
+<script src="../js/gpu/column.wgsl.js"></script>
+<script src="../js/gpu/surface.wgsl.js"></script>
+<script src="../js/gpu/forces.wgsl.js"></script>
+<script src="../js/gpu/diag.wgsl.js"></script>
+<script src="../js/gpu/events.wgsl.js"></script>
+<script src="../js/gpu/sim-gpu.js"></script>
+<script>
+'use strict';
+var logLines = [];
+function say(line) {
+	logLines.push(line);
+	document.getElementById('log').textContent = logLines.join('\n');
+}
+function finish(json) {
+	document.getElementById('result').textContent = JSON.stringify(json);
+	document.title = json.pass ? 'PGT PASS' : 'PGT FAIL';
+	say(json.pass ? 'PASS gpu-parity' : 'FAIL gpu-parity');
+}
+function relDiff(a, b) { return Math.abs(a - b) / Math.max(Math.abs(a), 1); }
+function later() { return new Promise(function (r) { setTimeout(r, 0); }); }
+
+// Float fields with their normalization scale (world ~1, speeds ~0.1 rad/Myr, z ~5 km …).
+var F32_FIELDS = [
+	['world', 1], ['q', 1], ['omega', 0.1], ['vel', 0.1], ['u', 0.01],
+	['age', 100], ['damage', 1], ['area', 1], ['ext', 1], ['relN', 1], ['relT', 1]
+];
+var SURFACE_F32 = [['z', 5], ['slope', 1], ['gradZ', 1], ['gapTime', 1]];
+var MM_FIELDS = ['fel', 'maf', 'sed'];
+var RAW_FIELDS = ['plate', 'cell', 'owner', 'wet', 'low', 'trench', 'eType', 'pol', 'alive', 'cellPlate'];
+
+function makeState(seed) {
+	var g = new Grid(LEVEL, seed).build();
+	var s = new State(g, seed);
+	s.ckptCap = 0;
+	s.ckptDue = Infinity; // the ring is the CPU checkpoint test's business, not parity's
+	return s;
+}
+// Level comes from the URL (?level=5&seed=7) so the same page is the parity rig at L4 and the
+// timing rig at L5; the eight-frame field window stays event-free because the cadence is 1 Myr.
+var QS = new URLSearchParams(location.search);
+var LEVEL = +(QS.get('level') || 4), SEED = +(QS.get('seed') || 7);
+
+// Decode one GPU field from the arena dump into a CPU state. Same kind table upload() used,
+// so decode cannot drift from encode. Signed CPU targets (trench, pol) need sign restore.
+var wordF32 = new Float32Array(1), wordU32 = new Uint32Array(wordF32.buffer);
+function pullField(sim, view, name, dst) {
+	var L = sim.layout, f = L.field[name], base = 0;
+	for (var a = 1; a < f.arena; a++) base += L.arenaBytes[a] / 4;
+	var src = new Uint32Array(view), at = base + f.offset;
+	var kind = GpuSim.FIELD_KIND[name], pad = GpuSim.FIELD_PAD[name] || f.stride;
+	var arr = dst[GpuSim.CPU_NAME[name] || name];
+	var signFix = arr.constructor === Int8Array ? 24 : arr.constructor === Int16Array ? 16 : 0;
+	for (var e = 0; e < f.count; e++) {
+		for (var w = 0; w < pad && w < f.stride; w++) {
+			var word = src[at + e * f.stride + w], v;
+			if (kind === 'f32') { wordU32[0] = word; v = wordF32[0]; }
+			else if (kind === 'mm' || kind === 'pairLen') v = word / 1000;
+			else if (kind === 'ore') v = word / 1e6;
+			else if (kind === 'cm') v = (word | 0) / 100;
+			else if (kind === 'pairVel') v = word * 1000;
+			else v = signFix ? (word << signFix) >> signFix : word;
+			arr[e * pad + w] = v;
+		}
+	}
+}
+
+// One field comparison: floats return the worst relative error in normalized units (NaN pairs
+// count as equal — unowned cells are NaN by design); integers return flip count, keeping the
+// first few examples; millimetre fields flip only past the 1 m quantum.
+function compareField(out, name, kind, scale, cpu, gpu) {
+	var cn = GpuSim.CPU_NAME[name] || name;
+	var a = cpu[cn], b = gpu[cn], n = a.length, stride = b.length / n;
+	var worst = 0, flips = 0;
+	for (var i = 0; i < n; i++) {
+		for (var w = 0; w < stride; w++) {
+			var x = a[i * stride + w], y = b[i * stride + w];
+			if (kind === 'f32') {
+				if (isNaN(x) && isNaN(y)) continue;
+				var err = Math.abs(x - y) / Math.max(Math.abs(x), Math.abs(y), scale * 1e-9);
+				if (err > worst) { worst = err; out.worstField = name; }
+			} else if (kind === 'mm') {
+				if (Math.abs(x - y) > 0.0015) {
+					flips++;
+					if (out.flips.length < 8) out.flips.push(name + '[' + i + '] cpu ' + x + ' gpu ' + y);
+				}
+				var d = Math.abs(x - y);
+				if (d > (out.mmWorst[name] || 0)) out.mmWorst[name] = d;
+			} else if (x !== y) {
+				flips++;
+				if (out.flips.length < 8) out.flips.push(name + '[' + i + '] cpu ' + x + ' gpu ' + y);
+			}
+		}
+	}
+	return { worst: worst, flips: flips };
+}
+
+function compareState(sim, view, cpu, gpu, withSurface) {
+	var out = { flips: [], mmWorst: { fel: 0, maf: 0, sed: 0 }, worstField: '-' };
+	var fields = withSurface ? F32_FIELDS.concat(SURFACE_F32) : F32_FIELDS.slice();
+	var worst = 0, flips = 0;
+	for (var i = 0; i < fields.length; i++) {
+		pullField(sim, view, fields[i][0], gpu);
+		var r = compareField(out, fields[i][0], 'f32', fields[i][1], cpu, gpu);
+		if (r.worst > worst) worst = r.worst;
+		flips += r.flips;
+	}
+	for (var m = 0; m < MM_FIELDS.length; m++) {
+		pullField(sim, view, MM_FIELDS[m], gpu);
+		var rm = compareField(out, MM_FIELDS[m], 'mm', 1, cpu, gpu);
+		flips += rm.flips;
+	}
+	for (var rr = 0; rr < RAW_FIELDS.length; rr++) {
+		if (!cpu[GpuSim.CPU_NAME[RAW_FIELDS[rr]] || RAW_FIELDS[rr]]) continue;
+		pullField(sim, view, RAW_FIELDS[rr], gpu);
+		flips += compareField(out, RAW_FIELDS[rr], 'int', 1, cpu, gpu).flips;
+	}
+	out.worst = worst;
+	out.flipCount = flips;
+	return out;
+}
+
+// Arena dump layout: C, then X, then B concatenated (readBackArenas order).
+function arenaBase(sim, arena) {
+	var base = 0;
+	for (var a = 1; a < arena; a++) base += sim.layout.arenaBytes[a] / 4;
+	return base;
+}
+
+async function quiesce(sim) {
+	await sim.sync();
+	while (sim.eventPending || sim.ckptPending) await later();
+}
+
+async function run() {
+	if (!navigator.gpu) { finish({ pass: false, skip: 'no-webgpu' }); return; }
+	var adapter = await navigator.gpu.requestAdapter();
+	if (!adapter) { finish({ pass: false, skip: 'no-adapter' }); return; }
+	say('adapter: ' + (adapter.info && adapter.info.vendor || 'default'));
+
+	// ---- boot parity: identical seeds, CPU raster vs GPU raster ----
+	var cpu = makeState(7), gpu = makeState(7);
+	Sim.raster(cpu);
+	var sim = new GpuSim(gpu.grid, gpu);
+	await sim.init();
+	sim.upload();
+	sim.raster();
+	await quiesce(sim);
+	var view = await sim.readBackArenas();
+	var boot = compareState(sim, view, cpu, gpu, false);
+	say('boot: worst normalized float error ' + boot.worst.toExponential(2) +
+		' (' + boot.worstField + '), decision flips ' + boot.flipCount +
+		', crust max diff m ' + Math.max(boot.mmWorst.fel, boot.mmWorst.maf, boot.mmWorst.sed) * 1000);
+	if (boot.flips.length) say('  flips: ' + boot.flips.join('; '));
+
+	// ---- coupled frames: eight steps at dt 0.1, no event in the window ----
+	var frameWorst = 0, frameFlips = 0, last = boot;
+	for (var step = 0; step < 8; step++) {
+		Sim.step(cpu, 0.1);
+		sim.step(0.1);
+		await quiesce(sim);
+		view = await sim.readBackArenas();
+		last = compareState(sim, view, cpu, gpu, true);
+		frameWorst = Math.max(frameWorst, last.worst);
+		frameFlips += last.flipCount;
+		if (last.flipCount) say('  frame ' + (step + 1) + ' flips: ' + last.flips.join('; '));
+	}
+	say('frames 1..8: worst normalized float error ' + frameWorst.toExponential(2) +
+		', decision flips ' + frameFlips +
+		', crust max diff m ' + Math.max(last.mmWorst.fel, last.mmWorst.maf, last.mmWorst.sed) * 1000);
+
+	// ---- ensemble: 60 Myr with events on both sides (GPU one cycle late) ----
+	Sim.runTo(cpu, 0.1, 60);
+	while (gpu.t < 60 - 0.05) {
+		sim.step(0.1);
+		await quiesce(sim);
+	}
+	await quiesce(sim);
+	view = await sim.readBackArenas();
+	var v = new Uint32Array(view);
+	var alive = sim.layout.field.alive, fel = sim.layout.field.fel, maf = sim.layout.field.maf,
+		sed = sim.layout.field.sed, cells = sim.layout.field.cells;
+	var cAt = arenaBase(sim, 1), bAt = arenaBase(sim, 3);
+	var sumF = 0, sumM = 0, sumS = 0, plates = 0, cols = 0;
+	for (var i2 = 0; i2 < fel.count; i2++) {
+		if (!v[cAt + alive.offset + i2]) continue;
+		cols++;
+		sumF += v[cAt + fel.offset + i2];
+		sumM += v[cAt + maf.offset + i2];
+		sumS += v[cAt + sed.offset + i2];
+	}
+	for (var p = 0; p < cells.count; p++) if (v[bAt + cells.offset + p] > 0) plates++;
+	var A0 = cpu.grid.A0[0];
+	var ens = {
+		plateCpu: cpu.plateCount, plateGpu: plates, cols: cols,
+		massFelCpu: cpu.massFel, massFelGpu: sumF / 1000 * A0,
+		massMafCpu: cpu.massMaf, massMafGpu: sumM / 1000 * A0,
+		massSedCpu: cpu.massSed, massSedGpu: sumS / 1000 * A0
+	};
+	var okEns = Math.abs(ens.plateCpu - ens.plateGpu) <= 3 &&
+		relDiff(ens.massFelCpu, ens.massFelGpu) < 2e-3 &&
+		relDiff(ens.massMafCpu, ens.massMafGpu) < 2e-3 &&
+		relDiff(ens.massSedCpu, ens.massSedGpu) < 2e-3;
+	say('ensemble@60: plates cpu ' + ens.plateCpu + ' gpu ' + ens.plateGpu + ', columns ' + cols +
+		', fel rel ' + relDiff(ens.massFelCpu, ens.massFelGpu).toExponential(2) +
+		', maf rel ' + relDiff(ens.massMafCpu, ens.massMafGpu).toExponential(2) +
+		', sed rel ' + relDiff(ens.massSedCpu, ens.massSedGpu).toExponential(2));
+
+	// ---- determinism: two independent GPU runs, same device, must hash equal ----
+	var simB = new GpuSim(gpu.grid, makeState(7));
+	await simB.init();
+	simB.upload();
+	for (var d = 0; d < 30; d++) { simB.step(0.1); await quiesce(simB); }
+	var h1 = await sim.hashAsync();
+	var h2 = await simB.hashAsync();
+	say('determinism: ' + (h1 === h2 ? 'hashes equal ' : 'HASH MISMATCH ') +
+		h1.toString(16) + ' vs ' + h2.toString(16));
+
+	// f32 reference arithmetic: boot runs a handful of ops per value, eight coupled frames
+	// amplify through divisions and normalizations.
+	var pass = boot.flipCount === 0 && boot.worst < 1e-4 && frameFlips === 0 && frameWorst < 1e-2 &&
+		okEns && h1 === h2;
+
+	// ---- bench: wall-clock ms per coupled GPU step at this level (plan §H5) ----
+	var benchMs = -1, benchFrames = 200;
+	var t0 = performance.now();
+	for (var b = 0; b < benchFrames; b++) sim.step(0.1);
+	await sim.sync();
+	benchMs = (performance.now() - t0) / benchFrames;
+	say('bench L' + LEVEL + ': ' + benchMs.toFixed(2) + ' ms/step (' + benchFrames + ' coupled frames)');
+
+	finish({
+		pass: pass,
+		level: LEVEL,
+		boot: { worst: boot.worst, flips: boot.flipCount, crustM: Math.max(boot.mmWorst.fel, boot.mmWorst.maf, boot.mmWorst.sed) * 1000 },
+		frames: { worst: frameWorst, flips: frameFlips },
+		ensemble: ens,
+		hashes: [h1 >>> 0, h2 >>> 0],
+		msPerStep: benchMs
+	});
+}
+
+run().catch(function (err) {
+	say('ERROR: ' + (err && err.stack || err));
+	finish({ pass: false, error: String(err && err.message || err) });
+});
+</script>
+</body>
+</html>

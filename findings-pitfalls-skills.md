@@ -314,3 +314,58 @@
 	plates, 19.9 vs 20.1% continents, and 7.15 vs 5.87 cm/yr. Exact trajectories diverge from
 	minute floating-order changes, so release gates must stay on invariants and declared
 	statistics, never column identity after thousands of frames.
+
+## porting the kernels to WebGPU (what the structural test caught)
+
+	structural checks run before any GPU exists caught five real defects in ~2500 assertions
+	(tests/wgsl.js): a whole family of accessors (`ldUC`) used across nine kernel files that the
+	prelude never defined (drafting drift — the canonical families are ld/st/add/sub + F/I
+	bitcast variants, one letter per arena); a kernel entry point (`kZdynCopy`) implemented but
+	left off its module's entry list, so encodeFrame dispatched a pipeline that would not exist;
+	two arena constants named after CPU-side field aliases (`A_PAIRQK` for pairOk,
+	`A_GMASSED*` for gMassSed) that only exist in the JS naming, not the layout; and the spawn
+	scan fields (spawnFlag, spawnSlot with the +1 total word) missing from the layout entirely.
+	Rule: layout.js is the only source of names; every identifier a kernel uses must resolve to
+	the layout's A_/N_ block or the prelude's const table, and a node test enforces it.
+
+	the orchestrator's own references need the same treatment: writeGlobalsImage and
+	interpretGlobals name globals as strings via an index map, so a typo (`gDynDay` vs
+	`gDynDecay`) survives until the first browser frame. The wgsl test greps sim-gpu.js for
+	`gi.<name>`, `word('…')` and `field.<name>` references and resolves them against the layout.
+
+	queue writes cannot vary parameters between dispatches of one submit, so shared programs
+	with per-use parameters need the parameters baked into entry points. The exclusive scan
+	serves three jobs (bins V, spawn flags V, gather lists C) as six thin entry points over one
+	body; the alternative — one job slot in globals — would need three submits per frame.
+
+	GPU-owned scalars must never ride the per-frame globals write: colHigh, the spawn bump base
+	and the free-list cursor grow by atomicMax on the device between event readbacks, and the
+	next frame's globals upload would silently rewind them. They are written only at upload and
+	after the CPU event cycle; dispatch sizes then over-provision to colCap because kernels
+	guard on the fresh device-side watermark.
+
+	zeroing policy has to mirror CPU kernel semantics, not a uniform memset: per-frame counters
+	(gaps, spawns, overlaps, type changes, speed sums) reset each frame because the CPU kernels
+	reset them at entry, while the source/sink ledgers are run-cumulative and would silently
+	forget all but the last frame if cleared per frame — the CPU mass-balance identity depends
+	on the cumulative reading. Mass and ore sums are neither: the census kSums rewrites them
+	fully each event.
+
+	fixed-point clamping order matters: `clamp(round(v·1e6), 0, 1)` clamps the word to ≤1 and
+	turns every nonzero ore into 1; the clamp belongs to the input value before scaling. The
+	conversion helpers live in one place precisely so this class of bug is a one-line fix.
+
+	decode must restore CPU signedness: trench and polarity live in Int8Array on the CPU, so a
+	u32 word readback needs the `<<24>>24` restore or -1 arrives as 4294967295. The kind table
+	driving upload drives decode, so the two cannot drift.
+
+	event readbacks are async while the frame loop is not: a staging buffer cannot take a second
+	copyBufferToBuffer while its previous mapAsync is unresolved. The cadence simply re-fires
+	next frame; the parity harness drains (`quiesce`) instead, because bit-determinism requires
+	each event cycle applied on the same frame in both runs — the interactive loop accepts a
+	one-frame slip in event timing, which changes trajectories but not the physics.
+
+	one more defect class the call-site net now catches: a helper name split from its arena
+	letter by a space (`addU M(x)`) tokenizes as a call of the single-letter name, so the
+	family-prefix check passes it. The net flags any lowercase word before ` <LETTER>(` that is
+	not a defined function — reintroduced during the final review sweep and caught on purpose.

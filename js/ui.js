@@ -12,12 +12,55 @@
 	var renderer = new Renderer(canvas, state), playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
 	Sim.raster(state);
 	Perf.reset();
+	// GPU path (Phase H): the same state drives a GpuSim; frames run on the device and the
+	// renderer samples the arenas, so no per-frame readback happens. Saving and the deposit
+	// extract snapshot the arenas into the CPU state first, exactly like the checkpoint bridge.
+	var gpuOn = false, gpuSim = null, gpuRenderer = null;
+	var gpuBtn = document.getElementById('gpu');
+	function buildGpu() {
+		gpuSim = new GpuSim(grid, state);
+		return gpuSim.init().then(function () {
+			gpuSim.upload();
+			gpuSim.raster();
+			gpuRenderer = new GpuRenderer(gpuCanvas, gpuSim).init();
+			gpuRenderer.draw(layerInput.value);
+		});
+	}
+	function rebuildGpu() {
+		if (gpuSim && gpuSim.device) gpuSim.device.destroy();
+		gpuSim = null; gpuRenderer = null;
+		if (!gpuOn) return Promise.resolve();
+		if (!navigator.gpu) { gpuOn = false; gpuBtn.setAttribute('aria-pressed', 'false'); return Promise.resolve(); }
+		return buildGpu();
+	}
+	// A canvas keeps its first context type forever, so the GPU mode gets its own canvas and
+	// the two simply swap visibility.
+	var gpuCanvas = document.getElementById('mapgpu');
+	gpuCanvas.hidden = true;
+	gpuBtn.addEventListener('click', function () {
+		gpuOn = !gpuOn;
+		gpuBtn.setAttribute('aria-pressed', String(gpuOn));
+		if (gpuOn) {
+			if (!navigator.gpu) { probe.textContent = 'WebGPU is not available in this browser.'; gpuOn = false; gpuBtn.setAttribute('aria-pressed', 'false'); return; }
+			gpuCanvas.hidden = false; canvas.hidden = true;
+			if (!gpuSim) buildGpu().then(function () { if (gpuOn) dirty = true; });
+			else dirty = true;
+		} else {
+			gpuCanvas.hidden = true; canvas.hidden = false;
+			dirty = true;
+		}
+	});
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
 		play.setAttribute('aria-pressed', String(playing)); step.disabled = playing;
 	}
 	play.addEventListener('click', function () { runTarget = Infinity; setPlaying(!playing); });
-	step.addEventListener('click', function () { runTarget = Infinity; Sim.step(state, +dtInput.value); dirty = true; });
+	step.addEventListener('click', function () {
+		runTarget = Infinity;
+		if (gpuOn && gpuSim) { gpuSim.step(+dtInput.value); gpuSim.applyArrived(); }
+		else Sim.step(state, +dtInput.value);
+		dirty = true;
+	});
 	runToStart.addEventListener('click', function () {
 		if (!runToInput.checkValidity()) { runToInput.reportValidity(); return; }
 		runTarget = +runToInput.value;
@@ -31,26 +74,33 @@
 		grid = new Grid(Params.level, +seedInput.value).build();
 		state = new State(grid, +seedInput.value, startInput.value === 'hot');
 		renderer.state = state;
-		Sim.raster(state); dirty = true; probe.textContent = 'Click the map to inspect a column.';
+		Sim.raster(state); dirty = !gpuOn; probe.textContent = 'Click the map to inspect a column.';
 		Perf.reset();
+		rebuildGpu().then(function () { if (gpuOn) dirty = true; });
 	});
 	document.getElementById('save').addEventListener('click', function () {
-		var blob = new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' });
-		var link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-		link.download = 'planet-' + (startInput.value === 'hot' ? 'hot' : 'map') + '-' + Math.round(state.t) + 'myr.pgt';
-		link.click();
-		URL.revokeObjectURL(link.href);
+		var save = function () {
+			var blob = new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' });
+			var link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = 'planet-' + (startInput.value === 'hot' ? 'hot' : 'map') + '-' + Math.round(state.t) + 'myr.pgt';
+			link.click();
+			URL.revokeObjectURL(link.href);
+		};
+		if (gpuSim) gpuSim.snapshot().then(save, save); else save();
 	});
 	// Deposit extraction is on demand, so its scratch is allocated on first use, never per frame.
 	document.getElementById('deposits').addEventListener('click', function () {
-		if (!extractScratch) extractScratch = new Float64Array(grid.V);
-		var blob = new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' });
-		var link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-		link.download = 'deposits-' + Math.round(state.t) + 'myr.json';
-		link.click();
-		URL.revokeObjectURL(link.href);
+		var extract = function () {
+			if (!extractScratch || extractScratch.length !== grid.V) extractScratch = new Float64Array(grid.V);
+			var blob = new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' });
+			var link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = 'deposits-' + Math.round(state.t) + 'myr.json';
+			link.click();
+			URL.revokeObjectURL(link.href);
+		};
+		if (gpuSim) gpuSim.snapshot().then(extract, extract); else extract();
 	});
 	loadInput.addEventListener('change', function () {
 		var file = loadInput.files[0];
@@ -61,7 +111,8 @@
 				setPlaying(false); runTarget = Infinity;
 				Checkpoint.load(state, new Uint8Array(reader.result));
 				Sim.raster(state);
-				dirty = true;
+				dirty = !gpuOn;
+				if (gpuSim) { gpuSim.upload(); gpuSim.raster(); }
 			} catch (error) {
 				probe.textContent = 'Load failed: ' + error.message;
 			}
@@ -69,8 +120,8 @@
 		};
 		reader.readAsArrayBuffer(file);
 	});
-	canvas.addEventListener('click', function (event) {
-		var rect = canvas.getBoundingClientRect();
+	function probeClick(event) {
+		var rect = event.currentTarget.getBoundingClientRect();
 		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * grid.lookupW)));
 		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * grid.lookupH)));
 		var cell = grid.lookup[(grid.lookupH - 1 - y) * grid.lookupW + x], owner = state.owner[cell];
@@ -94,23 +145,33 @@
 			' · arc ' + state.oArc[owner].toFixed(2) + ' · oro ' + state.oOro[owner].toFixed(2) +
 			' · basin ' + state.oBas[owner].toFixed(2) + ' · placer ' + state.oPla[owner].toFixed(2) +
 			' · fert ' + state.fert[owner].toFixed(2);
-	});
+	}
+	canvas.addEventListener('click', probeClick);
+	gpuCanvas.addEventListener('click', probeClick);
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
 		if (playing) {
 			steps = +speedInput.value;
 			if (runTarget < Infinity) steps = Math.min(steps, Math.max(0, Math.ceil((runTarget - state.t) / dt - 1e-9)));
-			if (steps > 0) { Sim.advance(state, dt, steps); dirty = true; }
+			if (steps > 0) {
+				if (gpuOn && gpuSim) { for (var gi = 0; gi < steps; gi++) gpuSim.step(dt); gpuSim.applyArrived(); }
+				else Sim.advance(state, dt, steps);
+				dirty = true;
+			}
 			if (runTarget < Infinity && state.t >= runTarget - dt * 0.5) {
 				runTarget = Infinity; setPlaying(false);
 			}
 		}
-		if (dirty) { renderer.draw(layerInput.value); dirty = false; }
+		if (dirty) {
+			if (gpuOn && gpuRenderer) gpuRenderer.draw(layerInput.value);
+			else renderer.draw(layerInput.value);
+			dirty = false;
+		}
 		Perf.frame(now, steps, dt);
 		if (Perf.due(now)) {
 			Perf.update(now);
 			perfMain.textContent = Perf.text;
-			perfKern.textContent = Perf.detail;
+			perfKern.textContent = gpuOn && gpuSim ? 'WebGPU frame · CPU probe one event cycle old' : Perf.detail;
 		}
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';

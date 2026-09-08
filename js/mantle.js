@@ -81,13 +81,19 @@ var Mantle = {
 		s.plumeLife[i] = 50 + Mantle.rand(s) * 100;
 		s.plumeStr[i] = 0.4 + Mantle.rand(s) * 0.8;
 	},
-	update: function (s) {
-		var p = MantleParams, g = s.grid, speed = p.U0 * Math.pow(s.Tm = Mantle.Tm(s.t, s.Tm0), 2.5), scale = s.mantleScale * speed;
-		var sig = p.plumeRad / p.radius, invSig = 1 / (sig * sig);
+	// Wave precession and plume respawn: the cheap, RNG-driven part of the mantle state. Both
+	// CPU and GPU paths run this every frame; only the per-cell field fill differs.
+	advance: function (s) {
+		s.Tm = Mantle.Tm(s.t, s.Tm0);
 		Mantle.precess(s);
 		for (var i = 0; i < s.plumeCount; i++) {
 			while (s.t >= s.plumeBirth[i] + s.plumeLife[i]) Mantle.spawnPlume(s, i, s.plumeBirth[i] + s.plumeLife[i]);
 		}
+		return MantleParams.U0 * Math.pow(s.Tm, 2.5);
+	},
+	update: function (s) {
+		var p = MantleParams, g = s.grid, speed = Mantle.advance(s), scale = s.mantleScale * speed;
+		var invSig = Math.pow(p.radius / p.plumeRad, 2);
 		var scratch = s.scratch;
 		for (var c = 0; c < g.V; c++) {
 			var b = c * 3, x = g.pos[b], y = g.pos[b + 1], z = g.pos[b + 2];

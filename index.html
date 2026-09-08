@@ -7,17 +7,18 @@
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="eyebrow">Phase G — CPU release</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
+	<header><div class="eyebrow">Phase H — WebGPU port</div><span class="badge">CPU · L5 · GPU toggle</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
 	<main>
 		<div class="heading"><div><p>Plates rift apart, suture back together, and the planet cools — and the crust keeps the record of where the metal was.</p></div></div>
 		<section class="map-panel" aria-label="Planet map">
 			<div class="map-top"><span>EQUIRECTANGULAR / 10,242 CELLS</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="type">Boundary type</option><option value="z">Elevation</option><option value="damage">Rift damage</option><option value="owner">Column coverage</option><option value="sediment">Sediment</option><option value="oVms">Ore · VMS</option><option value="oMaf">Ore · mafic</option><option value="oArc">Ore · arc</option><option value="oOro">Ore · orogenic</option><option value="oBas">Ore · basin</option><option value="oPla">Ore · placer</option></select></label></div>
 			<canvas id="map" aria-label="Equirectangular map of moving plates">Canvas support is required.</canvas>
+			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU)"></canvas>
 			<div class="perf" id="perf"><span id="perf-main">performance counter idle</span><span id="perf-kern"></span></div>
 			<div class="map-bottom"><span>90° S</span><span>Boundary type: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</span><span>180° E</span></div>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
-			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button>
+			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button><button id="gpu" aria-pressed="false">GPU</button>
 			<label>Time step<select id="dt"><option value="0.01">10,000 years</option><option value="0.02">20,000 years</option><option value="0.05">50,000 years</option><option value="0.1" selected>100,000 years</option></select></label>
 			<label>Steps / frame<select id="speed"><option>1</option><option>5</option><option>20</option></select></label>
 			<label>Run to<input id="run-to" type="number" min="0" max="10000" step="100" value="4500"></label><button id="run-to-start">Run to target</button>
@@ -45,6 +46,23 @@
 	<script src="js/extract.js"></script>
 	<script src="js/sim.js"></script>
 	<script src="js/render.js"></script>
+	<script src="js/gpu/layout.js"></script>
+	<script src="js/gpu/common.wgsl.js"></script>
+	<script src="js/gpu/scan.wgsl.js"></script>
+	<script src="js/gpu/mantle.wgsl.js"></script>
+	<script src="js/gpu/plates.wgsl.js"></script>
+	<script src="js/gpu/columns.wgsl.js"></script>
+	<script src="js/gpu/bin.wgsl.js"></script>
+	<script src="js/gpu/raster.wgsl.js"></script>
+	<script src="js/gpu/edges.wgsl.js"></script>
+	<script src="js/gpu/contact.wgsl.js"></script>
+	<script src="js/gpu/column.wgsl.js"></script>
+	<script src="js/gpu/surface.wgsl.js"></script>
+	<script src="js/gpu/forces.wgsl.js"></script>
+	<script src="js/gpu/diag.wgsl.js"></script>
+	<script src="js/gpu/events.wgsl.js"></script>
+	<script src="js/gpu/sim-gpu.js"></script>
+	<script src="js/gpu/render-gpu.js"></script>
 	<script src="js/ui.js"></script>
 </body>
 </html>
