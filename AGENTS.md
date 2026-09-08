@@ -46,6 +46,7 @@
 0.1.5-final-design.md - normative design.
 0.2-plan.md - development plan built on the design.
 experiments/ - measurement scripts (node), not loaded by the page.
+experiments/logs/ - keep useful
 
 findings-pitfalls-skills.md - notes and pitfalls for LLM agents. write here if found good way to do something.
 
