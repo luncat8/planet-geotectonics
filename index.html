@@ -3,17 +3,17 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width,initial-scale=1">
-	<title>Planet Geotectonics · Transport Lab</title>
+	<title>Planet Geotectonics · Kinematics</title>
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="eyebrow">Phase A — Foundation</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0% uncovered</span></div></header>
+	<header><div class="eyebrow">Phase B — Kinematics</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
 	<main>
-		<div class="heading"><div><p>Rigid plates. Material columns. No grid advection.</p></div></div>
+		<div class="heading"><div><p>Mantle-driven rigid plates. Boundaries classified, not prescribed.</p></div></div>
 		<section class="map-panel" aria-label="Planet map">
-			<div class="map-top"><span>EQUIRECTANGULAR / 10,242 CELLS</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="z">Elevation preview</option><option value="owner">Column coverage</option></select></label></div>
+			<div class="map-top"><span>EQUIRECTANGULAR / 10,242 CELLS</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="type">Boundary type</option><option value="z">Elevation preview</option><option value="owner">Column coverage</option></select></label></div>
 			<canvas id="map" aria-label="Equirectangular map of moving plates">Canvas support is required.</canvas>
-			<div class="map-bottom"><span>90° S</span><span>DARK CELLS = NO COLUMN WITHIN COVERAGE RADIUS</span><span>180° E</span></div>
+			<div class="map-bottom"><span>90° S</span><span>RED SUBDUCTION · YELLOW RIDGE · WHITE TRANSFORM · VIOLET COLLISION</span><span>180° E</span></div>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
 			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button>
@@ -21,13 +21,17 @@
 			<label>Steps / frame<select id="speed"><option>1</option><option>5</option><option>20</option></select></label>
 			<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
 		</section>
-		<section class="notes"><div><h2>01 / Transport foundation</h2><p>16 seeded plates rotate at prescribed angular velocities. Crust stays attached to columns; the grid only samples them. Gaps and overlaps are expected in this kinematic demo.</p><p class="muted">Mantle forces, crust recycling, surface evolution and WebGPU are later phases, not active physics here.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
+		<section class="notes"><div><h2>02 / Mantle kinematics</h2><p>16 Voronoi plates follow a precessing poloidal–toroidal mantle flow by least-squares basal drag. Crust still lives on columns; gaps and overlaps are left as-is until contact physics.</p><p class="muted">Ridge spawn, subduction consume, slab pull and surface evolution are later phases.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
 	</main>
 	<script src="js/geodesics.js"></script>
 	<script src="js/params.js"></script>
 	<script src="js/quat.js"></script>
+	<script src="js/mantle.js"></script>
 	<script src="js/state.js"></script>
 	<script src="js/columns.js"></script>
+	<script src="js/plates.js"></script>
+	<script src="js/edges.js"></script>
+	<script src="js/diag.js"></script>
 	<script src="js/sim.js"></script>
 	<script src="js/render.js"></script>
 	<script src="js/ui.js"></script>

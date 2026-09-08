@@ -20,6 +20,23 @@ Renderer.prototype.draw = function (layer) {
 		colors[b] = 20; colors[b + 1] = 26; colors[b + 2] = 39;
 		if (owner < 0) continue;
 		if (layer === 'owner') { colors[b] = 78; colors[b + 1] = 197; colors[b + 2] = 167; continue; }
+		if (layer === 'type') {
+			var kind = 0;
+			for (var k = 0; k < g.ringN[c]; k++) {
+				var e = c * 6 + k, t = s.edgeType[e];
+				if (t === 1 && s.polarity[e] === 2) { kind = 4; break; }
+				if (t === 1 && kind < 3) kind = 3;
+				else if (t === 2 && kind < 2) kind = 2;
+				else if (t === 3 && kind < 1) kind = 1;
+			}
+			if (kind === 4) { colors[b] = 186; colors[b + 1] = 92; colors[b + 2] = 214; continue; }
+			if (kind === 3) { colors[b] = 214; colors[b + 1] = 72; colors[b + 2] = 64; continue; }
+			if (kind === 2) { colors[b] = 232; colors[b + 1] = 196; colors[b + 2] = 74; continue; }
+			if (kind === 1) { colors[b] = 214; colors[b + 1] = 214; colors[b + 2] = 220; continue; }
+			var p = s.plate[owner] * 3;
+			colors[b] = this.palette[p] * 0.45; colors[b + 1] = this.palette[p + 1] * 0.45; colors[b + 2] = this.palette[p + 2] * 0.45;
+			continue;
+		}
 		if (layer === 'plate') {
 			var p = s.plate[owner] * 3;
 			colors[b] = this.palette[p]; colors[b + 1] = this.palette[p + 1]; colors[b + 2] = this.palette[p + 2];

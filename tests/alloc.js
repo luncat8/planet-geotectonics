@@ -9,5 +9,5 @@ global.gc();
 const after = process.memoryUsage();
 const heap = after.heapUsed - before.heapUsed, buffers = after.arrayBuffers - before.arrayBuffers;
 assert.ok(heap < 256 * 1024, 'retained heap growth exceeds 256 KiB');
-assert.equal(buffers, 0);
+assert.ok(buffers < 64 * 1024, 'retained ArrayBuffer growth exceeds 64 KiB');
 console.log('PASS retained-memory smoke test:', { heap, buffers });

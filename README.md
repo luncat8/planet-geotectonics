@@ -7,18 +7,18 @@ A no-build, offline-friendly planetary tectonics simulator in development.
 Open `index.html` directly in a browser. No dependencies, network requests or server are
 needed. Alternatively, serve this directory with `python3 -m http.server 8000 --bind 0.0.0.0`.
 
-## Current implementation: Phase A transport foundation
+## Current implementation: Phase B kinematics
 
 - Icosahedral grid with flat adjacency/geometry tables and deterministic land mask.
-- Fixed-capacity column and plate arrays; seeded Voronoi plate initialization and reset.
-- Normalized quaternion integration, exact body-to-world column rotation, cached hill climb,
-  deterministic count/scan/scatter bins and nearest-distance raster ownership.
-- Canvas map with plate/elevation/coverage views, controls and column inspector.
+- Fixed-capacity column and plate arrays; seeded Voronoi plates, `q = identity`, `b = r`.
+- Precessing poloidal–toroidal mantle flow (mean speed `U0·Tm^2.5`) plus short-lived plumes.
+- Drag-only 3×3 plate solve: `M ω = rhs`, relaxation `τ_ω`, `vMax` cap.
+- Boundary classification with hysteresis, subduction polarity and 2-ring `trenchDist`.
+- Canvas map with plate, boundary-type, elevation and coverage views.
 
-Plate velocities are **prescribed**, not force-driven. Elevation is a static isostatic preview.
-Gaps are deliberately left empty; contact, crust production/destruction, mantle forces,
-surface evolution, events, ores, checkpoints and WebGPU are **not implemented** yet.
-See `0.2-plan.md` for the complete roadmap and `0.1.5-final-design.md` for the physical design.
+Contact (gap spawn / overlap consume), slab pull, ridge push, surface evolution, events,
+ores, checkpoints and WebGPU are **not implemented** yet. See `0.2-plan.md` and
+`0.1.5-final-design.md`.
 
 ## Test
 
@@ -27,6 +27,7 @@ node tests/run-all.js
 ```
 
 Uses only Node built-ins. The runner launches the retained-memory test with `--expose-gc`.
-Tests cover grid geometry, analytic rigid rotation, seeded bitwise determinism/reset,
-L5 cap transport over 10,000 frames at both dt endpoints, crowded bins and ownership ties.
-The memory smoke test checks retained growth, not absence of transient allocations.
+Phase A: grid geometry, analytic rigid rotation, bitwise determinism, L5 cap transport at
+both dt endpoints, crowded bins. Phase B: mantle mean speed / poloidal divergence / spectrum,
+`ω = Ω` identity, least-squares drag fit, two-plate edge classification and flicker, 16-plate
+500 Myr (dt 0.1) and 50 Myr (dt 0.01) kinematics.

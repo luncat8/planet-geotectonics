@@ -17,7 +17,6 @@
 	document.getElementById('reset').addEventListener('click', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
 		setPlaying(false);
-		// The seed controls both the land mask and the plate initialization.
 		grid = new Grid(Params.level, +seedInput.value).build();
 		state = new State(grid, +seedInput.value); renderer.state = state;
 		Sim.raster(state); dirty = true; probe.textContent = 'Click the map to inspect a column.';
@@ -28,14 +27,24 @@
 		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * grid.lookupH)));
 		var cell = grid.lookup[(grid.lookupH - 1 - y) * grid.lookupW + x], owner = state.owner[cell];
 		if (owner < 0) { probe.textContent = 'Cell ' + cell + ' · uncovered. Crust creation is not implemented yet.'; return; }
-		probe.textContent = 'Cell ' + cell + ' · column ' + owner + ' · plate ' + (state.plate[owner] + 1) + '\nFelsic ' + (state.hFel[owner] / 1000).toFixed(1) + ' km · mafic ' + (state.hMaf[owner] / 1000).toFixed(1) + ' km\nAge ' + state.age[owner].toFixed(1) + ' Myr · elevation ' + Math.round(state.z[cell]) + ' m';
+		var rank = 0, names = ['interior', 'transform', 'divergent', 'subduction', 'collision'];
+		for (var k = 0; k < grid.ringN[cell]; k++) {
+			var e = cell * 6 + k, t = state.edgeType[e], r = t === 1 && state.polarity[e] === 2 ? 4 : t === 1 ? 3 : t === 2 ? 2 : t === 3 ? 1 : 0;
+			if (r > rank) rank = r;
+		}
+		var kind = names[rank];
+		var speed = Math.hypot(state.vel[cell * 3], state.vel[cell * 3 + 1], state.vel[cell * 3 + 2]) / 10000;
+		probe.textContent = 'Cell ' + cell + ' · column ' + owner + ' · plate ' + (state.plate[owner] + 1) +
+			'\n' + speed.toFixed(2) + ' cm/yr · ' + kind + ' · trenchDist ' + state.trenchDist[cell] +
+			'\nFelsic ' + (state.hFel[owner] / 1000).toFixed(1) + ' km · mafic ' + (state.hMaf[owner] / 1000).toFixed(1) +
+			' km\nAge ' + state.age[owner].toFixed(1) + ' Myr · elevation ' + Math.round(state.z[cell]) + ' m';
 	});
 	function frame(now) {
 		if (playing) { Sim.advance(state, +dtInput.value, +speedInput.value); dirty = true; }
 		if (dirty) { renderer.draw(layerInput.value); dirty = false; }
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';
-			gaps.textContent = (100 * state.gaps / grid.V).toFixed(1) + '% uncovered';
+			gaps.textContent = (state.meanSpeed / 10000).toFixed(2) + ' cm/yr · Tm ' + state.Tm.toFixed(2);
 			lastUpdate = now;
 		}
 		requestAnimationFrame(frame);
