@@ -9,8 +9,8 @@ var Plates = {
 	// mantle speed that would push as hard. Divided by cD(Tm) = exp(Ea(1/Tm − 1)), so a cooling
 	// asthenosphere damps slab pull and ridge push into a stagnant lid with no code switch.
 	forces: function (s) {
-		var g = s.grid, p = PlateParams, R = p.radius, w = s.wEq, inv = g.gradInv;
-		var ocean = p.hOceanic, ridge = p.kRidge / R, coll = p.vColl / p.vRef;
+		var g = s.grid, p = PlateParams, R = p.radius, w = s.wEq;
+		var ocean = p.hOceanic, ridge = p.kRidge, coll = p.vColl / p.vRef;
 		var invCD = Math.exp(-p.Ea * (1 / s.Tm - 1));
 		ridge *= invCD; coll *= invCD;
 		var slab = p.vSlab * invCD / p.ageSlab;
@@ -18,34 +18,23 @@ var Plates = {
 		for (var c = 0; c < g.V; c++) {
 			var b = c * 3, owner = s.owner[c];
 			if (owner < 0) continue;
-			var x = g.pos[b], y = g.pos[b + 1], z = g.pos[b + 2], zi = s.z[c];
-			if (zi === zi && s.hFel[owner] < ocean) {
-				var bx = 0, by = 0, bz = 0;
-				for (var k = 0; k < g.ringN[c]; k++) {
-					var j = g.ring[c * 6 + k], zj = s.z[j];
-					if (zj !== zj) continue;
-					var dz = zj - zi, jb = j * 3;
-					bx += dz * g.pos[jb]; by += dz * g.pos[jb + 1]; bz += dz * g.pos[jb + 2];
-				}
-				var i9 = c * 9;
-				var gx = inv[i9] * bx + inv[i9 + 1] * by + inv[i9 + 2] * bz;
-				var gy = inv[i9 + 3] * bx + inv[i9 + 4] * by + inv[i9 + 5] * bz;
-				var gz = inv[i9 + 6] * bx + inv[i9 + 7] * by + inv[i9 + 8] * bz;
-				var rn = gx * x + gy * y + gz * z;
-				w[b] -= ridge * (gx - x * rn);
-				w[b + 1] -= ridge * (gy - y * rn);
-				w[b + 2] -= ridge * (gz - z * rn);
+			var x = g.pos[b], y = g.pos[b + 1], z = g.pos[b + 2];
+			if (s.hFel[owner] < ocean) {
+				w[b] -= ridge * s.gradZ[b];
+				w[b + 1] -= ridge * s.gradZ[b + 1];
+				w[b + 2] -= ridge * s.gradZ[b + 2];
 			}
 			for (var k2 = 0; k2 < g.ringN[c]; k2++) {
-				var e = c * 6 + k2;
-				if (s.edgeType[e] !== PlateEdges.CONVERGENT) continue;
+				var e = c * 6 + k2, otherOwner = s.owner[g.ring[e]];
+				if (otherOwner < 0 || s.edgeType[e] !== PlateEdges.CONVERGENT) continue;
 				var pol = s.polarity[e], push;
 				if (pol === 2) {
-					// Collision resistance brakes both plates; gathering over the ring covers the
-					// far side too, because relN and faceN are antisymmetric per direction.
+					// Thick continental crust must build a stronger normal barrier. Without this
+					// factor a collision keeps consuming columns until the contact pass wins.
 					var closing = -s.relN[e];
 					if (closing <= 0) continue;
-					push = -coll * closing;
+					var thick = 1 + p.collThickness * Math.max(0, Math.max(s.hFel[owner], s.hFel[otherOwner]) - ocean) / p.hCollapse;
+					push = -coll * Math.min(4, thick) * closing;
 				} else if (pol === -1) {
 					push = slab * Math.min(p.ageSlab, s.age[owner]);
 				} else continue;

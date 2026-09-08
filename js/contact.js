@@ -46,7 +46,16 @@ var Contact = {
 					var wj = j * 3;
 					var ex = s.world[wj] - wx, ey = s.world[wj + 1] - wy, ez = s.world[wj + 2] - wz;
 					var d = ex * ex + ey * ey + ez * ez;
-					if (d >= best) continue;
+					if (d >= best || d <= 0) continue;
+					var invD = 1 / Math.sqrt(d), nxD = ex * invD, nyD = ey * invD, nzD = ez * invD;
+					var aD = s.plate[i] * 3, bD = s.plate[j] * 3;
+					var closingD = (s.omega[bD + 1] * s.world[wj + 2] - s.omega[bD + 2] * s.world[wj + 1]
+						- s.omega[aD + 1] * wz + s.omega[aD + 2] * wy) * nxD
+						+ (s.omega[bD + 2] * s.world[wj] - s.omega[bD] * s.world[wj + 2]
+						- s.omega[aD + 2] * wx + s.omega[aD] * wz) * nyD
+						+ (s.omega[bD] * s.world[wj + 1] - s.omega[bD + 1] * s.world[wj]
+						- s.omega[aD] * wy + s.omega[aD + 1] * wx) * nzD;
+					if (R * closingD > -hi) continue;
 					best = d; other = j; dx = ex; dy = ey; dz = ez;
 				}
 			}

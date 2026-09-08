@@ -18,6 +18,8 @@ function State(grid, seed) {
 	this.age = new Float64Array(this.colCap);
 	this.damage = new Float64Array(this.colCap);
 	this.zDyn = new Float64Array(this.colCap);
+	this.zDynNext = new Float64Array(this.colCap);
+	this.collapseDelta = new Float64Array(this.colCap);
 	this.alive = new Uint8Array(this.colCap);
 	this.plate = new Uint16Array(this.colCap);
 	this.cell = new Int32Array(this.colCap);
@@ -43,6 +45,10 @@ function State(grid, seed) {
 	this.owner = new Int32Array(grid.V);
 	this.distance = new Float64Array(grid.V);
 	this.z = new Float64Array(grid.V);
+	this.wet = new Uint8Array(grid.V);
+	this.gradZ = new Float64Array(grid.V * 3);
+	this.slope = new Float64Array(grid.V);
+	this.low = new Int32Array(grid.V);
 	this.cellPlate = new Uint16Array(grid.V);
 	this.gapFrames = new Uint16Array(grid.V);
 	this.gapTime = new Float32Array(grid.V);
@@ -51,6 +57,15 @@ function State(grid, seed) {
 	this.gapDonor = new Int32Array(grid.V * 3);
 	this.gapDonorN = new Uint8Array(grid.V);
 	this.gapScan = new Int32Array(43);   // 1 + 6 + 6*6, the widest two-hop cell list
+	this.mobile = new Float64Array(grid.V);
+	this.mobileFel = new Float64Array(grid.V);
+	this.mobilePla = new Float64Array(grid.V);
+	this.outflow = new Float64Array(grid.V);
+	this.outflowFel = new Float64Array(grid.V);
+	this.outflowPla = new Float64Array(grid.V);
+	this.inflow = new Float64Array(grid.V);
+	this.inflowFel = new Float64Array(grid.V);
+	this.inflowPla = new Float64Array(grid.V);
 	this.uMantle = new Float64Array(grid.V * 3);
 	this.vel = new Float64Array(grid.V * 3);
 	this.wEq = new Float64Array(grid.V * 3);
@@ -92,12 +107,13 @@ State.prototype.reset = function (seed) {
 	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
 	this.Tm = 1; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0;
 	this.spawns = 0; this.deaths = 0; this.overlaps = 0; this.lastEvent = -Infinity;
-	this.producedFel = 0; this.producedMaf = 0; this.subductedMaf = 0; this.subductedSed = 0;
+	this.producedFel = 0; this.producedMaf = 0; this.erodedFel = 0; this.erodedMaf = 0;
+	this.subductedMaf = 0; this.subductedSed = 0;
 	this.subductedArea = 0; this.massFel = 0; this.massMaf = 0; this.massSed = 0;
 	this.massFel0 = 0; this.massMaf0 = 0; this.massSed0 = 0;
 	this.body.fill(0); this.world.fill(0); this.area.fill(0);
 	this.hFel.fill(0); this.hMaf.fill(0); this.hSed.fill(0); this.age.fill(0);
-	this.damage.fill(0); this.zDyn.fill(0); this.alive.fill(0);
+	this.damage.fill(0); this.zDyn.fill(0); this.zDynNext.fill(0); this.collapseDelta.fill(0); this.alive.fill(0);
 	this.plate.fill(0); this.cell.fill(-1); this.consumedBy.fill(-1);
 	this.loserList.fill(-1); this.loserStart.fill(0); this.loserCursor.fill(0);
 	this.q.fill(0); this.omega.fill(0); this.omegaTarget.fill(0);
@@ -105,9 +121,13 @@ State.prototype.reset = function (seed) {
 	this.subRate.fill(0); this.subCount.fill(0);
 	this.plateSpawned.fill(0); this.plateLost.fill(0);
 	this.count.fill(0); this.offset.fill(0); this.cursor.fill(0); this.entries.fill(0);
-	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.climbHistogram.fill(0);
+	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.wet.fill(0);
+	this.gradZ.fill(0); this.slope.fill(0); this.low.fill(-1); this.climbHistogram.fill(0);
 	this.cellPlate.fill(65535); this.gapFrames.fill(0); this.gapTime.fill(0); this.spawnSlot.fill(-1);
 	this.gapPlate.fill(0); this.gapDonor.fill(-1); this.gapDonorN.fill(0); this.gapScan.fill(0);
+	this.mobile.fill(0); this.mobileFel.fill(0); this.mobilePla.fill(0);
+	this.outflow.fill(0); this.outflowFel.fill(0); this.outflowPla.fill(0);
+	this.inflow.fill(0); this.inflowFel.fill(0); this.inflowPla.fill(0);
 	this.uMantle.fill(0); this.vel.fill(0); this.wEq.fill(0);
 	this.relN.fill(0); this.relT.fill(0); this.edgeType.fill(0); this.polarity.fill(0);
 	this.trenchDist.fill(3); this.ext.fill(0); this.plumeT.fill(0);
@@ -144,6 +164,7 @@ State.prototype.reset = function (seed) {
 State.prototype.rebase = function () {
 	StateDiag.mass(this);
 	this.massFel0 = this.massFel; this.massMaf0 = this.massMaf; this.massSed0 = this.massSed;
-	this.producedFel = 0; this.producedMaf = 0; this.subductedMaf = 0; this.subductedSed = 0;
+	this.producedFel = 0; this.producedMaf = 0; this.erodedFel = 0; this.erodedMaf = 0;
+	this.subductedMaf = 0; this.subductedSed = 0;
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = State;

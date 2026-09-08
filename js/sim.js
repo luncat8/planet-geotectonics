@@ -4,6 +4,7 @@ var SimPlates = typeof module !== 'undefined' && module.exports ? require('./pla
 var SimEdges = typeof module !== 'undefined' && module.exports ? require('./edges.js') : Edges;
 var SimContact = typeof module !== 'undefined' && module.exports ? require('./contact.js') : Contact;
 var SimColumnUpdate = typeof module !== 'undefined' && module.exports ? require('./column-update.js') : ColumnUpdate;
+var SimSurface = typeof module !== 'undefined' && module.exports ? require('./surface.js') : Surface;
 var SimEvents = typeof module !== 'undefined' && module.exports ? require('./events.js') : Events;
 var SimDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
 var SimParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
@@ -23,6 +24,8 @@ var Sim = {
 		at = SimPerf.lap(K.APPLY, at);
 		SimColumnUpdate.step(s, dt);
 		at = SimPerf.lap(K.COLUMN, at);
+		SimSurface.step(s, dt);
+		at = SimPerf.lap(K.SURFACE, at);
 		if (!s.prescribedOmega) {
 			SimPlates.forces(s);
 			at = SimPerf.lap(K.FORCES, at);
@@ -58,6 +61,7 @@ var Sim = {
 	raster: function (s) {
 		SimMantle.update(s);
 		SimColumns.move(s); SimColumns.bin(s); SimColumns.raster(s);
+		SimSurface.elevation(s);
 		if (s.fixedOmega) return;
 		SimEdges.velocities(s);
 		if (!s.prescribedOmega) {

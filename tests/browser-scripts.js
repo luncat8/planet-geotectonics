@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
-for (const file of ['geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'events', 'perf', 'sim', 'render']) {
+for (const file of ['geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'perf', 'sim', 'render']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
 vm.runInContext(`
@@ -17,7 +17,7 @@ var canvas = { getContext: function () { return {
 var renderer = new Renderer(canvas, state);
 renderer.draw('plate');
 Sim.advance(state, 0.1, 10);
-renderer.draw('z'); renderer.draw('owner'); renderer.draw('type');
+renderer.draw('z'); renderer.draw('owner'); renderer.draw('type'); renderer.draw('sediment');
 Sim.advance(state, 0.1, 190);
 renderer.draw('plate'); renderer.draw('type'); renderer.draw('z'); renderer.draw('owner');
 `, context);

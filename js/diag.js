@@ -1,13 +1,15 @@
 var DiagQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : Quat;
 var Diag = {
 	// Source/sink ledgers. Mass is counted with the nominal column footprint A0ref, so a
-	// transfer between columns is exact and only the recorded sources and sinks move the total.
+	// transfer between columns or into mobile sediment is exact. producedFel/producedMaf are
+	// signed net sources after surface erosion; only recorded sources and sinks move total crust.
 	mass: function (s) {
 		var fel = 0, maf = 0, sed = 0;
 		for (var i = 0; i < s.n; i++) {
 			if (!s.alive[i]) continue;
 			fel += s.hFel[i]; maf += s.hMaf[i]; sed += s.hSed[i];
 		}
+		for (var c = 0; c < s.grid.V; c++) sed += s.mobile[c];
 		s.massFel = fel * s.A0ref; s.massMaf = maf * s.A0ref; s.massSed = sed * s.A0ref;
 	},
 	check: function (s) {
@@ -29,9 +31,11 @@ var Diag = {
 				+ s.hFel[i] + s.hMaf[i] + s.hSed[i] + s.age[i] + s.zDyn[i])) finite = 0;
 		}
 		for (var c = 0; c < g.V; c++) {
+			if (!Number.isFinite(s.mobile[c] + s.mobileFel[c] + s.mobilePla[c])) finite = 0;
 			if (s.owner[c] < 0) continue;
 			var cb = c * 3;
-			if (!Number.isFinite(s.vel[cb] + s.uMantle[cb] + s.z[c] + s.ext[c])) finite = 0;
+			if (!Number.isFinite(s.vel[cb] + s.uMantle[cb] + s.z[c] + s.ext[c]
+				+ s.gradZ[cb] + s.slope[c])) finite = 0;
 		}
 		s.quatError = qErr; s.rigidError = rigid; s.finite = finite;
 		var h = s.histI % s.histT.length;

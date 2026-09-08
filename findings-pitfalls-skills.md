@@ -145,3 +145,31 @@
 	smooth with an EMA on the frame gap (τ 500 ms) and on the step time (τ 250 ms), and
 	rebuild the HUD text at 2 Hz: per-frame string concatenation is not free, and at 2 Hz the
 	text rebuild touches 1.7 % of the frames.
+
+## contact-to-force ordering
+
+	CONTACT/APPLY can delete a column after EDGES has classified the frame. Any force pass that uses
+	those edge records must re-check the current neighbour owner before reading its crust fields;
+	otherwise a stale C-C polarity reads `hFel[-1]` and sends NaN into the plate solve. The contact
+	search should choose the nearest closing foreign column, not simply the nearest foreign column:
+	a separating transform can sit inside a closing subduction pair.
+
+	Collision resistance should be a normal barrier, not global basal friction: scale it with closing
+	speed and a bounded continental-thickness factor, and use a shorter angular relaxation (0.5 Myr)
+	so the barrier does not make all plate motion look viscous. The prescribed C-C load test catches
+	both the monotonic thickness response and stale-contact finiteness.
+
+## surface coupling
+
+	Keep isostasy in one authoritative K9 kernel. A pre-raster preview duplicated in the ownership
+	kernel quickly becomes inconsistent once sediment, flexure or trench loads change a column. Compute
+	elevation and gradient before routing, gather all one-hop outflow before deposition, and count mobile
+	sediment in the mass ledger even when a gap has no owner. Recompute scalar z after deposition for
+	rendering; the graph gradient can wait until the next frame because a single-frame erosion transfer
+	is small.
+
+## performance after surface coupling
+
+	L5 with surface coupling remains above the 40 frames/s node floor (about 45-52 frames/s in
+	repeated smoke runs); mantle harmonic evaluation and the graph gradient are the dominant kernels.
+	Keep the per-frame HUD text at 2 Hz and use typed-array scratch buffers instead of per-cell arrays.
