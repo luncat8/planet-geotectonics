@@ -54,6 +54,7 @@ var Columns = {
 			var threshold = 2 * Math.sin(ColumnParams.rGap * g.nbrDist[c] / radius * 0.5);
 			if (best > threshold * threshold) owner = -1;
 			s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
+			s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
 			if (owner < 0) { s.gaps++; s.z[c] = NaN; continue; }
 			// Static isostatic preview only; evolving surface processes belong to Phase D.
 			var ci = Math.max(0, Math.min(1, (s.hFel[owner] - 5000) / 15000));

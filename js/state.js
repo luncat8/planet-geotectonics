@@ -1,5 +1,6 @@
 var StateParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var StateGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
+var StateMantle = typeof module !== 'undefined' && module.exports ? require('./mantle.js') : Mantle;
 function State(grid, seed) {
 	this.grid = grid;
 	this.colCap = Math.ceil(grid.V * 1.5);
@@ -14,7 +15,11 @@ function State(grid, seed) {
 	this.cell = new Int32Array(this.colCap);
 	this.q = new Float64Array(this.plateCap * 4);
 	this.omega = new Float64Array(this.plateCap * 3);
+	this.omegaTarget = new Float64Array(this.plateCap * 3);
+	this.M = new Float64Array(this.plateCap * 9);
+	this.rhs = new Float64Array(this.plateCap * 3);
 	this.seeds = new Float64Array(this.plateCap * 3);
+	this.plateCells = new Uint32Array(this.plateCap);
 	this.count = new Uint32Array(grid.V);
 	this.offset = new Uint32Array(grid.V + 1);
 	this.cursor = new Uint32Array(grid.V);
@@ -22,28 +27,64 @@ function State(grid, seed) {
 	this.owner = new Int32Array(grid.V);
 	this.distance = new Float64Array(grid.V);
 	this.z = new Float64Array(grid.V);
+	this.cellPlate = new Uint16Array(grid.V);
+	this.uMantle = new Float64Array(grid.V * 3);
+	this.vel = new Float64Array(grid.V * 3);
+	this.relN = new Float64Array(grid.V * 6);
+	this.relT = new Float64Array(grid.V * 6);
+	this.edgeType = new Int8Array(grid.V * 6);
+	this.polarity = new Int8Array(grid.V * 6);
+	this.trenchDist = new Int8Array(grid.V);
+	this.ext = new Float64Array(grid.V);
+	this.plumeT = new Float64Array(grid.V);
+	this.waveDir0 = new Float64Array(StateParams.nWave * 3);
+	this.waveAxis = new Float64Array(StateParams.nWave * 3);
+	this.waveDir = new Float64Array(StateParams.nWave * 3);
+	this.wavePeriod = new Float64Array(StateParams.nWave);
+	this.waveFreq = new Float64Array(StateParams.nWave);
+	this.wavePhase = new Float64Array(StateParams.nWave);
+	this.waveAmp = new Float64Array(StateParams.nWave);
+	this.plumePos = new Float64Array(6 * 3);
+	this.plumeBirth = new Float64Array(6);
+	this.plumeLife = new Float64Array(6);
+	this.plumeStr = new Float64Array(6);
+	this.scratch = new Float64Array(32);
 	this.climbHistogram = new Uint32Array(32);
+	this.histT = new Float64Array(StateParams.histCap);
+	this.histMeanV = new Float64Array(StateParams.histCap);
+	this.histMaxV = new Float64Array(StateParams.histCap);
+	this.histGaps = new Uint32Array(StateParams.histCap);
+	this.histPlates = new Uint16Array(StateParams.histCap);
+	this.histChanges = new Uint32Array(StateParams.histCap);
 	this.reset(seed === undefined ? grid.seed : seed);
 }
 State.prototype.reset = function (seed) {
 	this.seed = seed >>> 0;
 	this.t = 0; this.frame = 0; this.n = this.grid.V;
 	this.plateCount = Math.min(StateParams.plateCount, this.n);
-	this.gaps = 0; this.maxClimb = 0;
+	this.gaps = 0; this.maxClimb = 0; this.fixedOmega = 0; this.finite = 1;
+	this.meanSpeed = 0; this.maxSpeed = 0; this.typeChanges = 0;
+	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
+	this.Tm = 1; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0; this.produced = 0; this.subducted = 0;
 	this.body.fill(0); this.world.fill(0); this.area.fill(0);
 	this.hFel.fill(0); this.hMaf.fill(0); this.age.fill(0);
-	this.plate.fill(0); this.cell.fill(-1); this.q.fill(0); this.omega.fill(0); this.seeds.fill(0);
+	this.plate.fill(0); this.cell.fill(-1); this.q.fill(0); this.omega.fill(0); this.omegaTarget.fill(0);
+	this.M.fill(0); this.rhs.fill(0); this.seeds.fill(0); this.plateCells.fill(0);
 	this.count.fill(0); this.offset.fill(0); this.cursor.fill(0); this.entries.fill(0);
 	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.climbHistogram.fill(0);
+	this.cellPlate.fill(65535); this.uMantle.fill(0); this.vel.fill(0);
+	this.relN.fill(0); this.relT.fill(0); this.edgeType.fill(0); this.polarity.fill(0);
+	this.trenchDist.fill(3); this.ext.fill(0); this.plumeT.fill(0);
+	this.waveDir0.fill(0); this.waveAxis.fill(0); this.waveDir.fill(0);
+	this.wavePeriod.fill(0); this.waveFreq.fill(0); this.wavePhase.fill(0); this.waveAmp.fill(0);
+	this.plumePos.fill(0); this.plumeBirth.fill(0); this.plumeLife.fill(0); this.plumeStr.fill(0);
+	this.scratch.fill(0); this.histT.fill(0); this.histMeanV.fill(0); this.histMaxV.fill(0);
+	this.histGaps.fill(0); this.histPlates.fill(0); this.histChanges.fill(0);
 	var random = StateGrid.mulberry32(this.seed), g = this.grid;
 	for (var p = 0; p < this.plateCount; p++) {
 		this.q[p * 4 + 3] = 1;
 		var y = random() * 2 - 1, a = random() * Math.PI * 2, r = Math.sqrt(1 - y * y);
 		this.seeds[p * 3] = r * Math.cos(a); this.seeds[p * 3 + 1] = y; this.seeds[p * 3 + 2] = r * Math.sin(a);
-		var wy = random() * 2 - 1, wa = random() * Math.PI * 2, wr = Math.sqrt(1 - wy * wy);
-		var speed = StateParams.speed / StateParams.radius;
-		this.omega[p * 3] = speed * wr * Math.cos(wa);
-		this.omega[p * 3 + 1] = speed * wy; this.omega[p * 3 + 2] = speed * wr * Math.sin(wa);
 	}
 	for (var i = 0; i < this.n; i++) {
 		var b = i * 3, best = -Infinity, winner = 0;
@@ -58,5 +99,6 @@ State.prototype.reset = function (seed) {
 		this.age[i] = this.hFel[i] ? 500 : random() * 120;
 	}
 	this.body.set(g.pos); this.world.set(g.pos);
+	StateMantle.init(this);
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = State;

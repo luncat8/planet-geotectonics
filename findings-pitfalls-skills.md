@@ -45,3 +45,24 @@
 	keep unit positions in Float64 from mesh construction, not round-tripped via cellA f32.
 	GC-delimited heap deltas measure retained memory, not transient allocations. Warm up
 	first and track arrayBuffers separately; inspect hot-path code/profiles as well.
+	ArrayBuffer delta can go negative if the second GC collects warmup leftovers; bound
+	growth, do not require a zero delta.
+
+## mantle field
+
+	Tm(t) = Tfloor + (Tm0 − Tfloor) exp(−t/τ_cool). Map start Tm0 = 1, hot start 1.6.
+	Scale ∇ₛΦ+β r×∇ₛΨ so the mean cell speed equals U0 Tm^2.5 at t=0; RMS-vs-mean
+	would leave a ~8 % unit mismatch in the acceptance band.
+	A lookup image of cell-quantized u always has grid-scale Fourier energy. Banding
+	checks must sample the analytic field on spherical directions.
+
+## discrete divergence on the dual
+
+	Σ_j n_ij L_ij is not zero (tens of km of leftover). Midpoint flux
+	0.5 (u_i+u_j)·n L therefore reports a large fake divergence for a rigid Ω×r field.
+	Use 0.5 (u_j−u_i)·n L / A; it annihilates rigid motion to ~1e-5 /Myr at L5.
+
+## prescribed omega
+
+	K10 overwrites ω. Transport tests (Phase A raster bench) set state.fixedOmega so
+	the frame loop keeps integrate + move/bin/raster only.
