@@ -3,11 +3,11 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width,initial-scale=1">
-	<title>Planet Geotectonics · Metallogeny</title>
+	<title>Planet Geotectonics · CPU Release</title>
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="eyebrow">Phase F — Metallogeny</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
+	<header><div class="eyebrow">Phase G — CPU release</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
 	<main>
 		<div class="heading"><div><p>Plates rift apart, suture back together, and the planet cools — and the crust keeps the record of where the metal was.</p></div></div>
 		<section class="map-panel" aria-label="Planet map">
@@ -20,11 +20,12 @@
 			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button>
 			<label>Time step<select id="dt"><option value="0.01">10,000 years</option><option value="0.02">20,000 years</option><option value="0.05">50,000 years</option><option value="0.1" selected>100,000 years</option></select></label>
 			<label>Steps / frame<select id="speed"><option>1</option><option>5</option><option>20</option></select></label>
+			<label>Run to<input id="run-to" type="number" min="0" max="10000" step="100" value="4500"></label><button id="run-to-start">Run to target</button>
 			<label>Start<select id="start"><option value="map" selected>Map start</option><option value="hot">Hot start</option></select></label>
 			<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
 			<button id="save">Save world</button><button id="deposits">Deposits JSON</button><label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
 		</section>
-		<section class="notes"><div><h2>06 / Metallogeny</h2><p>Every million years the plate table is rebuilt: consumed columns are compacted, plates that stopped moving relative to a neighbour suture into it, plates that lost their last column disappear, and a damaged corridor that the mantle flow is pulling apart becomes a new plate with its own rotation.</p><p class="muted">Six saturating potentials accumulate where the geologic factory runs: VMS at ridges, mafic under plumes, arc behind trenches (enriched by whatever that plate is subducting), orogenic in collision belts, basin and placer where sediment lands. Deposit extraction blurs each field one cell and lists its ranked maxima with a context tag. The mantle cools on a 2.5 Gyr exponential, so flow, slab pull, ridge push and lithosphere strength all fade together. Hot starts have no continents: every craton in the map is built by arcs and collisions. Snapshots every 20 Myr can be saved to a file and loaded back.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
+		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
 	</main>
 	<script src="js/geodesics.js"></script>
 	<script src="js/params.js"></script>

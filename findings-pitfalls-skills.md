@@ -276,3 +276,41 @@
 	megamorphic property load that cost 2.07 ms/step until the six arrays were hoisted into
 	locals (0.28 ms). And the belt dilation belongs in the edge pass that finds the belt, not
 	in a per-column ring scan: belt edges are few, continental columns are many.
+
+## bounded vector lengths in hot JS kernels
+
+	Math.hypot is deliberately robust against overflow and underflow; V8 pays for that scaling
+	even when every vector is a bounded unit direction, velocity or slope. In the L5 frame,
+	replacing the three high-count hypot calls with sqrt(x*x+y*y+z*z) moved 17.7 -> 14.8
+	ms/step in the same session: mantle 5.40 -> 3.36, edges 2.80 -> 2.36, surface 2.83 ->
+	2.23 ms. Keep hypot for setup and quaternion normalization, where it is called only per
+	plate. The hot replacements are safe because their operands are physically capped and
+	cannot approach floating-point overflow or underflow.
+
+	The same pass removed work that is constant for the life of a grid: K4's squared gap chord,
+	K6's squared contact chord, edge tangent r x n, finite-volume n*L/(2A), and symmetric
+	collapse weights. Compute those once in Grid/State. Combining mass, ore and rigid checks in
+	one diagnostic column traversal, and comparing squared rigid error until the final sqrt,
+	cut K11 from about 1.2 to 0.6-0.9 ms/step. L5's strict node proxy then measures 65-68
+	steps/s; keep a 40 steps/s development floor because shared CI load is not a calibration.
+
+## calibration resolution and duration
+
+	A low-resolution sweep is useful for checking plumbing, not choosing release defaults.
+	At L3/300 Myr the scaled fragment floor is only six cells: the dt 0.02 baseline reaches 55
+	plates and 43% continents while the established L5/1500 Myr baseline has 30 plates and 19%
+	continents. Event frames also dominate a sampled boundary-flicker ratio on the coarse mesh.
+	Use experiments/sweep.js --quick only as a smoke test; make parameter decisions from L5,
+	1500 Myr rows at both dt values. Sweep U0, vSlab, kArc and kCollapse one factor at a time
+	before trying a Cartesian neighbourhood: one full L5 fine-dt trajectory is already tens
+	of thousands of coupled frames, and low-resolution ranking does not transfer.
+
+## CPU release history
+
+	The L5 seed-7 release profile reaches 4500 Myr at dt 0.1 with finite state, exact ledgers,
+	21 plates, 13.5% continental columns, 4.9% cratons and 1.27 cm/yr mean speed at Tm 0.56.
+	At the 1500 Myr acceptance epoch it has 18.8% continents; the 500-1000 Myr mean is 6.06
+	cm/yr. The dt 0.01 history at 500 Myr remains statistical rather than pointwise: 30 vs 32
+	plates, 19.9 vs 20.1% continents, and 7.15 vs 5.87 cm/yr. Exact trajectories diverge from
+	minute floating-order changes, so release gates must stay on invariants and declared
+	statistics, never column identity after thousands of frames.

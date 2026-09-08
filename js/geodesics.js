@@ -272,7 +272,8 @@ Grid.prototype.build = function () {
 	var flatPos = new Float64Array(V * 3), A0 = new Float64Array(V);
 	var flatRing = new Int32Array(V * 6).fill(-1), ringN = new Uint8Array(V);
 	var nbrDist = new Float64Array(V), edgeLen = new Float64Array(V * 6);
-	var faceN = new Float64Array(V * 18);
+	var faceN = new Float64Array(V * 18), faceT = new Float64Array(V * 18);
+	var fluxN = new Float64Array(V * 18), collapseWeight = new Float64Array(V * 6);
 	// Least-squares tangent gradient operator per cell: grad z = gradInv · Σ (z_j − z_i) r_j.
 	// Exact for tangent-linear fields, so ridge push sees no grid-scale noise.
 	var gradInv = new Float64Array(V * 9), mom = new Float64Array(9), inv = new Float64Array(9);
@@ -288,7 +289,16 @@ Grid.prototype.build = function () {
 			nbrDist[c] += nbrA[packed + 2] / ringN[c];
 			var dot = Grid.dot(pos[c], pos[j]);
 			var normal = Grid.norm([pos[j][0] - dot * pos[c][0], pos[j][1] - dot * pos[c][1], pos[j][2] - dot * pos[c][2]]);
-			faceN.set(normal, e * 3);
+			var eb = e * 3;
+			faceN.set(normal, eb);
+			faceT[eb] = pos[c][1] * normal[2] - pos[c][2] * normal[1];
+			faceT[eb + 1] = pos[c][2] * normal[0] - pos[c][0] * normal[2];
+			faceT[eb + 2] = pos[c][0] * normal[1] - pos[c][1] * normal[0];
+			var fluxScale = 0.5 * edgeLen[e] / A0[c];
+			fluxN[eb] = normal[0] * fluxScale;
+			fluxN[eb + 1] = normal[1] * fluxScale;
+			fluxN[eb + 2] = normal[2] * fluxScale;
+			collapseWeight[e] = 0.5 * (1 / ringN[c] + 1 / rings[j].length);
 			var dx = pos[j][0] - pos[c][0] - pos[c][0] * (dot - 1);
 			var dy = pos[j][1] - pos[c][1] - pos[c][1] * (dot - 1);
 			var dz = pos[j][2] - pos[c][2] - pos[c][2] * (dot - 1);
@@ -308,7 +318,8 @@ Grid.prototype.build = function () {
 
 	return {
 		level: level, seed: seed, V: V, W: W, H: H, cellA: cellA, cellB: cellB,
-		pos: flatPos, A0: A0, ring: flatRing, ringN: ringN, nbrDist: nbrDist, edgeLen: edgeLen, faceN: faceN,
+		pos: flatPos, A0: A0, ring: flatRing, ringN: ringN, nbrDist: nbrDist, edgeLen: edgeLen,
+		faceN: faceN, faceT: faceT, fluxN: fluxN, collapseWeight: collapseWeight,
 		gradInv: gradInv, land: land,
 		nbrA: nbrA, nbrB: nbrB, indices: indices,
 		lookup: lookup, lookupW: lookupW, lookupH: lookupH,

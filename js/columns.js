@@ -1,6 +1,5 @@
 var ColumnQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : Quat;
 var ColumnParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
-var ColumnGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
 var Columns = {
 	climb: function (s, c, x, y, z) {
 		var g = s.grid, pos = g.pos, steps = 0;
@@ -53,8 +52,7 @@ var Columns = {
 					best = d; owner = i;
 				}
 			}
-			var threshold = ColumnGrid.chord(ColumnParams.rGap * g.nbrDist[c]);
-			if (best > threshold * threshold) owner = -1;
+			if (best > s.gapLimit2[c]) owner = -1;
 			s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
 			s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
 			if (owner < 0) { s.gaps++; s.z[c] = NaN; continue; }

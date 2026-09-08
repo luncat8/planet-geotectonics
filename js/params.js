@@ -1,8 +1,12 @@
-var Params = Object.freeze({
+// Sealed rather than frozen so experiments/sweep.js can tune existing keys without allowing
+// misspelled parameters to enter the runtime configuration.
+var Params = Object.seal({
 	level: 5, seed: 7, dt: 0.1, radius: 6371000, plateCap: 128, plateCount: 16,
 	rGap: 0.75, rSpawn: 0.85, rContact: 0.6, donors: 3, gapPersist: 2, fillDelay: 20, sedScrape: 0.5, riftDamage: 0.6,
 	hRiftBreakup: 15000, hOceanic: 8000, hCollapse: 50000, collThickness: 1,
 	epsHi: 2000, epsLo: 1000, vRef: 50000, vMax: 200000, vSuture: 3000, tauOmega: 0.5,
+	// Phase G one-factor calibration baseline: 6.06 cm/yr at 500–1000 Myr, 18.8% continental
+	// area at 1500 Myr, bounded relief and all six ore factories populated (seed 7, L5).
 	U0: 50000, beta: 0.5, Ea: 3, vSlab: 1e6, kRidge: 5e6, vColl: 2e5, ageSlab: 70,
 	kArc: 65, arcMafShare: 0.3, zTrench: 3000, tauDyn: 10, kFlex: 0.05, kCollapse: 0.02,
 	zPlume: 1000, tauPlume: 50, kLip: 30,

@@ -1,11 +1,14 @@
 // Phase E long run: a hot start cooled for 1500 Myr at dt 0.1, and 300 Myr at dt 0.01 to show
 // the world does not depend on the frame step. Acceptance 3 (plate speeds, continental area,
-// cratons) and the plan's plate-count window are checked per epoch; acceptance 6 (4500 Myr)
-// and the Tm < 0.45 stagnant lid are Phase G work, since Tm only reaches 0.45 at 6.3 Gyr on
-// this cooling schedule.
+// cratons) and the plan's plate-count window are checked per epoch. Pass --release for
+// acceptance 6's 4500 Myr / dt 0.1 and 500 Myr / dt 0.01 histories without making every
+// development test run take that long.
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Params = require('../js/params.js');
 const EPOCH = 100;
+const RELEASE = process.argv.includes('--release');
+const COARSE_MYR = RELEASE ? 4500 : 1500;
+const FINE_MYR = RELEASE ? 500 : 300;
 
 function epochStats(s) {
 	let n = 0, continental = 0, craton = 0;
@@ -37,8 +40,8 @@ function history(dt, myr) {
 	return { s, epochs, seconds: (performance.now() - start) / 1000 };
 }
 
-const long = history(0.1, 1500);
-console.log('dt 0.1, hot start, 1500 Myr in ' + long.seconds.toFixed(0) + ' s');
+const long = history(0.1, COARSE_MYR);
+console.log('dt 0.1, hot start, ' + COARSE_MYR + ' Myr in ' + long.seconds.toFixed(0) + ' s');
 for (const e of long.epochs) {
 	console.log('  t ' + e.t.toFixed(0).padStart(4) + ' plates ' + String(e.plates).padStart(3)
 		+ ' cols ' + String(e.columns).padStart(5) + ' cont ' + (e.continental * 100).toFixed(1).padStart(5) + '%'
@@ -48,6 +51,7 @@ for (const e of long.epochs) {
 		+ ' snapshots ' + e.snapshots);
 }
 const last = long.epochs[long.epochs.length - 1];
+const acceptance = long.epochs[Math.round(1500 / EPOCH) - 1];
 for (const e of long.epochs) {
 	// finite covers NaN, plate ids outside the dense table, and a potential above saturation.
 	assert.equal(e.finite, 1, 'state invariant (finite, plate ids, saturation) at t ' + e.t);
@@ -60,18 +64,19 @@ for (const e of long.epochs) {
 const middle = long.epochs.filter(e => e.t >= 500 && e.t <= 1000);
 const middleMean = middle.reduce((a, e) => a + e.meanCm, 0) / middle.length;
 assert.ok(middleMean >= 1 && middleMean <= 10, 'middle epoch speed ' + middleMean.toFixed(2) + ' cm/yr');
-assert.ok(last.continental >= 0.15 && last.continental <= 0.4, 'continental area ' + last.continental);
-assert.ok(last.craton > 0, 'cratons must exist by 1500 Myr');
-assert.ok(last.splits >= 1 && last.merges >= 1, 'a world that never rearranges is not plate tectonics');
+assert.ok(acceptance.continental >= 0.15 && acceptance.continental <= 0.4, 'continental area ' + acceptance.continental);
+assert.ok(acceptance.craton > 0, 'cratons must exist by 1500 Myr');
+assert.ok(acceptance.splits >= 1 && acceptance.merges >= 1, 'a world that never rearranges is not plate tectonics');
 assert.equal(last.snapshots, Params.ckptCap, 'the checkpoint ring fills up on a long run');
-console.log('PASS longrun 1500 Myr: no NaN, invariants exact, plates 6-40, middle epoch '
-	+ middleMean.toFixed(2) + ' cm/yr, continental ' + (last.continental * 100).toFixed(1) + '%, '
+console.log('PASS longrun ' + COARSE_MYR + ' Myr: no NaN, invariants exact, plates 6-40, middle epoch '
+	+ middleMean.toFixed(2) + ' cm/yr, continental at 1500 Myr ' + (acceptance.continental * 100).toFixed(1) + '%, '
 	+ last.splits + ' splits and ' + last.merges + ' merges');
 
-const short = history(0.01, 300);
-const coarse = long.epochs[2];                 // the same 300 Myr on the 100 kyr step
+const short = history(0.01, FINE_MYR);
+const coarse = long.epochs[Math.round(FINE_MYR / EPOCH) - 1];
 const fine = short.epochs[short.epochs.length - 1];
-console.log('dt 0.01, 300 Myr in ' + short.seconds.toFixed(0) + ' s vs the dt 0.1 run at 300 Myr:',
+console.log('dt 0.01, ' + FINE_MYR + ' Myr in ' + short.seconds.toFixed(0)
+	+ ' s vs the dt 0.1 run at ' + FINE_MYR + ' Myr:',
 	{ plates: [coarse.plates, fine.plates], meanCm: [+coarse.meanCm.toFixed(2), +fine.meanCm.toFixed(2)],
 		continental: [+coarse.continental.toFixed(3), +fine.continental.toFixed(3)],
 		splits: [coarse.splits, fine.splits], merges: [coarse.merges, fine.merges] });
@@ -84,4 +89,4 @@ for (const e of short.epochs) {
 assert.ok(Math.abs(fine.plates - coarse.plates) <= 6, 'plate count drifts with dt');
 assert.ok(Math.abs(fine.meanCm - coarse.meanCm) < 0.25 * coarse.meanCm, 'speed drifts with dt');
 assert.ok(Math.abs(fine.continental - coarse.continental) < 0.05, 'continental area drifts with dt');
-console.log('PASS longrun: 300 Myr at dt 0.01 matches dt 0.1 at the statistics level');
+console.log('PASS longrun: ' + FINE_MYR + ' Myr at dt 0.01 matches dt 0.1 at the statistics level');

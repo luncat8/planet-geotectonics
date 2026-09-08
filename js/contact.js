@@ -2,7 +2,6 @@ var ContactParams = typeof module !== 'undefined' && module.exports ? require('.
 var ContactQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : Quat;
 var ContactMantle = typeof module !== 'undefined' && module.exports ? require('./mantle.js') : Mantle;
 var ContactEdges = typeof module !== 'undefined' && module.exports ? require('./edges.js') : Edges;
-var ContactGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
 // K6 CONTACT (scan: mark own records) and K7 APPLY (gather from marked records).
 // Every cross-column transfer is a mark here plus a pull there, so the GPU port needs no
 // atomics in the state path and the CPU result does not depend on traversal order.
@@ -41,8 +40,7 @@ var Contact = {
 			var c = s.cell[i];
 			if (c < 0) continue;
 			var wi = i * 3, wx = s.world[wi], wy = s.world[wi + 1], wz = s.world[wi + 2];
-			var limit = ContactGrid.chord(ContactParams.rContact * g.nbrDist[c]);
-			var best = limit * limit, other = -1;
+			var best = s.contactLimit2[c], other = -1;
 			var dx = 0, dy = 0, dz = 0, own = s.plate[i];
 			for (var k = -1; k < g.ringN[c]; k++) {
 				var bin = k < 0 ? c : g.ring[c * 6 + k];
@@ -136,8 +134,7 @@ var Contact = {
 			}
 			// An opposing plate already in contact would turn the newborn into an overlap next
 			// frame: spawn/consume oscillation at slow boundaries. Leave the cell empty instead.
-			var reach = ContactGrid.chord(p.rContact * g.nbrDist[c]);
-			if (i0 < 0 || foreign <= reach * reach) continue;
+			if (i0 < 0 || foreign <= s.contactLimit2[c]) continue;
 			if (s.n + s.spawns >= s.colCap) break;
 			var slot = s.n + s.spawns++;
 			s.spawnSlot[c] = slot;

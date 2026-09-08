@@ -19,8 +19,7 @@ var ColumnUpdate = {
 				if (j <= c) continue;
 				var oj = s.owner[j];
 				if (oj < 0 || oj === oi || Math.max(s.hFel[oi], s.hFel[oj]) <= p.hCollapse) continue;
-				var flux = p.kCollapse * dt * (s.hFel[oj] - s.hFel[oi])
-					* 0.5 * (1 / g.ringN[c] + 1 / g.ringN[j]);
+				var flux = p.kCollapse * dt * (s.hFel[oj] - s.hFel[oi]) * g.collapseWeight[c * 6 + k];
 				delta[oi] += flux; delta[oj] -= flux;
 			}
 		}
