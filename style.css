@@ -17,6 +17,9 @@ p { font-size: 14px; line-height: 1.7; color: #aab9bd; margin: 10px 0 0; }
 .map-top label { display: flex; align-items: center; gap: 10px; }
 .map-bottom { font-size: 9px; }
 canvas { display: block; cursor: crosshair; max-height: 60vh;}
+.perf { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; padding: 7px 10px; border-top: 1px solid #2b3540;
+	background: #101922; color: #80d7b9; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.perf span:last-child { color: #788c99; }
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 10px 0; border-bottom: 1px solid #2b3540; }
 .controls label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #aab9bd; }
 button, select, input { font: inherit; border: 1px solid #3c4b57; border-radius: 5px; background: #1a2632; color: #e1e8eb; padding: 10px 12px; min-height: 39px; }

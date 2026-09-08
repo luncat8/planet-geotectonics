@@ -66,3 +66,82 @@
 
 	K10 overwrites ω. Transport tests (Phase A raster bench) set state.fixedOmega so
 	the frame loop keeps integrate + move/bin/raster only.
+
+## crust flux accounting (Phase C conveyor rig)
+
+	two counter-rotating hemispheres about ±x̂ with |ω| = W share the equator as their
+	boundary; relN = 2WR sin φ, so each half carries ∫|relN| dl = 4WR² of area flux.
+	do not use "speed × trench length": a rigid rotation is transform almost everywhere and
+	its normal speed vanishes at two points.
+	the sim's own measured divergent flux under-counts the analytic 4WR² by ~33 % (395 529 vs
+	637 100 km²/Myr at L4) because a jagged ridge leaves many of its edges classified
+	TRANSFORM or INTERIOR. Assert the analytic value on a prescribed-ω rig; the convergent
+	side measures fine (578 166 measured vs 642 771 consumed).
+	cumulative consumed/flux is not assertable from t = 0: the 0.6 d contact threshold against
+	d initial spacing takes one extra bite of ≈ 0.4 d L (4.5e12 m² at L4), 70 % of a 10 Myr
+	total. Warm up, then rebase, then measure.
+
+## spawn threshold (why rSpawn sits above rGap)
+
+	at the raster's 0.75 d gap threshold both cells of an opening pair gap in the same frame
+	and each spawns, so the ridge makes 37 % more crust than divergence pays for and the
+	column count grows without bound. L4, 160 Myr, analytic flux 4WR²:
+	  rSpawn 0.75: consumed 1.129 spawned 1.371 cols 1.0484 | 0.85: 1.002 / 0.943 / 0.9883
+	  rSpawn 1.00: consumed 1.002 spawned 0.764 cols 0.9524
+	L5 sweep of the same rig (current code, with the fillDelay fallback):
+	  0.80 1.023 1.211 1.0379 | 0.83 1.006 1.095 1.0181 | 0.85 1.004 1.029 1.0053
+	  0.87 1.003 0.979 0.9953 | 0.90 1.003 0.926 0.9849   (consumed / spawned / cols÷V)
+	the 2-ring donor search is NOT the limiter: replacing the cell∪ring scan with a flat
+	two-hop list left the sweep bit-identical. Kept because a fresh gap needs a donor one
+	cell outside its own ring.
+	census at rSpawn = 1.0 (L4): 26 552 gap cell-frames, 25 819 still below threshold, 147
+	eligible, 147 spawned, reject rate 0.000. The deficit is geometric — one spawn inhibits
+	its neighbours within rSpawn·d — not donor starvation.
+	rSpawn leaves packing holes: a cell 0.77–0.83 d from every neighbour, ring all one plate.
+	fillDelay = 20 Myr fills them, and a rift cell crosses 0.75 → 0.85 d in 4.5 Myr at
+	1 cm/yr (0.9 Myr at 5 cm/yr), so the fallback never fires at a live ridge.
+
+## mass ledger leaks (found with per-stage identity checks)
+
+	check Σ h + produced − subducted − const after each stage; the stage that breaks it is the
+	leak. Three were real:
+	  spawn thinned the donors before choosing the branch, and the oceanic branch discarded
+	  newFel — crust vanished at every ridge.
+	  C–C collision dropped the loser's hMaf. It is delamination: book it as subductedMaf.
+	  subduction dropped the loser's hFel. Felsic crust is too buoyant to subduct, so accrete
+	  it onto the overriding column; Σ hFel then has arc production as its only source. Watch
+	  that accretion can push an oceanic overrider past hFel = 8 km and flip its polarity.
+	state.rebase() must zero producedFel / producedMaf / subductedMaf / subductedSed as well
+	as re-anchor the mass baselines. Otherwise a warm-up's accumulators reappear as a 0.032
+	"maf residual" in the measured window that looks like drift but is not.
+
+## arc growth calibration
+
+	design §11's kArc = 8000 grows arc cells past 100 km of crust in 100 Myr. Calibrating
+	Earth's 2.3 km³/yr against the rate-weighted arc area (L5: 1027 arc cells, 7.04 % of the
+	surface, 3.593e13 m²) gives 64; params use 65, arc max 41 km after 160 Myr.
+
+## units on the unit sphere
+
+	column and cell geometry is unit-sphere, thresholds are metres: chord = 2 sin(d/2R).
+	comparing chord² against a metre threshold silently accepts everything — 0.6 d at L5 is
+	chord² 2.8e-8 against 3.7e11 m².
+
+## spherical gradient (gradInv)
+
+	least-squares tangent gradient, grad z = gradInv · Σ (z_j − z_i) r_j, tangent-projected
+	after the solve. Constant field → exactly zero, so there is no additive bias.
+	latitude field (|y| < 0.9): worst |mag − 1| 1.14e-2 at L3 and 6.57e-3 at L5, worst
+	direction error 5.43e-4 / 3.45e-5, mean magnitude 1.0011 / 1.00006.
+	a degree-1 harmonic reconstructs to 3.7e-2 — fine for ridge push and routing, not for
+	anything that needs an exact ∇.
+
+## performance counter
+
+	L5, node, 300 steps at dt 0.1: 12.9 ms/step = 77.5 frames/s. Kernel split (ms/step):
+	mantle 5.34, edges 2.88, raster 1.24, contact 1.05, forces 0.60, diag 0.55, apply 0.45,
+	move 0.42, reduce 0.21, bin 0.11, column 0.03, events 0.01.
+	the mantle harmonic evaluation dominates the CPU budget; it is the first WebGPU candidate.
+	smooth with an EMA on the frame gap (τ 500 ms) and on the step time (τ 250 ms), and
+	rebuild the HUD text at 2 Hz: per-frame string concatenation is not free, and at 2 Hz the
+	text rebuild touches 1.7 % of the frames.

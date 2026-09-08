@@ -20,6 +20,15 @@ var Quat = {
 		out[o] = x + qw * tx + qy * tz - qz * ty;
 		out[o + 1] = y + qw * ty + qz * tx - qx * tz;
 		out[o + 2] = z + qw * tz + qx * ty - qy * tx;
+	},
+	// world -> body, i.e. rotation by the conjugate. Used to rebase a column onto its plate.
+	rotateInv: function (out, o, q, p, body, b) {
+		var x = body[b], y = body[b + 1], z = body[b + 2];
+		var qx = -q[p], qy = -q[p + 1], qz = -q[p + 2], qw = q[p + 3];
+		var tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+		out[o] = x + qw * tx + qy * tz - qz * ty;
+		out[o + 1] = y + qw * ty + qz * tx - qx * tz;
+		out[o + 2] = z + qw * tz + qx * ty - qy * tx;
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Quat;

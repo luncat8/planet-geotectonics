@@ -2,8 +2,8 @@ const { assert } = require('./helpers.js');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const context = vm.createContext({ console });
-for (const file of ['geodesics', 'params', 'quat', 'mantle', 'state', 'columns', 'plates', 'edges', 'diag', 'sim', 'render']) {
+const context = vm.createContext({ console, performance });
+for (const file of ['geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'events', 'perf', 'sim', 'render']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
 vm.runInContext(`
@@ -17,9 +17,11 @@ var canvas = { getContext: function () { return {
 var renderer = new Renderer(canvas, state);
 renderer.draw('plate');
 Sim.advance(state, 0.1, 10);
-renderer.draw('z'); renderer.draw('owner');
+renderer.draw('z'); renderer.draw('owner'); renderer.draw('type');
+Sim.advance(state, 0.1, 190);
+renderer.draw('plate'); renderer.draw('type'); renderer.draw('z'); renderer.draw('owner');
 `, context);
-assert.equal(context.state.frame, 10);
+assert.equal(context.state.frame, 200);
 assert.equal(context.image.data.length, 1024 * 512 * 4);
 assert.equal(context.image.data[3], 255);
 const grid = context.state.grid;

@@ -3,11 +3,13 @@ var Edges = {
 	INTERIOR: 0, CONVERGENT: 1, DIVERGENT: 2, TRANSFORM: 3,
 	velocities: function (s) {
 		var g = s.grid, R = EdgeParams.radius, nP = s.plateCount, mean = 0, max = 0, n = 0;
+		s.plateCells.fill(0);
 		for (var c = 0; c < g.V; c++) {
 			var b = c * 3, owner = s.owner[c], plate = 65535;
 			if (owner >= 0) plate = s.plate[owner];
 			s.cellPlate[c] = plate;
 			if (plate >= nP) { s.vel[b] = 0; s.vel[b + 1] = 0; s.vel[b + 2] = 0; continue; }
+			s.plateCells[plate]++;
 			var x = g.pos[b], y = g.pos[b + 1], z = g.pos[b + 2], w = plate * 3;
 			var ox = s.omega[w], oy = s.omega[w + 1], oz = s.omega[w + 2];
 			var vx = R * (oy * z - oz * y), vy = R * (oz * x - ox * z), vz = R * (ox * y - oy * x);

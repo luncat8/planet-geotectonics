@@ -30,6 +30,23 @@ Grid.cross = function (a, b) {
 }
 Grid.dot = function (a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
 Grid.sub = function (a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
+// Metric surface distance -> chord between unit position vectors. Column and cell geometry is
+// unit-sphere, thresholds are metres; every distance test needs this conversion.
+Grid.chord = function (dist) { return 2 * Math.sin(dist / (2 * PLANET_R)); }
+Grid.inv3 = function (m, out) {
+	var det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+	var inv = 1 / det;
+	out[0] = (m[4] * m[8] - m[5] * m[7]) * inv;
+	out[1] = (m[2] * m[7] - m[1] * m[8]) * inv;
+	out[2] = (m[1] * m[5] - m[2] * m[4]) * inv;
+	out[3] = (m[5] * m[6] - m[3] * m[8]) * inv;
+	out[4] = (m[0] * m[8] - m[2] * m[6]) * inv;
+	out[5] = (m[2] * m[3] - m[0] * m[5]) * inv;
+	out[6] = (m[3] * m[7] - m[4] * m[6]) * inv;
+	out[7] = (m[1] * m[6] - m[0] * m[7]) * inv;
+	out[8] = (m[0] * m[4] - m[1] * m[3]) * inv;
+	return out;
+}
 
 Grid.prototype.build = function () {
 	var level = this.level, seed = this.seed;
@@ -256,10 +273,14 @@ Grid.prototype.build = function () {
 	var flatRing = new Int32Array(V * 6).fill(-1), ringN = new Uint8Array(V);
 	var nbrDist = new Float64Array(V), edgeLen = new Float64Array(V * 6);
 	var faceN = new Float64Array(V * 18);
+	// Least-squares tangent gradient operator per cell: grad z = gradInv · Σ (z_j − z_i) r_j.
+	// Exact for tangent-linear fields, so ridge push sees no grid-scale noise.
+	var gradInv = new Float64Array(V * 9), mom = new Float64Array(9), inv = new Float64Array(9);
 	for (var c = 0; c < V; c++) {
 		flatPos.set(pos[c], c * 3);
 		A0[c] = cellA[c * 4 + 3];
 		ringN[c] = rings[c].length;
+		mom.fill(0);
 		for (var k = 0; k < ringN[c]; k++) {
 			var e = c * 6 + k, packed = (c + k * W * H) * 4, j = rings[c][k];
 			flatRing[e] = j;
@@ -268,12 +289,27 @@ Grid.prototype.build = function () {
 			var dot = Grid.dot(pos[c], pos[j]);
 			var normal = Grid.norm([pos[j][0] - dot * pos[c][0], pos[j][1] - dot * pos[c][1], pos[j][2] - dot * pos[c][2]]);
 			faceN.set(normal, e * 3);
+			var dx = pos[j][0] - pos[c][0] - pos[c][0] * (dot - 1);
+			var dy = pos[j][1] - pos[c][1] - pos[c][1] * (dot - 1);
+			var dz = pos[j][2] - pos[c][2] - pos[c][2] * (dot - 1);
+			mom[0] += dx * dx; mom[1] += dx * dy; mom[2] += dx * dz;
+			mom[4] += dy * dy; mom[5] += dy * dz; mom[8] += dz * dz;
 		}
+		mom[3] = mom[1]; mom[6] = mom[2]; mom[7] = mom[5];
+		// The moment matrix is rank 2 in the tangent plane; λ r rᵀ makes it invertible and its
+		// inverse maps the radial part to r/λ, which the caller projects away.
+		var lam = mom[0] + mom[4] + mom[8], rx = pos[c][0], ry = pos[c][1], rz = pos[c][2];
+		mom[0] += lam * rx * rx; mom[1] += lam * rx * ry; mom[2] += lam * rx * rz;
+		mom[3] += lam * ry * rx; mom[4] += lam * ry * ry; mom[5] += lam * ry * rz;
+		mom[6] += lam * rz * rx; mom[7] += lam * rz * ry; mom[8] += lam * rz * rz;
+		Grid.inv3(mom, inv);
+		gradInv.set(inv, c * 9);
 	}
 
 	return {
 		level: level, V: V, W: W, H: H, cellA: cellA, cellB: cellB,
-		pos: flatPos, A0: A0, ring: flatRing, ringN: ringN, nbrDist: nbrDist, edgeLen: edgeLen, faceN: faceN, land: land,
+		pos: flatPos, A0: A0, ring: flatRing, ringN: ringN, nbrDist: nbrDist, edgeLen: edgeLen, faceN: faceN,
+		gradInv: gradInv, land: land,
 		nbrA: nbrA, nbrB: nbrB, indices: indices,
 		lookup: lookup, lookupW: lookupW, lookupH: lookupH,
 		landFraction: landCount / V,
