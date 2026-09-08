@@ -42,6 +42,11 @@ Renderer.prototype.draw = function (layer) {
 			colors[b] = this.palette[p]; colors[b + 1] = this.palette[p + 1]; colors[b + 2] = this.palette[p + 2];
 			continue;
 		}
+		if (layer === 'sediment') {
+			var sediment = Math.min(1, s.hSed[owner] / 5000);
+			colors[b] = 52 + 170 * sediment; colors[b + 1] = 42 + 110 * sediment; colors[b + 2] = 30 + 55 * sediment;
+			continue;
+		}
 		var z = s.z[c];
 		if (z < 0) {
 			var shallow = Math.max(0, 1 + z / 6500);

@@ -41,7 +41,8 @@
 			'\nFelsic ' + (state.hFel[owner] / 1000).toFixed(1) + ' km · mafic ' + (state.hMaf[owner] / 1000).toFixed(1) +
 			' km · sediment ' + (state.hSed[owner] / 1000).toFixed(1) + ' km' +
 			'\nAge ' + state.age[owner].toFixed(1) + ' Myr · elevation ' + Math.round(state.z[cell]) +
-			' m · dynamic ' + Math.round(state.zDyn[owner]) + ' m';
+			' m · slope ' + (state.slope[cell] * 100).toFixed(2) + '% · damage ' + state.damage[owner].toFixed(2) +
+			'\n' + (state.wet[cell] ? 'wet' : 'land') + ' · dynamic ' + Math.round(state.zDyn[owner]) + ' m';
 	});
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;

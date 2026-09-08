@@ -3,15 +3,15 @@
 <head>
 	<meta charset="utf-8">
 	<meta name="viewport" content="width=device-width,initial-scale=1">
-	<title>Planet Geotectonics · Crust cycle</title>
+	<title>Planet Geotectonics · Surface coupling</title>
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="eyebrow">Phase C — Crust cycle</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
+	<header><div class="eyebrow">Phase D — Surface coupling</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
 	<main>
 		<div class="heading"><div><p>Ridges create crust, trenches consume it. Boundaries classified, not prescribed.</p></div></div>
 		<section class="map-panel" aria-label="Planet map">
-			<div class="map-top"><span>EQUIRECTANGULAR / 10,242 CELLS</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="type">Boundary type</option><option value="z">Elevation preview</option><option value="owner">Column coverage</option></select></label></div>
+			<div class="map-top"><span>EQUIRECTANGULAR / 10,242 CELLS</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="type">Boundary type</option><option value="z">Elevation</option><option value="owner">Column coverage</option><option value="sediment">Sediment</option></select></label></div>
 			<canvas id="map" aria-label="Equirectangular map of moving plates">Canvas support is required.</canvas>
 			<div class="perf" id="perf"><span id="perf-main">performance counter idle</span><span id="perf-kern"></span></div>
 			<div class="map-bottom"><span>90° S</span><span>Boundary type: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</span><span>180° E</span></div>
@@ -22,7 +22,7 @@
 			<label>Steps / frame<select id="speed"><option>1</option><option>5</option><option>20</option></select></label>
 			<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
 		</section>
-		<section class="notes"><div><h2>03 / Crust cycle</h2><p>Divergence opens gaps that spawn new columns — oceanic from the mantle, or thinned from the rift flanks. Convergence brings foreign columns inside contact range: the loser is consumed, its sediment scraped into an accretionary prism, and the overriding plate grows arc crust two cells behind the trench.</p><p class="muted">Slab pull, ridge push and collision resistance now drive the plates alongside basal drag. Surface erosion and plate split/merge are later phases.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
+		<section class="notes"><div><h2>04 / Surface coupling</h2><p>Divergence opens gaps that spawn new columns — oceanic from the mantle, or thinned from the rift flanks. Convergence brings foreign columns inside contact range: the loser is consumed, its sediment scraped into an accretionary prism, and the overriding plate grows arc crust two cells behind the trench.</p><p class="muted">Isostasy, trench and plume loads, flexure, collapse, erosion and one-hop sediment routing now feed elevation back into ridge push. Split/merge and ores are later phases.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
 	</main>
 	<script src="js/geodesics.js"></script>
 	<script src="js/params.js"></script>
@@ -35,6 +35,7 @@
 	<script src="js/plates.js"></script>
 	<script src="js/contact.js"></script>
 	<script src="js/column-update.js"></script>
+	<script src="js/surface.js"></script>
 	<script src="js/events.js"></script>
 	<script src="js/perf.js"></script>
 	<script src="js/sim.js"></script>

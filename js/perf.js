@@ -4,12 +4,12 @@
 var Perf = {
 	TEXT_MS: 500, TAU_STEP: 250, TAU_FPS: 500, MIN_KERNEL_MS: 0.05,
 	NAMES: ['events', 'integrate', 'move', 'bin', 'raster', 'mantle', 'edges',
-		'contact', 'apply', 'column', 'forces', 'reduce', 'diag'],
+		'contact', 'apply', 'column', 'surface', 'forces', 'reduce', 'diag'],
 	K: {
 		EVENTS: 0, INTEGRATE: 1, MOVE: 2, BIN: 3, RASTER: 4, MANTLE: 5, EDGES: 6,
-		CONTACT: 7, APPLY: 8, COLUMN: 9, FORCES: 10, REDUCE: 11, DIAG: 12
+		CONTACT: 7, APPLY: 8, COLUMN: 9, SURFACE: 10, FORCES: 11, REDUCE: 12, DIAG: 13
 	},
-	kern: new Float64Array(13),
+	kern: new Float64Array(14),
 	stepMs: 0, frameMs: 0, fps: 0, stepsPerSec: 0, myrPerSec: 0,
 	windowSteps: 0, lastFrame: 0, lastText: 0, text: '', detail: '',
 	clock: function () {

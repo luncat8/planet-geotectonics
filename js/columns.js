@@ -58,12 +58,8 @@ var Columns = {
 			s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
 			s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
 			if (owner < 0) { s.gaps++; s.z[c] = NaN; continue; }
-			// Static isostatic preview (design §7.1); erosion and flexure belong to Phase D.
-			var ci = Math.max(0, Math.min(1, (s.hFel[owner] - 5000) / 15000));
-			ci = ci * ci * (3 - 2 * ci);
-			var therm = (1 - ci) * 350 * Math.sqrt(Math.min(s.age[owner], 80)) + ci * 2091;
-			s.z[c] = -3342 + s.hFel[owner] / 6 + (s.hMaf[owner] * 350 + s.hSed[owner] * 900) / 3300
-				- therm + s.zDyn[owner];
+			// Surface.elevation is authoritative after raster; leaving the old value here keeps
+			// MOVE/BIN/RASTER a pure ownership kernel and avoids a second isostasy implementation.
 		}
 	}
 };
