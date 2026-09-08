@@ -1,0 +1,32 @@
+The longrun --release completed in 1358 seconds.
+ 
+   t 2600 plates  26 cols  8382 cont  15.8% craton  3.89% mean  2.99 cm/yr max  7.02 Tm 0.79 splits  87 merges  77 snapshots 16
+  t 2700 plates  29 cols  8367 cont  16.5% craton  4.16% mean  3.30 cm/yr max  7.99 Tm 0.77 splits  91 merges  78 snapshots 16
+  t 2800 plates  28 cols  8362 cont  16.7% craton  4.59% mean  2.84 cm/yr max  6.89 Tm 0.76 splits  91 merges  79 snapshots 16
+  t 2900 plates  27 cols  8431 cont  16.2% craton  4.64% mean  2.89 cm/yr max  7.27 Tm 0.74 splits  91 merges  80 snapshots 16
+  t 3000 plates  24 cols  8451 cont  16.4% craton  4.77% mean  2.82 cm/yr max  7.27 Tm 0.73 splits  92 merges  84 snapshots 16
+  t 3100 plates  23 cols  8487 cont  16.4% craton  4.89% mean  2.56 cm/yr max  7.83 Tm 0.71 splits  93 merges  86 snapshots 16
+  t 3200 plates  23 cols  8407 cont  16.6% craton  5.35% mean  2.39 cm/yr max  7.66 Tm 0.70 splits  93 merges  86 snapshots 16
+  t 3300 plates  22 cols  8424 cont  16.0% craton  5.27% mean  2.25 cm/yr max  6.05 Tm 0.68 splits  93 merges  87 snapshots 16
+  t 3400 plates  21 cols  8408 cont  15.7% craton  5.20% mean  2.26 cm/yr max  5.14 Tm 0.67 splits  94 merges  89 snapshots 16
+  t 3500 plates  21 cols  8455 cont  15.0% craton  4.70% mean  1.94 cm/yr max  5.32 Tm 0.66 splits  95 merges  90 snapshots 16
+  t 3600 plates  20 cols  8474 cont  14.8% craton  5.29% mean  1.95 cm/yr max  5.06 Tm 0.65 splits  95 merges  91 snapshots 16
+  t 3700 plates  20 cols  8456 cont  14.8% craton  5.10% mean  2.07 cm/yr max  5.62 Tm 0.63 splits  95 merges  91 snapshots 16
+  t 3800 plates  21 cols  8441 cont  14.5% craton  4.98% mean  1.73 cm/yr max  4.74 Tm 0.62 splits  96 merges  91 snapshots 16
+  t 3900 plates  22 cols  8428 cont  13.6% craton  4.34% mean  1.79 cm/yr max  4.96 Tm 0.61 splits  97 merges  91 snapshots 16
+  t 4000 plates  23 cols  8403 cont  13.8% craton  4.71% mean  1.42 cm/yr max  5.50 Tm 0.60 splits  98 merges  91 snapshots 16
+  t 4100 plates  22 cols  8451 cont  13.9% craton  4.80% mean  1.57 cm/yr max  3.80 Tm 0.59 splits  98 merges  92 snapshots 16
+  t 4200 plates  21 cols  8438 cont  14.0% craton  4.81% mean  1.45 cm/yr max  4.90 Tm 0.58 splits  98 merges  93 snapshots 16
+  t 4300 plates  21 cols  8396 cont  14.3% craton  4.94% mean  1.34 cm/yr max  3.75 Tm 0.57 splits  98 merges  93 snapshots 16
+  t 4400 plates  21 cols  8482 cont  13.9% craton  4.76% mean  1.43 cm/yr max  4.26 Tm 0.57 splits  98 merges  93 snapshots 16
+  t 4500 plates  21 cols  8421 cont  13.5% craton  4.86% mean  1.27 cm/yr max  3.14 Tm 0.56 splits  98 merges  93 snapshots 16
+PASS longrun 4500 Myr: no NaN, invariants exact, plates 6-40, middle epoch 6.06 cm/yr, continental at 1500 Myr 18.8%, 98 splits and 93 merges
+dt 0.01, 500 Myr in 696 s vs the dt 0.1 run at 500 Myr: {
+  plates: [ 32, 30 ],
+  meanCm: [ 5.87, 7.15 ],
+  continental: [ 0.201, 0.199 ],
+  splits: [ 48, 53 ],
+  merges: [ 32, 39 ]
+}
+PASS longrun: 500 Myr at dt 0.01 matches dt 0.1 at the statistics level
+exit=0
