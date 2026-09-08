@@ -2,25 +2,32 @@
 	var canvas = document.getElementById('map');
 	var play = document.getElementById('play'), step = document.getElementById('step');
 	var dtInput = document.getElementById('dt'), speedInput = document.getElementById('speed');
+	var runToInput = document.getElementById('run-to'), runToStart = document.getElementById('run-to-start');
 	var seedInput = document.getElementById('seed'), layerInput = document.getElementById('layer');
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var perfMain = document.getElementById('perf-main'), perfKern = document.getElementById('perf-kern');
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
-	var renderer = new Renderer(canvas, state), playing = false, dirty = true, lastUpdate = 0;
+	var renderer = new Renderer(canvas, state), playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
 	Sim.raster(state);
 	Perf.reset();
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
 		play.setAttribute('aria-pressed', String(playing)); step.disabled = playing;
 	}
-	play.addEventListener('click', function () { setPlaying(!playing); });
-	step.addEventListener('click', function () { Sim.step(state, +dtInput.value); dirty = true; });
+	play.addEventListener('click', function () { runTarget = Infinity; setPlaying(!playing); });
+	step.addEventListener('click', function () { runTarget = Infinity; Sim.step(state, +dtInput.value); dirty = true; });
+	runToStart.addEventListener('click', function () {
+		if (!runToInput.checkValidity()) { runToInput.reportValidity(); return; }
+		runTarget = +runToInput.value;
+		if (runTarget <= state.t) { probe.textContent = 'Run-to target must be later than the current time.'; return; }
+		setPlaying(true);
+	});
 	layerInput.addEventListener('change', function () { dirty = true; });
 	document.getElementById('reset').addEventListener('click', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
-		setPlaying(false);
+		setPlaying(false); runTarget = Infinity;
 		grid = new Grid(Params.level, +seedInput.value).build();
 		state = new State(grid, +seedInput.value, startInput.value === 'hot');
 		renderer.state = state;
@@ -51,7 +58,7 @@
 		var reader = new FileReader();
 		reader.onload = function () {
 			try {
-				setPlaying(false);
+				setPlaying(false); runTarget = Infinity;
 				Checkpoint.load(state, new Uint8Array(reader.result));
 				Sim.raster(state);
 				dirty = true;
@@ -90,7 +97,14 @@
 	});
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
-		if (playing) { steps = +speedInput.value; Sim.advance(state, dt, steps); dirty = true; }
+		if (playing) {
+			steps = +speedInput.value;
+			if (runTarget < Infinity) steps = Math.min(steps, Math.max(0, Math.ceil((runTarget - state.t) / dt - 1e-9)));
+			if (steps > 0) { Sim.advance(state, dt, steps); dirty = true; }
+			if (runTarget < Infinity && state.t >= runTarget - dt * 0.5) {
+				runTarget = Infinity; setPlaying(false);
+			}
+		}
 		if (dirty) { renderer.draw(layerInput.value); dirty = false; }
 		Perf.frame(now, steps, dt);
 		if (Perf.due(now)) {

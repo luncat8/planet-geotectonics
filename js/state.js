@@ -82,6 +82,16 @@ function State(grid, seed, hot) {
 	this.entries = new Uint32Array(this.colCap);
 	this.owner = new Int32Array(grid.V);
 	this.distance = new Float64Array(grid.V);
+	// Static unit-sphere distance thresholds. Keeping sin() out of K4/K6 saves two
+	// transcendental calls per covered cell without changing the contact geometry.
+	this.gapLimit2 = new Float64Array(grid.V);
+	this.contactLimit2 = new Float64Array(grid.V);
+	for (var limitCell = 0; limitCell < grid.V; limitCell++) {
+		var gapChord = StateGrid.chord(StateParams.rGap * grid.nbrDist[limitCell]);
+		var contactChord = StateGrid.chord(StateParams.rContact * grid.nbrDist[limitCell]);
+		this.gapLimit2[limitCell] = gapChord * gapChord;
+		this.contactLimit2[limitCell] = contactChord * contactChord;
+	}
 	this.z = new Float64Array(grid.V);
 	this.wet = new Uint8Array(grid.V);
 	this.gradZ = new Float64Array(grid.V * 3);

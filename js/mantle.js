@@ -32,9 +32,9 @@ var Mantle = {
 		for (var w = 0; w < p.nWave; w++) {
 			if (phiOnly && w >= p.nPhi) continue;
 			var a = w * 3, dx = s.waveDir[a], dy = s.waveDir[a + 1], dz = s.waveDir[a + 2];
-			var ampK = s.waveAmp[w] * s.waveFreq[w] * Math.cos(s.waveFreq[w] * (dx * x + dy * y + dz * z) + s.wavePhase[w]);
+			var dot = dx * x + dy * y + dz * z;
+			var ampK = s.waveAmp[w] * s.waveFreq[w] * Math.cos(s.waveFreq[w] * dot + s.wavePhase[w]);
 			if (w < p.nPhi) {
-				var dot = dx * x + dy * y + dz * z;
 				ux += ampK * (dx - dot * x);
 				uy += ampK * (dy - dot * y);
 				uz += ampK * (dz - dot * z);
@@ -98,7 +98,8 @@ var Mantle = {
 				var dot = Math.max(-1, Math.min(1, px * x + py * y + pz * z));
 				var h = s.plumeStr[k] * s.Tm * Math.exp(-(1 - dot) * invSig);
 				heat += h;
-				var tx = x * dot - px, ty = y * dot - py, tz = z * dot - pz, tm = Math.hypot(tx, ty, tz);
+				var tx = x * dot - px, ty = y * dot - py, tz = z * dot - pz;
+				var tm = Math.sqrt(tx * tx + ty * ty + tz * tz);
 				if (tm < 1e-12) continue;
 				var flow = speed * h / tm;
 				ux += flow * tx; uy += flow * ty; uz += flow * tz;

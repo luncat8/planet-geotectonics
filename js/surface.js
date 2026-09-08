@@ -61,7 +61,7 @@ var Surface = {
 			var radial = gx * x + gy * y + gz * z;
 			gx = (gx - x * radial) / R; gy = (gy - y * radial) / R; gz = (gz - z * radial) / R;
 			s.gradZ[b] = gx; s.gradZ[b + 1] = gy; s.gradZ[b + 2] = gz;
-			s.slope[c2] = Math.hypot(gx, gy, gz); s.low[c2] = low;
+			s.slope[c2] = Math.sqrt(gx * gx + gy * gy + gz * gz); s.low[c2] = low;
 		}
 	},
 	// Erosion is taken in the order sediment, felsic crust, mafic crust. The signed production
