@@ -8,24 +8,34 @@ var ColumnUpdate = {
 		t = Math.max(0, Math.min(1, t));
 		return t * t * (3 - 2 * t);
 	},
+	// Gather form: a column owns up to a handful of cells (its own and that cell's ring), and
+	// every edge of those cells contributes ±k(hFel_other − hFel_i)·w to it — both directions
+	// of an edge reduce to the same expression on the owner's side, so the per-column sum
+	// equals the per-edge accumulation without any writer touching another column. Mass is
+	// still conserved exactly: paired terms are identical floats with opposite sign.
 	collapse: function (s, dt) {
 		var p = ColumnParams, g = s.grid, delta = s.collapseDelta;
-		delta.fill(0);
-		for (var c = 0; c < g.V; c++) {
-			var oi = s.owner[c];
-			if (oi < 0) continue;
-			for (var k = 0; k < g.ringN[c]; k++) {
-				var j = g.ring[c * 6 + k];
-				if (j <= c) continue;
-				var oj = s.owner[j];
-				if (oj < 0 || oj === oi || Math.max(s.hFel[oi], s.hFel[oj]) <= p.hCollapse) continue;
-				var flux = p.kCollapse * dt * (s.hFel[oj] - s.hFel[oi]) * g.collapseWeight[c * 6 + k];
-				delta[oi] += flux; delta[oj] -= flux;
-			}
-		}
+		var k = p.kCollapse * dt;
 		for (var i = 0; i < s.n; i++) {
 			if (!s.alive[i]) continue;
-			s.hFel[i] = Math.max(0, s.hFel[i] + delta[i]);
+			var cell = s.cell[i];
+			if (cell < 0) { delta[i] = 0; continue; }
+			var d = 0, fel = s.hFel[i];
+			for (var q = -1; q < g.ringN[cell]; q++) {
+				var c = q < 0 ? cell : g.ring[cell * 6 + q];
+				if (s.owner[c] !== i) continue;
+				for (var e = 0; e < g.ringN[c]; e++) {
+					var j = g.ring[c * 6 + e], oj = s.owner[j];
+					if (oj < 0 || oj === i) continue;
+					if (Math.max(fel, s.hFel[oj]) <= p.hCollapse) continue;
+					d += (s.hFel[oj] - fel) * g.collapseWeight[c * 6 + e];
+				}
+			}
+			delta[i] = k * d;
+		}
+		for (var i2 = 0; i2 < s.n; i2++) {
+			if (!s.alive[i2]) continue;
+			s.hFel[i2] = Math.max(0, s.hFel[i2] + delta[i2]);
 		}
 	},
 	// Cells within one ring of a continent–continent convergent or a continental transform

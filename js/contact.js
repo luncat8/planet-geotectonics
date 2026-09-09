@@ -77,17 +77,25 @@ var Contact = {
 			s.overlaps++;
 		}
 	},
-	// Cells within two hops, flat and with repeats: a repeated column only loses its own
-	// distance comparison, and a donor one cell outside the ring is what a fresh gap needs.
+	// Cells within two hops, unique, in first-occurrence order: a repeated column only loses
+	// its own distance comparison, and a donor one cell outside the ring is what a fresh gap
+	// needs. Uniqueness matters twice over: a donor appearing in two slots of the top-3 would
+	// be charged two shares, and the donor-side thinning gather must see each request once.
 	ringCells: function (s, c, out) {
-		var g = s.grid, n = 0;
+		var g = s.grid, n = 0, q, k, k2, j;
 		out[n++] = c;
-		for (var k = 0; k < g.ringN[c]; k++) {
-			var j = g.ring[c * 6 + k];
+		for (k = 0; k < g.ringN[c]; k++) {
+			j = g.ring[c * 6 + k];
 			out[n++] = j;
-			for (var k2 = 0; k2 < g.ringN[j]; k2++) out[n++] = g.ring[j * 6 + k2];
+			for (k2 = 0; k2 < g.ringN[j]; k2++) out[n++] = g.ring[j * 6 + k2];
 		}
-		return n;
+		var u = 0;
+		for (q = 0; q < n; q++) {
+			var v = out[q], seen = false;
+			for (k = 0; k < u; k++) if (out[k] === v) { seen = true; break; }
+			if (!seen) out[u++] = v;
+		}
+		return u;
 	},
 	// Gaps: a cell that stayed uncovered long enough spawns one column at its centre.
 	gaps: function (s, dt) {
@@ -126,10 +134,12 @@ var Contact = {
 					j = s.entries[at]; w = j * 3;
 					dx = s.world[w] - px; dy = s.world[w + 1] - py; dz = s.world[w + 2] - pz;
 					d = dx * dx + dy * dy + dz * dz;
-					if (s.plate[j] !== plate) { if (d < foreign) foreign = d; continue; }
-					if (d < d0) { d2 = d1; i2 = i1; d1 = d0; i1 = i0; d0 = d; i0 = j; }
-					else if (d < d1) { d2 = d1; i2 = i1; d1 = d; i1 = j; }
-					else if (d < d2) { d2 = d; i2 = j; }
+				if (s.plate[j] !== plate) { if (d < foreign) foreign = d; continue; }
+				// Donor order is a total order (distance, index): equal distances keep the
+				// smaller column, so the pick does not depend on the bin walk order.
+				if (d < d0 || (d === d0 && j < i0)) { d2 = d1; i2 = i1; d1 = d0; i1 = i0; d0 = d; i0 = j; }
+				else if (d < d1 || (d === d1 && j < i1)) { d2 = d1; i2 = i1; d1 = d; i1 = j; }
+				else if (d < d2 || (d === d2 && j < i2)) { d2 = d; i2 = j; }
 				}
 			}
 			// An opposing plate already in contact would turn the newborn into an overlap next
@@ -233,6 +243,8 @@ var Contact = {
 	},
 	// Subduction feeds the overriding plate: trench load on the boundary cells, arc crust on the
 	// cells one and two rings behind it, at a rate set by that plate's mean closing speed.
+	// The apply pass is a per-column gather over the cells raster can own (own cell plus its
+	// ring): 15 % of columns own several cells, and each owned arc cell grows its owner.
 	arcs: function (s, dt) {
 		var g = s.grid, p = ContactParams, A0 = s.A0ref, nP = s.plateCount;
 		var relax = Math.min(1, dt / p.tauDyn);
@@ -248,43 +260,51 @@ var Contact = {
 			}
 		}
 		for (var q = 0; q < nP; q++) if (s.subCount[q]) s.subRate[q] /= s.subCount[q];
-		for (var c2 = 0; c2 < g.V; c2++) {
-			var o = s.owner[c2];
-			if (o < 0) continue;
-			var rate = s.plate[o] < nP ? s.subRate[s.plate[o]] / p.vRef : 0;
+		for (var i = 0; i < s.n; i++) {
+			if (!s.alive[i]) continue;
+			var q2 = s.plate[i];
+			if (q2 >= nP) continue;
+			var rate = s.subRate[q2] / p.vRef;
 			if (rate <= 0) continue;
-			var dist = s.trenchDist[c2];
-			if (dist === 0) { s.zDyn[o] -= p.zTrench * relax; continue; }
-			if (dist > 2) continue;
-			var dh = p.kArc * s.Tm * rate * dt;
-			s.hFel[o] += dh;
-			s.hMaf[o] += p.arcMafShare * dh;
-			s.producedFel += dh * A0;
-			s.producedMaf += p.arcMafShare * dh * A0;
-			// Porphyry/epithermal potential, enriched by what this plate is subducting.
-			var q = s.plate[o], fed = s.arcFeedN[q];
-			var feed = fed ? p.kRec * s.arcFeed[q] / fed : 0;
-			// The recycling feed carries hSed in kilometres, so the per-frame gain is not
-			// bounded by construction; cap the dose at 1 to keep the potential at most 1.
-			s.oArc[o] += (1 - s.oArc[o])
-				* Math.min(1, p.kA * s.Tm * rate * (1 + feed) * s.fert[o] * dt);
+			var cell = s.cell[i];
+			if (cell < 0) continue;
+			var fed = s.arcFeedN[q2];
+			var feed = fed ? p.kRec * s.arcFeed[q2] / fed : 0;
+			for (var k2 = -1; k2 < g.ringN[cell]; k2++) {
+				var c2 = k2 < 0 ? cell : g.ring[cell * 6 + k2];
+				if (s.owner[c2] !== i) continue;
+				var dist = s.trenchDist[c2];
+				if (dist === 0) { s.zDyn[i] -= p.zTrench * relax; continue; }
+				if (dist > 2) continue;
+				var dh = p.kArc * s.Tm * rate * dt;
+				s.hFel[i] += dh;
+				s.hMaf[i] += p.arcMafShare * dh;
+				s.producedFel += dh * A0;
+				s.producedMaf += p.arcMafShare * dh * A0;
+				// Porphyry/epithermal potential, enriched by what this plate is subducting.
+				// The recycling feed carries hSed in kilometres, so the per-frame gain is not
+				// bounded by construction; cap the dose at 1 to keep the potential at most 1.
+				s.oArc[i] += (1 - s.oArc[i])
+					* Math.min(1, p.kA * s.Tm * rate * (1 + feed) * s.fert[i] * dt);
+			}
 		}
 	},
 	spawn: function (s) {
 		var g = s.grid, p = ContactParams, A0 = s.A0ref, k, d;
+		s.riftZone.fill(0);
 		for (var c = 0; c < g.V; c++) {
 			var slot = s.spawnSlot[c];
 			if (slot < 0) continue;
 			var b = c * 3, w = slot * 3, plate = s.gapPlate[c];
 			// A donor can be consumed by this frame's APPLY between scan and spawn. It has
 			// nothing left to give, so it is dropped from the share as well as from the mean.
+			// gapDonorN records the surviving count, or 255 when the newborn is oceanic.
 			var K = 0, meanFel = 0;
-			for (k = 0; k < s.gapDonorN[c]; k++) {
+			for (k = 0; k < 3; k++) {
 				d = s.gapDonor[c * 3 + k];
-				if (!s.alive[d]) { s.gapDonor[c * 3 + k] = -1; continue; }
-				s.gapDonor[c * 3 + K] = d;
-				meanFel += s.hFel[d];
+				if (d < 0 || !s.alive[d]) continue;
 				K++;
+				meanFel += s.hFel[d];
 			}
 			ContactQuat.rotateInv(s.body, w, s.q, plate * 4, g.pos, b);
 			s.world[w] = g.pos[b]; s.world[w + 1] = g.pos[b + 1]; s.world[w + 2] = g.pos[b + 2];
@@ -297,6 +317,7 @@ var Contact = {
 			if (!K || meanFel / K < p.hRiftBreakup) {
 				// Oceanic crust from the mantle; the donors keep their crust untouched. VMS is a
 				// one-shot at birth scaled by the spreading rate the ridge flanks are opening at.
+				s.gapDonorN[c] = 255;
 				s.hFel[slot] = 0; s.hSed[slot] = 0;
 				s.hMaf[slot] = ContactMantle.hMafNew(s.Tm);
 				s.damage[slot] = 0;
@@ -304,27 +325,60 @@ var Contact = {
 				s.oVms[slot] = p.kV * s.Tm * Math.min(1, Contact.spread(s, c) / p.vRef) * s.fert[slot];
 				continue;
 			}
-			// Rifting stretches existing crust: the newborn takes 1/(K+1) of each donor, and the
-			// donors lose exactly the amount it gains.
+			// Rifting stretches existing crust: each donor gives 1/(K+1) of what it holds
+			// before any thinning, so every share is computed from the same pre-rift stock.
+			// The newborn's gain and the donors' losses are the same terms, which keeps the
+			// ledger exact however many rift cells share one donor — both sides are then
+			// independent gathers with no ordering between them, which the GPU port needs.
+			s.gapDonorN[c] = K;
 			var share = 1 / (K + 1), newFel = 0, newSed = 0;
-			for (k = 0; k < K; k++) {
+			for (k = 0; k < 3; k++) {
 				d = s.gapDonor[c * 3 + k];
-				var giveFel = share * s.hFel[d], giveSed = share * s.hSed[d];
-				newFel += giveFel; newSed += giveSed;
-				s.hFel[d] -= giveFel; s.hSed[d] -= giveSed;
+				if (d < 0 || !s.alive[d]) continue;
+				newFel += share * s.hFel[d];
+				newSed += share * s.hSed[d];
 			}
 			s.hFel[slot] = newFel; s.hSed[slot] = newSed; s.hMaf[slot] = 0;
 			s.damage[slot] = p.riftDamage;
 			// Rifted continental crust carries its Ni-Cu-PGE endowment with it.
 			s.oMaf[slot] = p.kM2 * s.fert[slot];
+			// Mark the cells a donor of this newborn can live in (the gap scan's two-hop
+			// reach), so the thinning pass below only walks columns near an open rift.
+			var scan = s.gapScan, bins = Contact.ringCells(s, c, scan);
+			for (var q = 0; q < bins; q++) s.riftZone[scan[q]] = 1;
 		}
-		s.n += s.spawns;
+	},
+	// The donor side of rifting: a donor gives a share to every newborn gap cell that picked
+	// it. All of a donor's requests lie within two hops of its own cell, so the loss is a
+	// gather over that fixed candidate set — no per-newborn writer ever touches a donor.
+	thinning: function (s) {
+		var g = s.grid, scan = s.gapScan;
+		for (var i = 0; i < s.n; i++) {
+			if (!s.alive[i]) continue;
+			var cell = s.cell[i];
+			if (cell < 0 || !s.riftZone[cell]) continue;
+			var bins = Contact.ringCells(s, cell, scan), lossFel = 0, lossSed = 0;
+			for (var q = 0; q < bins; q++) {
+				var c = scan[q];
+				if (s.spawnSlot[c] < 0 || s.gapDonorN[c] === 255) continue;
+				var share = 1 / (s.gapDonorN[c] + 1), gives = false;
+				for (var k = 0; k < 3; k++) if (s.gapDonor[c * 3 + k] === i) gives = true;
+				if (!gives) continue;
+				lossFel += s.hFel[i] * share;
+				lossSed += s.hSed[i] * share;
+			}
+			if (!(lossFel > 0)) continue;
+			s.hFel[i] -= lossFel;
+			s.hSed[i] -= lossSed;
+		}
 	},
 	apply: function (s, dt) {
 		Contact.resolve(s);
 		Contact.gather(s);
 		Contact.arcs(s, dt);
 		Contact.spawn(s);
+		Contact.thinning(s);
+		s.n += s.spawns;
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Contact;
