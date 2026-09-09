@@ -7,7 +7,7 @@
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="eyebrow">Phase G — CPU release</div><span class="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
+	<header><div class="eyebrow">Phase H — WebGPU</div><span class="badge" id="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
 	<main>
 		<div class="heading"><div><p>Plates rift apart, suture back together, and the planet cools — and the crust keeps the record of where the metal was.</p></div></div>
 		<section class="map-panel" aria-label="Planet map">
@@ -24,6 +24,7 @@
 			<label>Start<select id="start"><option value="map" selected>Map start</option><option value="hot">Hot start</option></select></label>
 			<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
 			<button id="save">Save world</button><button id="deposits">Deposits JSON</button><label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
+			<label>Engine<select id="engine"><option value="cpu" selected>CPU</option><option value="gpu">GPU · WebGPU</option></select></label>
 		</section>
 		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second.</p></div><div><h2>Column inspector</h2><p id="probe">Click the map to inspect a column.</p></div></section>
 	</main>
@@ -44,6 +45,17 @@
 	<script src="js/perf.js"></script>
 	<script src="js/extract.js"></script>
 	<script src="js/sim.js"></script>
+	<script src="js/gpu/wgsl-common.js"></script>
+	<script src="js/gpu/wgsl-plates.js"></script>
+	<script src="js/gpu/wgsl-mantle.js"></script>
+	<script src="js/gpu/wgsl-columns.js"></script>
+	<script src="js/gpu/wgsl-scan.js"></script>
+	<script src="js/gpu/wgsl-edges.js"></script>
+	<script src="js/gpu/wgsl-contact.js"></script>
+	<script src="js/gpu/wgsl-column.js"></script>
+	<script src="js/gpu/wgsl-surface.js"></script>
+	<script src="js/gpu/wgsl-diag.js"></script>
+	<script src="js/gpu/sim-gpu.js"></script>
 	<script src="js/render.js"></script>
 	<script src="js/ui.js"></script>
 </body>

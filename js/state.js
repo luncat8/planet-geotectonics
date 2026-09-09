@@ -103,7 +103,10 @@ function State(grid, seed, hot) {
 	this.spawnSlot = new Int32Array(grid.V);
 	this.gapPlate = new Uint16Array(grid.V);
 	this.gapDonor = new Int32Array(grid.V * 3);
+	// Alive donor count of a spawning gap cell, or 255 for an oceanic newborn (no thinning).
 	this.gapDonorN = new Uint8Array(grid.V);
+	// Cells within two hops of an open rift request, so donor thinning only walks those.
+	this.riftZone = new Uint8Array(grid.V);
 	this.gapScan = new Int32Array(43);   // 1 + 6 + 6*6, the widest two-hop cell list
 	this.mobile = new Float64Array(grid.V);
 	this.mobileFel = new Float64Array(grid.V);
@@ -111,9 +114,14 @@ function State(grid, seed, hot) {
 	this.outflow = new Float64Array(grid.V);
 	this.outflowFel = new Float64Array(grid.V);
 	this.outflowPla = new Float64Array(grid.V);
-	this.inflow = new Float64Array(grid.V);
-	this.inflowFel = new Float64Array(grid.V);
-	this.inflowPla = new Float64Array(grid.V);
+	// K9 routing scratch in gather form (design §2): erosion per column writes what each
+	// owned cell lost, the stay pass gathers inflow from the ring, the deposit pass pulls.
+	this.eroSed = new Float64Array(grid.V);
+	this.eroFel = new Float64Array(grid.V);
+	this.eroPla = new Float64Array(grid.V);
+	this.stay = new Float64Array(grid.V);
+	this.stayFel = new Float64Array(grid.V);
+	this.stayPla = new Float64Array(grid.V);
 	this.uMantle = new Float64Array(grid.V * 3);
 	this.vel = new Float64Array(grid.V * 3);
 	this.wEq = new Float64Array(grid.V * 3);
@@ -192,10 +200,11 @@ State.prototype.reset = function (seed) {
 	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.wet.fill(0);
 	this.gradZ.fill(0); this.slope.fill(0); this.low.fill(-1); this.climbHistogram.fill(0);
 	this.cellPlate.fill(65535); this.gapFrames.fill(0); this.gapTime.fill(0); this.spawnSlot.fill(-1);
-	this.gapPlate.fill(0); this.gapDonor.fill(-1); this.gapDonorN.fill(0); this.gapScan.fill(0);
+	this.gapPlate.fill(0); this.gapDonor.fill(-1); this.gapDonorN.fill(0); this.riftZone.fill(0); this.gapScan.fill(0);
 	this.mobile.fill(0); this.mobileFel.fill(0); this.mobilePla.fill(0);
 	this.outflow.fill(0); this.outflowFel.fill(0); this.outflowPla.fill(0);
-	this.inflow.fill(0); this.inflowFel.fill(0); this.inflowPla.fill(0);
+	this.eroSed.fill(0); this.eroFel.fill(0); this.eroPla.fill(0);
+	this.stay.fill(0); this.stayFel.fill(0); this.stayPla.fill(0);
 	this.uMantle.fill(0); this.vel.fill(0); this.wEq.fill(0);
 	this.relN.fill(0); this.relT.fill(0); this.edgeType.fill(0); this.polarity.fill(0);
 	this.trenchDist.fill(3); this.ext.fill(0); this.plumeT.fill(0);

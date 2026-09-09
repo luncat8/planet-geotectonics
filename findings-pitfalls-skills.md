@@ -314,3 +314,132 @@
 	plates, 19.9 vs 20.1% continents, and 7.15 vs 5.87 cm/yr. Exact trajectories diverge from
 	minute floating-order changes, so release gates must stay on invariants and declared
 	statistics, never column identity after thousands of frames.
+
+## WebGPU parity: precision floors, not bugs
+
+	Measured on SwiftShader (Chromium 137, forceFallbackAdapter): builtin cos is only
+	accurate to 1.9e-4 at |x| ~ 3 and 2.6e-5 even near zero - the WGSL spec allows 2^-11,
+	so this is legal. exp is fine (1.1e-6 worst on [-6,2]). The GPU kernels that must track
+	the f64 CPU reference therefore use a private cosx: Cody-Waite reduction with a two-word
+	2*pi (callers stay under |x| <= 16) plus an even Taylor series in y = t*t, all fma, good
+	to 5.5e-7. integrate uses a small-argument sinx series for the quaternion increment.
+	The plume term computes 1 - dot(pp, v) through the chord |pp - v|^2 / 2: the direct
+	subtraction cancels near the plume axis and invSig (~160) amplifies the residue into
+	plumeT; the chord form is exact by Sterbenz and matches to 1e-7.
+
+	Velocity-family fields (uMantle, vel, relN, relT) carry f32 noise relative to the
+	FIELD scale, not to each near-cancellation value, so their parity tolerance is the
+	plan's "normalized units": (1e-6 + 1e-5 |x|) * vRef. With that, boot parity is exact
+	on every integer field and every float is inside tolerance.
+
+## WebGPU parity: the K10 solve and the ledger scale
+
+	The normal equations are ~A0*N ~ 1e13, so a cofactor solve in f32 overflows (det
+	products ~1e40 -> inf-inf -> NaN). Divide every entry by A0[0] before solving; the
+	solution is unchanged and eps becomes exactly 1e-4. Chunk partials and the final
+	64-partial sum use Kahan compensation, and the solve takes one fma-residual refinement
+	step; without those, omega drifts ~1.5e-5 relative, which is exactly the vel parity
+	budget.
+
+	Mass ledgers run 1e14-1e15, so fixed point at 1e6 overflows even i64, and a single
+	erosion event (3.5e14) overflows the i32 atomic delta slot outright. The GPU ledger
+	instead accumulates per-column f32 deltas in a scratch region (one writer per column
+	per kernel), Kahan-reduces them per chunk in fixed column order, and folds the frame
+	total into a running hi/lo f32 pair with twoSum - f64-like precision forever, and
+	bit-identical across repeat runs.
+
+## WebGPU parity: dispatch shapes and small constants
+
+	Kernels that map workgroup_id -> chunk and local_id -> item must be dispatched with
+	runGroups(nChunks, WG); run(threads, WG) computes groups = ceil(threads/WG) and
+	silently ran reduceA/subRateA on ONE workgroup (1/64th of the cells) - the symptom was
+	a plausible-looking but wrong omega, not a crash. zeroFrame's first branch must end at
+	exactly the slot count it zeroes (a t < 6 guard over an off-by-one u = t - 5 skipped
+	plate 0's cells counter; 1392 = 2 x 696 was the tell). WGSL forbids swizzle assignment
+	(r.xyz = ...) - build the vector in one constructor. The default storage-buffer limit
+	is 8 per stage and spawn/columnStep need 9: request the adapter's ceiling (10 here),
+	and validate against device.limits, not a hardcoded 8.
+
+## WebGPU parity: threshold-triggered divergence is the expected end state
+
+	From identical checkpoints the runs agree exactly (integers) and within f32-tolerance
+	(floats) for 7 frames at L5/seed 7; the first structural divergence is a consume event
+	in frame 8. Every early divergence is a legitimate threshold crossing under
+	within-tolerance noise: flat abyssal floors tie z to ~1e-15 and the CPU breaks the tie
+	by exact f64 value while f32 sees equality and breaks by index (gpu picks the lower
+	index 759/759 times); relN sits within ~750 of epsHi/epsLo at a few percent of
+	boundary edges and flips edgeType/polarity, which moves trench marks, which moves arc
+	deposition, which changes hFel/z and the erosion routing. The cascade is real physics
+	being re-decided, not error growth: ledgers, plate counts and speeds stay within
+	bounds. Gate long GPU runs on statistics (plate count, speed and area-age
+	distributions), never on column identity - the same rule the CPU dt-comparison tests
+	already use. Same-device repeat runs are bit-identical over 25 frames including two
+	event cycles (tests/gpu-parity.js --determinism).
+
+## WebGPU parity: four kernel bugs the frame-1 gate could not see
+
+	Frame-1 parity passes on a freshly zeroed world, so every bug that only fires on a
+	STATE TRANSITION survives it. Four such bugs shipped together and each needed its own
+	detector:
+
+	1. Tint/SwiftShader fold `x != x` to false under a no-NaN assumption (measured: both
+	   n != n and n == n are false on a quiet NaN). Every WGSL NaN guard must go through
+	   the bit pattern: isNanF(x) = exponent all ones and mantissa nonzero. The symptom
+	   was elevationG computing gradients from gap-cell NaN z and poisoning gradZ, slope,
+	   then omega and velocities - and the GPU's own finiteness check (n != n) reporting
+	   finite=1 throughout.
+	2. setEdgeType packed the type into byte 0 of the edge word but its mask kept byte 0
+	   and cleared byte 1: the new type was OR-ed onto the old. 1|2 = 3, so an edge that
+	   ever became TRANSFORM could never leave it, and CONVERGENT<->DIVERGENT flips
+	   became 3. Frame-2 "threshold cascade" (147 edgeType, 68 polarity mismatches, then
+	   omega +3%/frame compounding to a 40% mean-speed drift by t=44) was entirely this
+	   bug. Packed setters must clear exactly their own byte.
+	3. scanCRank read scanOut(c) - the block-local exclusive prefix from scanA - without
+	   adding the scanB block offset, so spawn ranks restarted at 0 every 1024 cells.
+	   Duplicate slots made the spawn kernel a last-writer-wins race: same-device
+	   determinism passed 8-22 frames and failed ~1 run in 2 at 25 (the failure needs
+	   spawn flags in 2+ blocks and a loser to overwrite). The scan scratch buffers are
+	   not part of the mirror compare; only dumping the raw SCAN buffer exposed it.
+	4. overlaps broke exact squared-distance ties by atomic bin order; now a total order
+	   (d, lower column index) matching the CPU's index-ordered bin fill.
+
+	Locating 2-4 took three probe designs worth reusing: (a) run the same upload twice
+	with per-frame mirror compare to bracket the first bad frame, then replay that frame
+	kernel-by-kernel; (b) a single-frame bias test - clone the GPU state into the CPU
+	mirror, evolve one frame on each side, diff per-plate M/rhs/omegaTarget - which
+	turned a vague 40% statistical drift into "rhs is 25% off from identical state";
+	(c) CPU chaos probes to size the envelope: injecting one cell's hSed, or even the
+	GPU's whole frame-2 integer decision set, washes out to <1% drift, and cloning the
+	GPU's full frame-2 state gives ~12% - so a 40% drift was provably bias, not chaos.
+
+	Also: the harness called state.reset({seed, level}) but State.reset takes a raw
+	number - the object coerced to 0 and every "seed 7" run was seed 0. All comparisons
+	stayed apples-to-apples, but three "different seeds" were one. Reset signatures are
+	part of the test surface; assert the boot actually differs between seeds.
+
+	After the fixes: frame 2 is clean except 745 sub-f32 low ties; integers hold ~20-50
+	frames (first consume/spawn threshold crossings after that); the 1000-frame,
+	3-seed ensemble ends within plates +-1, columns 1.4%, mean speed 14%, continental
+	share 1.5pp at t=100 Myr, and same-device determinism is bit-exact past 60 frames
+	including two event cycles.
+
+## WebGPU memory and the app integration
+
+	Buffer schema measured, not estimated (H5): the device holds 9.1 MB at L5, 35 MB at
+	L6 and 138.9 MB at L7 - dominated by gridF (83 words/cell), colF, cellF and edges;
+	the fattest single buffer (gridF, 51.9 MB at L7) is well under the 128 MB storage
+	binding ceiling. The JS mirror on top is another ~60 MB of f64 arrays at L7, so the
+	real cost of the port is about 200 MB at L7 including the mirror - fine for a
+	desktop tab, worth remembering on mobile.
+
+	SwiftShader is a correctness floor, never a perf number: L5 161 ms/frame,
+	L6 629 ms, L7 2.5 s on this container's CPU (no timestamp-query support either, so
+	per-kernel timing needs real hardware). The 60 fps at L7 acceptance therefore
+	cannot be closed headlessly - it needs a hardware run through the same harness.
+
+	The app integration runs the GPU backend beside the CPU one: same renderer, column
+	inspector, checkpoints and deposits JSON, all reading the downloaded mirror at
+	render cadence (one download per animation frame, events still on the CPU mirror).
+	The remaining H4 step is the no-readback renderer (render pipelines reading cellF/
+	cellI directly); the mirror download is ~8 ms at L5 and is the thing to remove
+	before L7-in-the-app is more than a demo.
