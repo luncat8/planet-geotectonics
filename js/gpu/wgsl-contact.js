@@ -39,7 +39,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 			let n = ex * invD;
 			let closing = dot(cross(plateOmega(u32(colPlate(j))), colWorld(j))
 				- cross(plateOmega(u32(own)), wi), n);
-			if (R * closing > -P_EPSHI) { continue; }
+			// Design §4.1: every overlap consumes one column, on any convergence (R·closing > 0)
+			// - matches the CPU gate in contact.overlaps. Tangential/divergent contacts don't
+			// consume, which is what strands orphan components (see Events.orphans).
+			if (R * closing > 0.0) { continue; }
 			best = d;
 			other = i32(j);
 			dvec = ex;
@@ -50,7 +53,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	// The exact CPU expression: (ω_j × w_j − ω_i × w_i) · n, n = (w_j − w_i)/|w_j − w_i|.
 	let rel = cross(plateOmega(u32(colPlate(u32(other)))), colWorld(u32(other))) - cross(plateOmega(u32(own)), wi);
 	let closing = dot(rel, dvec * inv);
-	if (R * closing > -P_EPSHI) { return; }
+	// Same gate as the search loop above (design §4.1).
+	if (R * closing > 0.0) { return; }
 	if (loserIdx(i, u32(other)) != i) { return; }
 	COLI[i * 4u + 2u] = other;
 	addOverlap();

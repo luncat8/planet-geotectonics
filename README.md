@@ -1,11 +1,12 @@
 # Planet Geotectonics
 
-A no-build, offline-friendly planetary tectonics simulator in development.
+planetary tectonics simulator in development. no-build, offline.
+
+![Geodesic Planet screenshot](screenshot.avif)
 
 ## Run
 
-Open `index.html` directly in a browser. No dependencies, network requests or server are
-needed. Alternatively, serve this directory with `python3 -m http.server 8000 --bind 0.0.0.0`.
+Open `index.html` directly in a browser.
 
 ## Current implementation: Phase G CPU release
 
@@ -26,7 +27,10 @@ needed. Alternatively, serve this directory with `python3 -m http.server 8000 --
 - Damage accumulation from strain and plume heating; at a 1 Myr cadence plates split along a
   rift corridor into components with their own least-squares-fitted rotation, small fragments
   are re-absorbed, slow or continent-colliding boundaries suture, and plates merge by rebasing
-  the loser's columns into the winner's frame.
+  the loser's columns into the winner's frame. Divergent boundaries that strand a sliver of one
+  plate inside another are cleaned up by terrane accretion: components disconnected from their
+  plate's main body are rebased into the plate that owns most of their surroundings, so plates
+  stay coherent instead of shredding into interleaved fingers.
 - Planetary cooling `Tm(t)` scaling the mantle speed, crust production and damage healing;
   hot-start and map-start initial states.
 - Checkpoints: a ring of full states every 20 Myr, plus save/load to one validated binary
@@ -44,8 +48,14 @@ needed. Alternatively, serve this directory with `python3 -m http.server 8000 --
   the strict L5 Node proxy above 60 steps/s on the calibration host.
 - CPU release tooling: a reproducible one-factor calibration sweep at both calibration frame steps,
   an optional 4.5 Gyr release test, and a browser run-to-time control (4500 Myr by default).
+- WebGPU engine (Phase H): the same kernel graph runs on the device (engine select in the
+  controls). The map renders straight from the GPU buffers in a fragment shader, so playing
+  never reads the state back; the CPU mirror is only pulled in for plate events (one cycle
+  late), the column probe, saving and the deposit extract. Same-device repeat runs are
+  bit-identical, and 1000-frame CPU-vs-GPU ensembles stay within predeclared statistical
+  bounds (`node tests/gpu-parity.js 1000 --ensemble`; boot/parity/determinism modes in the
+  same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIBS`).
 
-WebGPU and polish are **not implemented** yet.
 See `0.2-plan.md` and `0.1.5-final-design.md`.
 
 ## Test
@@ -84,4 +94,7 @@ breakdown and a retained-memory smoke test. Phase F: each potential's production
 exactly by diffing one kernel call, a placer rig that erodes a single orogenic summit, bounded
 potentials over an 800 Myr hot start, ranked deterministic deposit extraction and a checkpoint
 round trip. Phase G adds the strict throughput proxy, reproducible one-factor sweep, and the
-optional 4.5 Gyr release profile.
+optional 4.5 Gyr release profile. Phase H adds a GPU-free structural check of every WGSL kernel
+source (brace/paren balance, entry point, and every referenced constant or called helper defined
+in its prelude+body), catching the undefined-constant class of error that only surfaces at page
+load (`node tests/wgsl-struct.js`).

@@ -59,6 +59,9 @@ function State(grid, seed, hot) {
 	// Plate pairs are keyed [lo * plateCap + hi]: suture timers plus the per-cycle census.
 	this.sutureTime = new Float32Array(this.plateCap * this.plateCap);
 	this.pairScratch = new Float32Array(this.plateCap * this.plateCap);
+	// Per-orphan-component adjacent-plate tallies for Events.orphans (64 = compSize cap).
+	this.orphanTally = new Int32Array(64 * this.plateCap);
+	this.orphanIndex = new Int32Array(64);
 	this.pairLen = new Float32Array(this.plateCap * this.plateCap);
 	this.pairVel = new Float32Array(this.plateCap * this.plateCap);
 	this.pairOk = new Uint8Array(this.plateCap * this.plateCap);
@@ -188,7 +191,7 @@ State.prototype.reset = function (seed) {
 	this.M.fill(0); this.rhs.fill(0); this.seeds.fill(0); this.plateCells.fill(0);
 	this.plateBirth.fill(0); this.plateParent.fill(-1); this.plateDead.fill(0); this.plateRemap.fill(0);
 	this.sutureTime.fill(0); this.pairLen.fill(0); this.pairVel.fill(0); this.pairOk.fill(1);
-	this.pairScratch.fill(0); this.corridor.fill(0); this.compLabel.fill(-1); this.queue.fill(0);
+	this.pairScratch.fill(0); this.orphanTally.fill(0); this.orphanIndex.fill(0); this.corridor.fill(0); this.compLabel.fill(-1); this.queue.fill(0);
 	this.compSize.fill(0); this.compPlate.fill(-1);
 	this.fitM.fill(0); this.fitRhs.fill(0); this.fitOmega.fill(0);
 	this.openSum.fill(0); this.openLen.fill(0); this.openFitted.fill(0);

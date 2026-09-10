@@ -1,0 +1,17 @@
+$ cd /home/user/planet-geotectonics && node --expose-gc tests/longrun.js > /tmp/longrun.log 2>&1; echo "exit $?"; tail -12 /tmp/longrun.log
+
+stdout
+
+exit 0
+  t 1300 plates  14 cols  9443 cont  20.8% craton  9.19% mean  6.40 cm/yr max 17.94 Tm 1.09 splits  74 merges  75 snapshots 16
+  t 1400 plates  10 cols  9543 cont  19.0% craton  8.88% mean  5.11 cm/yr max 18.28 Tm 1.06 splits  74 merges  79 snapshots 16
+  t 1500 plates   8 cols  9486 cont  19.1% craton  9.57% mean  5.30 cm/yr max  8.83 Tm 1.04 splits  74 merges  81 snapshots 16
+PASS longrun 1500 Myr: no NaN, invariants exact, plates 6-40, middle epoch 9.05 cm/yr, continental at 1500 Myr 19.1%, 74 splits and 81 merges
+dt 0.01, 300 Myr in 454 s vs the dt 0.1 run at 300 Myr: {
+  plates: [ 23, 19 ],
+  meanCm: [ 13.46, 11.52 ],
+  continental: [ 0.15, 0.136 ],
+  splits: [ 33, 32 ],
+  merges: [ 25, 29 ]
+}
+PASS longrun: 300 Myr at dt 0.01 matches dt 0.1 at the statistics level
