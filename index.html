@@ -13,6 +13,7 @@
 		<section class="map-panel" aria-label="Planet map">
 			<div class="map-top"><span>EQUIRECTANGULAR / 10,242 CELLS</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="type">Boundary type</option><option value="z">Elevation</option><option value="damage">Rift damage</option><option value="owner">Column coverage</option><option value="sediment">Sediment</option><option value="oVms">Ore · VMS</option><option value="oMaf">Ore · mafic</option><option value="oArc">Ore · arc</option><option value="oOro">Ore · orogenic</option><option value="oBas">Ore · basin</option><option value="oPla">Ore · placer</option></select></label></div>
 			<canvas id="map" aria-label="Equirectangular map of moving plates">Canvas support is required.</canvas>
+			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU)"></canvas>
 			<div class="perf" id="perf"><span id="perf-main">performance counter idle</span><span id="perf-kern"></span></div>
 			<div class="map-bottom"><span>90° S</span><span>Boundary type: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</span><span>180° E</span></div>
 		</section>
@@ -56,6 +57,7 @@
 	<script src="js/gpu/wgsl-surface.js"></script>
 	<script src="js/gpu/wgsl-diag.js"></script>
 	<script src="js/gpu/sim-gpu.js"></script>
+	<script src="js/gpu/render-gpu.js"></script>
 	<script src="js/render.js"></script>
 	<script src="js/ui.js"></script>
 </body>
