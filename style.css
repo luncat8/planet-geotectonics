@@ -17,6 +17,7 @@ p { font-size: 14px; line-height: 1.7; color: #aab9bd; margin: 10px 0 0; }
 .map-top label { display: flex; align-items: center; gap: 10px; }
 .map-bottom { font-size: 9px; }
 canvas { display: block; cursor: crosshair; max-height: 60vh;}
+canvas[hidden] { display: none; }
 .perf { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; padding: 7px 10px; border-top: 1px solid #2b3540;
 	background: #101922; color: #80d7b9; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .perf span:last-child { color: #788c99; }

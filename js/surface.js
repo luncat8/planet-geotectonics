@@ -52,7 +52,12 @@ var Surface = {
 				if (zj !== zj) continue;
 				var dz = zj - zi;
 				bx += dz * g.pos[jb]; by += dz * g.pos[jb + 1]; bz += dz * g.pos[jb + 2];
-				if (zj < lowZ || (zj === lowZ && j2 < low)) { low = j2; lowZ = zj; }
+				// The drainage pick is a discrete decision the GPU must reproduce exactly; f32
+				// (Math.fround on the CPU, native on the device) collapses sub-ulp z
+				// differences into the same tie, which both engines then break by the
+				// smaller cell index, so routing cannot diverge between engines.
+				var zf = Math.fround(zj);
+				if (zf < lowZ || (zf === lowZ && j2 < low)) { low = j2; lowZ = zf; }
 			}
 			var i9 = c2 * 9;
 			var gx = inv[i9] * bx + inv[i9 + 1] * by + inv[i9 + 2] * bz;

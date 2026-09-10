@@ -1,5 +1,5 @@
 (function () {
-	var canvas = document.getElementById('map');
+	var canvas = document.getElementById('map'), gpuCanvas = document.getElementById('mapgpu');
 	var play = document.getElementById('play'), step = document.getElementById('step');
 	var dtInput = document.getElementById('dt'), speedInput = document.getElementById('speed');
 	var runToInput = document.getElementById('run-to'), runToStart = document.getElementById('run-to-start');
@@ -10,13 +10,14 @@
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var perfMain = document.getElementById('perf-main'), perfKern = document.getElementById('perf-kern');
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
-	var renderer = new Renderer(canvas, state), playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
-	var gpu = { on: false, ready: false, busy: false, ms: 0 };
+	var renderer = new Renderer(canvas, state), gpuRenderer = null, playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
+	var gpu = { on: false, ready: false, busy: false };
 	Sim.raster(state);
 	Perf.reset();
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
-	// asynchronously, runs the boot raster on the device, and pulls the mirror back so
-	// the canvas renderer and the inspector read the same arrays as the CPU path.
+	// asynchronously, runs the boot raster on the device and then renders straight from
+	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
+	// and at the event cadence inside GpuSim.step, so no per-frame readback happens.
 	function bootEngine(done) {
 		if (engineInput.value === 'gpu') {
 			if (!navigator.gpu) {
@@ -28,19 +29,21 @@
 			gpu.on = true; gpu.ready = false;
 			GpuSim.init(state, { fallback: false }).then(function () {
 				GpuSim.raster(state);
-				return GpuSim.download(state);
-			}).then(function () {
+				gpuRenderer = new GpuRenderer(gpuCanvas).init(state);
+				gpuCanvas.hidden = false; canvas.hidden = true;
 				gpu.ready = true; dirty = true;
 				badge.textContent = 'GPU · L' + Params.level;
 				done();
 			})['catch'](function (error) {
 				gpu.on = false; engineInput.value = 'cpu';
+				gpuCanvas.hidden = true; canvas.hidden = false;
 				badge.textContent = 'CPU · L' + Params.level;
 				probe.textContent = 'GPU engine failed (' + error.message + '); back on CPU.';
 				done();
 			});
 		} else {
 			gpu.on = false; gpu.ready = false;
+			gpuCanvas.hidden = true; canvas.hidden = false;
 			Sim.raster(state);
 			badge.textContent = 'CPU · L' + Params.level;
 			done();
@@ -48,6 +51,7 @@
 	}
 	engineInput.addEventListener('change', function () {
 		setPlaying(false); runTarget = Infinity;
+		Perf.reset();
 		bootEngine(function () { dirty = true; });
 	});
 	function setPlaying(value) {
@@ -61,8 +65,8 @@
 			if (gpu.busy) return;
 			gpu.busy = true;
 			GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params).then(function () {
-				return GpuSim.download(state);
-			}).then(function () { gpu.busy = false; dirty = true; })['catch'](function (error) {
+				gpu.busy = false; dirty = true;
+			})['catch'](function (error) {
 				gpu.busy = false; probe.textContent = 'GPU engine error: ' + error.message;
 			});
 		} else {
@@ -102,14 +106,19 @@
 		}
 	});
 	// Deposit extraction is on demand, so its scratch is allocated on first use, never per frame.
+	// On the GPU engine it first pulls the mirror so the potentials are current.
 	document.getElementById('deposits').addEventListener('click', function () {
-		if (!extractScratch) extractScratch = new Float64Array(grid.V);
-		var blob = new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' });
-		var link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-		link.download = 'deposits-' + Math.round(state.t) + 'myr.json';
-		link.click();
-		URL.revokeObjectURL(link.href);
+		var extract = function () {
+			if (!extractScratch) extractScratch = new Float64Array(grid.V);
+			var blob = new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' });
+			var link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = 'deposits-' + Math.round(state.t) + 'myr.json';
+			link.click();
+			URL.revokeObjectURL(link.href);
+		};
+		if (gpu.on && gpu.ready) { GpuSim.download(state).then(extract, extract); return; }
+		extract();
 	});
 	loadInput.addEventListener('change', function () {
 		var file = loadInput.files[0];
@@ -132,8 +141,8 @@
 		};
 		reader.readAsArrayBuffer(file);
 	});
-	canvas.addEventListener('click', function (event) {
-		var rect = canvas.getBoundingClientRect();
+	function probeAt(event, target) {
+		var rect = target.getBoundingClientRect();
 		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * grid.lookupW)));
 		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * grid.lookupH)));
 		var cell = grid.lookup[(grid.lookupH - 1 - y) * grid.lookupW + x], owner = state.owner[cell];
@@ -155,9 +164,20 @@
 			'\n' + (state.wet[cell] ? 'wet' : 'land') + ' · dynamic ' + Math.round(state.zDyn[owner]) + ' m' +
 			'\nOres VMS ' + state.oVms[owner].toFixed(2) + ' · mafic ' + state.oMaf[owner].toFixed(2) +
 			' · arc ' + state.oArc[owner].toFixed(2) + ' · oro ' + state.oOro[owner].toFixed(2) +
-			' · basin ' + state.oBas[owner].toFixed(2) + ' · placer ' + state.oPla[owner].toFixed(2) +
-			' · fert ' + state.fert[owner].toFixed(2);
-	});
+		' · basin ' + state.oBas[owner].toFixed(2) + ' · placer ' + state.oPla[owner].toFixed(2) +
+		' · fert ' + state.fert[owner].toFixed(2);
+	}
+	// The inspector reads the CPU state, so on the GPU engine a click first pulls the mirror
+	// back (one readback, on demand only) and then reports from it.
+	function probeClick(event) {
+		if (gpu.on && gpu.ready) {
+			GpuSim.download(state).then(function () { probeAt(event, event.currentTarget); });
+			return;
+		}
+		probeAt(event, event.currentTarget);
+	}
+	canvas.addEventListener('click', probeClick);
+	gpuCanvas.addEventListener('click', probeClick);
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
 		if (playing) {
@@ -165,13 +185,12 @@
 			if (runTarget < Infinity) steps = Math.min(steps, Math.max(0, Math.ceil((runTarget - state.t) / dt - 1e-9)));
 			if (steps > 0) {
 				if (gpu.on && gpu.ready) {
+					// Frames submit to the device without any readback; only the event
+					// cadence inside GpuSim.step pulls the mirror back to the CPU.
 					if (!gpu.busy) {
 						gpu.busy = true;
-						var t0 = performance.now();
 						GpuSim.advance(state, dt, steps).then(function () {
-							return GpuSim.download(state);
-						}).then(function () {
-							gpu.busy = false; gpu.ms = performance.now() - t0; dirty = true;
+							gpu.busy = false; dirty = true;
 						})['catch'](function (error) {
 							gpu.busy = false; setPlaying(false);
 							probe.textContent = 'GPU engine error: ' + error.message;
@@ -185,19 +204,17 @@
 				runTarget = Infinity; setPlaying(false);
 			}
 		}
-		if (dirty) { renderer.draw(layerInput.value); dirty = false; }
-		if (gpu.on && gpu.ready) {
-			if (Perf.due(now)) {
-				perfMain.textContent = (gpu.ms / Math.max(1, +speedInput.value)).toFixed(1) + ' ms/frame (GPU)' +
-					(gpu.ms > 0 ? ' · ' + (1000 / gpu.ms * +speedInput.value).toFixed(1) + ' frames/s' : '');
-				perfKern.textContent = 'events on CPU mirror · download each render';
-			}
-		} else {
-			Perf.frame(now, steps, dt);
-			if (Perf.due(now)) {
-				perfMain.textContent = Perf.text;
-				perfKern.textContent = Perf.detail;
-			}
+		if (dirty) {
+			if (gpu.on && gpu.ready) gpuRenderer.draw(layerInput.value);
+			else renderer.draw(layerInput.value);
+			dirty = false;
+		}
+		Perf.frame(now, steps, dt);
+		if (Perf.due(now)) {
+			Perf.update(now);
+			perfMain.textContent = Perf.text;
+			perfKern.textContent = gpu.on && gpu.ready
+				? 'WebGPU frame · CPU mirror one event cycle old' : Perf.detail;
 		}
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';

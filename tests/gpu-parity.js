@@ -43,10 +43,15 @@ function serve(dir) {
 	const all = process.argv.includes('--all');
 	const stop = process.argv.includes('--keep-going') ? false : true;
 	const server = await serve(ROOT);
-	const puppeteer = require('/tmp/wgputest/node_modules/puppeteer-core');
-	process.env.LD_LIBRARY_PATH = '/tmp/al2023/lib';
+	// Tooling locations are overridable so the rig is not tied to one machine; the defaults
+	// match the @sparticuz/chromium extraction (chromium + al2023 libs + swiftshader in /tmp).
+	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/wgputest/node_modules/puppeteer-core';
+	const chromeBin = process.env.PGT_CHROME || '/tmp/chromium';
+	const libDir = process.env.PGT_LIBS || '/tmp/al2023/lib';
+	const puppeteer = require(puppeteerDir);
+	if (libDir) process.env.LD_LIBRARY_PATH = libDir;
 	const browser = await puppeteer.launch({
-		executablePath: '/tmp/chromium',
+		executablePath: chromeBin,
 		args: ['--headless=new', '--no-sandbox', '--no-zygote', '--disable-gpu-sandbox',
 			'--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--in-process-gpu', '--disable-dev-shm-usage'],
 		headless: false, protocolTimeout: 1500000
