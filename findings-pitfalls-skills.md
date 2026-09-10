@@ -443,3 +443,127 @@
 	The remaining H4 step is the no-readback renderer (render pipelines reading cellF/
 	cellI directly); the mirror download is ~8 ms at L5 and is the thing to remove
 	before L7-in-the-app is more than a demo.
+## WebGPU parity: collapse ties on the CPU too (fround), don't just document them
+
+	The 745 sub-f32 low ties above are not irreducible. Make the CPU pick the drainage
+	neighbour on Math.fround(z) instead of the f64 value: sub-ulp differences collapse
+	into the same f32 on both engines, both then break the tie by the smaller cell
+	index, and frame-1 low flips drop 745 -> 28 (~0.3% of cells). The residual is the
+	mirror image of the old failure: the GPU's own z differs from fround(cpu z) by
+	1-4 ulp (different arithmetic paths through the elevation formula), so where the
+	CPU now sees a tie the GPU still sees a real difference. Only a full f32 reference
+	sim (all crust state rounded every frame) would close that; the ensemble bounds
+	remain the gate for long runs. Rule: every discrete decision shared with the GPU
+	(low, wet, fraction thresholds) should be taken on f32-quantized inputs on the CPU.
+
+## The no-readback renderer (H4) and where the mirror is allowed back
+
+	render-gpu.js is the render.js twin as a fragment shader: one fullscreen triangle,
+	the layer id in a four-byte uniform, the static lookup raster in its own read-only
+	buffer, and the sim buffers bound read-only - a frame costs one draw and zero
+	readbacks. Headless validation without a presented canvas: render into an
+	offscreen RENDER_ATTACHMENT texture, copyTextureToBuffer, compare against
+	render.js's expected colors per cell. Nine layers come out pixel-exact; plate,
+	type and z differ by at most 1 per channel (f32 cos/ramps vs f64 rounded to u8).
+
+	The CPU mirror is now allowed back only at: the event cadence inside GpuSim.step
+	(events run on the CPU, one cycle late), a probe click, save, and the deposits
+	extract. The frame loop never downloads: the old per-render download was ~8 ms at
+	L5 on hardware (~113 ms on this container's SwiftShader) versus ~0.2 ms to submit
+	a frame's dispatches - it alone explained the ~50 fps GPU mode ceiling.
+
+## Headless WebGPU rig: what works in sparticuz chromium and what silently dies
+
+	Recipe: npm i @sparticuz/chromium puppeteer-core; extract to /tmp (chromium,
+	al2023/lib with libnss, swiftshader); LD_LIBRARY_PATH=/tmp/al2023/lib; launch
+	headless=new with --enable-unsafe-webgpu --enable-unsafe-swiftshader
+	--in-process-gpu --no-sandbox. The page must come from http://127.0.0.1 or
+	file:// - about:blank via puppeteer is not a secure context and navigator.gpu is
+	undefined there.
+
+	Two hard bugs in that build (152.0.7977): queue.writeBuffer rejects any nonzero
+	dataOffset ("Number of bytes to write is too large") even when it fits - pass a
+	subarray instead; and presenting a webgpu canvas kills the instance at the next
+	mapAsync ("A valid external Instance reference no longer exists", sometimes a
+	target crash) - sim dispatch + mapAsync without presents runs forever, presents
+	without mapAsync run forever, only the combination dies. So: validate renderers
+	via offscreen texture readback headlessly, and leave the presented-canvas path to
+	real hardware. tests/gpu-parity.js takes PGT_CHROME / PGT_PUPPETEER / PGT_LIBS so
+	the rig is not tied to /tmp paths.
+
+## plate fragmentation was stranded orphan components, not split/merge balance
+
+	Symptom at 1 Gyr (L5 map start): 27 plates, median 348 cells, 58% of all cells on a
+	plate boundary (~51% subduction + ~46% ridge), plates shredded into interleaved
+	fingers (isoperimetric quotient ~0.01), and 40% of covered cells sitting OFF their
+	plate's main connected component. The obvious suspects were wrong: with splits
+	disabled (Params.splitDamage=2) components still went 16 -> 155 in 300 Myr, and the
+	release longrun log shows splits ~= merges - the seeder, not events, makes the
+	mess.
+
+	Root cause: contact.overlaps consumed columns only at strongly convergent contacts
+	(gate R.closing > -epsHi), while gaps() spawns crust on whichever flank owns the
+	nearest column - hash tie-break. A sliver stranded on the wrong side of a
+	divergent/tangential contact is never consumed, never absorbed (it is only a
+	fragment of a LARGE plate, and absorb only looks at whole plates below the floor),
+	and rides with its plate forever, accreting a moat of wrong-side newborn crust
+	(all 218 orphans measured < 250 cells; embedded slivers showed age 0.4 Myr plate
+	labels already flipped). Probes: experiments/plate-{fragmentation,islands,shape,
+	size-sweep}.js.
+
+	Fix (js/events.js Events.orphans, terrane accretion, runs after split each cycle):
+	per plate, plain-connectivity components (threshold infinity, so a damage corridor
+	does not disconnect); largest = main; every other component below minCells is
+	rebased into the plate owning most of its adjacent cells, crust keeping its world
+	position exactly like a merge. Numbers, L5 map 1 Gyr seed 7: plates 27 -> 14,
+	components 229 -> 18, island cells 40% -> 3.4%, boundary share 58% -> 19%, median
+	plate ~810 cells; ASCII plate map coherent. Transform boundary share stays ~2-3%
+	- a genuine property of the velocity field, not a defect.
+
+	What did NOT fix it (do not retry): raising minPlateCells to 250 (12-14 plates but
+	boundary still 46-60% - size floors do not remove interleaving); ridge-spawn
+	hysteresis locking the spawn plate to the last owner within 25% distance margin
+	(WORSE, 45.9% islands - locking the axis to one flank widens the misassigned
+	bands); the epsHi gate fix alone (39.9% islands - kept only because design 4.1
+	says every overlap removes one column). Secondary change that stays: the absorb
+	floor is Events.minCells itself (was 0.5x) - plan E1's stated intent, and with
+	terranes accreting there is no reason for half-size plates to linger. minPlateCells
+	stays at the author's 100.
+
+## terrane accretion shifts ore fossils, legitimately
+
+	tests/ores.js arcOnOverrider was brittle at 0.9 (baseline 0.911): terrane accretion
+	moves arc-fossil crust across plate labels, so a trench-side override can carry
+	arc potential from its accreted terrane - baseline moved to 0.896. Threshold now
+	0.85 with a comment. Rule: statistical geography tests that depend on plate
+	IDENTITY need margin for relabelling; tests that depend on crust POSITION do not.
+
+## structural WGSL checks without a GPU (tests/wgsl-struct.js)
+
+	The failed-gpu branch shipped ten kernel modules that never compiled (undefined
+	constants, reserved keywords); nothing caught it because compilation only happens
+	in the browser. tests/wgsl-struct.js rebuilds every kernel's full source in node
+	(CommonWGSL prelude for its groups + body, plus the renderer shader with its const
+	patch) and asserts: brace/paren balance, an entry point, every SCREAMING_CASE
+	token defined (const/fn/let/struct/var<...> declarations), and every called name
+	either declared or a WGSL builtin/statement from an allowlist. Probe-validated:
+	renaming a constant, adding a stray brace, dropping a group from a spec (kills
+	prelude helpers) and typo-ing a helper all fail with a pointed message.
+
+	Subtleties that each cost a probe iteration: strip comments FIRST (words and
+	braces in comments are neither definitions nor references); `var<storage,
+	read_write> NAME` needs the address-space attribute in the declaration regex;
+	multi-letter constants (CELL_EPS) do not match a two-letter-prefix token regex;
+	scan uses scanA/scanB/scanC entries, the renderer fs, everything else main - so
+	"entry point" means @compute/@fragment present, not literally fn main.
+
+## never `git checkout -- <file>` while it carries uncommitted fixes
+
+	Probing the new test with an injected bug, restoring with `git checkout -- file`
+	silently reverted that file's real uncommitted fix (the wgsl-contact gate) - the
+	probe had hit the wrong file, so nothing looked wrong until the CPU/GPU gates were
+	diffed. The ensemble that had started before the revert was still valid only
+	because node had already required the module into memory. Rules: restore probe
+	mutations with `cp backup file`, never git checkout, in a tree with uncommitted
+	work; and remember a long-running node process executes the code it loaded at
+	startup, not the file on disk.

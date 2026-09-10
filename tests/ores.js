@@ -196,7 +196,10 @@ for (const row of epochs) {
 }
 assert.ok(endGeo.oroContinental > 0.9, 'oOro stays on continental crust: ' + endGeo.oroContinental);
 assert.ok(endGeo.basinSediment > 0.6, 'oBas stays in thick sediment: ' + endGeo.basinSediment);
-assert.ok(endGeo.arcOnOverrider > 0.9, 'oArc stays on overriding plates: ' + endGeo.arcOnOverrider);
+// Terrane accretion (Events.orphans) legitimately carries arc fossils onto plates that are
+// not subducting right now, so this fossil-record share sits a little below the production
+// share; 0.85 keeps the assertion about where arcs form while tolerating the drift.
+assert.ok(endGeo.arcOnOverrider > 0.85, 'oArc stays on overriding plates: ' + endGeo.arcOnOverrider);
 
 // Extraction: ranked, in range, tagged, and the same list twice.
 const scratch = new Float64Array(grid.V);

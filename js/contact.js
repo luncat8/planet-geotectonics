@@ -32,7 +32,7 @@ var Contact = {
 	// relative velocity is the test, not the cell-edge type, so it does not care how the two
 	// columns happen to fall into cells.
 	overlaps: function (s) {
-		var g = s.grid, R = ContactParams.radius, hi = ContactParams.epsHi;
+		var g = s.grid, R = ContactParams.radius;
 		s.consumedBy.fill(-1);
 		s.overlaps = 0;
 		for (var i = 0; i < s.n; i++) {
@@ -59,7 +59,12 @@ var Contact = {
 						- s.omega[aD + 2] * wx + s.omega[aD] * wz) * nyD
 						+ (s.omega[bD] * s.world[wj + 1] - s.omega[bD + 1] * s.world[wj]
 						- s.omega[aD] * wy + s.omega[aD + 1] * wx) * nzD;
-					if (R * closingD > -hi) continue;
+					// Any convergence consumes (design §4.1: every overlap removes one column;
+					// the removal rate is the full relative speed). Gating on epsHi starved
+					// sub-threshold convergence instead, and a boundary closing at just under
+					// epsHi interpenetrated ~2 km/Myr: ghost columns passed through each other
+					// and shredded both plates into interleaved strips.
+					if (R * closingD > 0) continue;
 					best = d; other = j; dx = ex; dy = ey; dz = ez;
 				}
 			}
@@ -71,7 +76,7 @@ var Contact = {
 			var closing = (s.omega[b + 1] * zj - s.omega[b + 2] * yj - s.omega[a + 1] * wz + s.omega[a + 2] * wy) * nx
 				+ (s.omega[b + 2] * xj - s.omega[b] * zj - s.omega[a + 2] * wx + s.omega[a] * wz) * ny
 				+ (s.omega[b] * yj - s.omega[b + 1] * xj - s.omega[a] * wy + s.omega[a + 1] * wx) * nz;
-			if (R * closing > -hi) continue;
+			if (R * closing > 0) continue;
 			if (Contact.loser(s, i, other) !== i) continue;
 			s.consumedBy[i] = other;
 			s.overlaps++;

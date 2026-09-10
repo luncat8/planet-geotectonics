@@ -21,6 +21,7 @@ var Events = {
 		Events.retire(s);
 		Events.compactPlates(s);
 		Events.split(s);
+		Events.orphans(s);
 	},
 	copy: function (s, from, to) {
 		var a = from * 3, b = to * 3;
@@ -98,8 +99,11 @@ var Events = {
 		}
 	},
 	// A plate too small to be a plate is absorbed by the neighbour it shares most boundary with.
+	// The floor is the split minimum itself: anything a rift could not stand up as a plate is a
+	// fragment, and fragments only persist until the next cycle (a 0.5 factor left 50-99-cell
+	// plates wandering forever, which is what shredded the map into boundary types).
 	absorb: function (s) {
-		var cap = s.plateCap, nP = s.plateCount, floor = Events.minCells(s) * 0.5;
+		var cap = s.plateCap, nP = s.plateCount, floor = Events.minCells(s);
 		for (var a = 0; a < nP; a++) {
 			if (s.plateDead[a] || s.plateCells[a] >= floor) continue;
 			var best = -1, bestLen = 0;
@@ -359,6 +363,74 @@ var Events = {
 				if (corridor[cell]) s.damage[i] = EventsParams.splitDamage * 0.5;
 			}
 			s.splits += made;
+		}
+	},
+	// Terrane accretion: a connected component of a plate that is disconnected from the
+	// plate's main body and smaller than the split minimum cannot be a plate of its own —
+	// and nothing else ever removes it. Divergent and tangential contacts never consume, so
+	// a margin sliver stranded on the wrong side of a ridge rides with its plate forever,
+	// accreting a moat of wrong-side newborn crust around it (measured: 40 % of covered
+	// cells ended up in such interleaved strips by 1 Gyr, shredding every plate shape).
+	// The component joins the plate owning the cells around it, crust keeping its world
+	// position exactly like a merge rebase. Plain connectivity (threshold ∞), so a plate
+	// cut by a damage corridor is still one component until Events.split formally cuts it.
+	orphans: function (s) {
+		var g = s.grid, min = Events.minCells(s), label = s.compLabel, cap = s.plateCap;
+		for (var p = 0; p < s.plateCount; p++) {
+			if (s.plateDead[p] || s.plateCells[p] < 2 * min) continue;
+			var nComp = Events.components(s, p, Infinity);
+			if (nComp < 2) continue;
+			var main = 0, id;
+			for (id = 1; id < nComp; id++) if (s.compSize[id] > s.compSize[main]) main = id;
+			var orphaned = 0;
+			for (id = 0; id < nComp; id++) if (id !== main && s.compSize[id] < min) orphaned++;
+			if (!orphaned) continue;
+			// The tally budget is 64 orphan components per plate (orphanTally is 64*plateCap);
+			// a plate beyond that (only reachable on a badly shredded map) accretes its first
+			// 64 this cycle and the rest over the following ones.
+			var tally = s.orphanTally, index = s.orphanIndex;
+			index.fill(-1);
+			var next = 0;
+			for (id = 0; id < nComp && next < 64; id++) {
+				if (id !== main && s.compSize[id] < min) index[id] = next++;
+			}
+			tally.fill(0, 0, next * cap);
+			for (var c = 0; c < g.V; c++) {
+				var lab = label[c];
+				if (lab < 0 || lab === main || lab >= 64 || index[lab] < 0) continue;
+				for (var k = 0; k < g.ringN[c]; k++) {
+					var j = g.ring[c * 6 + k];
+					if (j < 0) continue;
+					var q = s.cellPlate[j];
+					if (q === p || q === 65535 || q >= s.plateCount || s.plateDead[q]) continue;
+					tally[index[lab] * cap + q]++;
+				}
+			}
+			var lp = p * 4, scratch = s.scratch;
+			for (id = 0; id < nComp; id++) {
+				if (id === main || s.compSize[id] >= min) continue;
+				var ix = id < 64 ? index[id] : -1;
+				if (ix < 0) continue;
+				var best = -1, bestCount = 0;
+				for (var q2 = 0; q2 < s.plateCount; q2++) {
+					var t = tally[ix * cap + q2];
+					if (t > bestCount) { bestCount = t; best = q2; }
+				}
+				if (best < 0) continue;
+				var wp = best * 4;
+				for (var i = 0; i < s.n; i++) {
+					if (!s.alive[i] || s.plate[i] !== p) continue;
+					var cell = s.cell[i];
+					if (cell < 0 || label[cell] !== id) continue;
+					var b = i * 3;
+					EventsQuat.rotate(scratch, 0, s.q, lp, s.body, b);
+					EventsQuat.rotateInv(s.body, b, s.q, wp, scratch, 0);
+					s.world[b] = scratch[0]; s.world[b + 1] = scratch[1]; s.world[b + 2] = scratch[2];
+					s.plate[i] = best;
+				}
+				s.plateCells[best] += s.compSize[id];
+				s.plateCells[p] -= s.compSize[id];
+			}
 		}
 	}
 };
