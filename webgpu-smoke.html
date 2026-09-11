@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WebGPU smoke · planet-geotectonics</title>
+<!-- webgpu-smoke.html - double-click in a real browser (no build, no server, file:// ok).
+     Boots the GPU engine exactly like index.html does, runs a short CPU/GPU parity
+     stretch, exercises the timestamp pipeline and every map layer, and writes the
+     full report below. "Save log" downloads it as a .log file - drop that file into
+     experiments/logs/ and tell the next agent session its name. -->
+<style>
+body { font: 13px/1.5 ui-monospace, Consolas, monospace; background: #10141d; color: #cdd6e4; margin: 16px; }
+h1 { font-size: 15px; margin: 0 0 8px; }
+pre#log { white-space: pre-wrap; word-break: break-word; background: #0b0e15; border: 1px solid #263043;
+	padding: 10px; max-height: 60vh; overflow: auto; }
+.ok { color: #7fd6a4; } .bad { color: #e07070; }
+button { margin-right: 8px; padding: 4px 12px; }
+#map { display: block; margin-top: 10px; image-rendering: pixelated; width: 256px; height: 128px; }
+</style>
+</head>
+<body>
+<h1>WebGPU smoke · planet-geotectonics</h1>
+<button id="save">Save log</button><button id="copy">Copy log</button>
+<pre id="log">starting…</pre>
+<canvas id="map" width="256" height="128"></canvas>
+<script src="js/geodesics.js"></script>
+<script src="js/params.js"></script>
+<script src="js/quat.js"></script>
+<script src="js/mantle.js"></script>
+<script src="js/diag.js"></script>
+<script src="js/state.js"></script>
+<script src="js/columns.js"></script>
+<script src="js/edges.js"></script>
+<script src="js/plates.js"></script>
+<script src="js/contact.js"></script>
+<script src="js/column-update.js"></script>
+<script src="js/surface.js"></script>
+<script src="js/events.js"></script>
+<script src="js/checkpoint.js"></script>
+<script src="js/perf.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/gpu/wgsl-common.js"></script>
+<script src="js/gpu/wgsl-columns.js"></script>
+<script src="js/gpu/wgsl-scan.js"></script>
+<script src="js/gpu/wgsl-mantle.js"></script>
+<script src="js/gpu/wgsl-plates.js"></script>
+<script src="js/gpu/wgsl-edges.js"></script>
+<script src="js/gpu/wgsl-contact.js"></script>
+<script src="js/gpu/wgsl-column.js"></script>
+<script src="js/gpu/wgsl-surface.js"></script>
+<script src="js/gpu/wgsl-diag.js"></script>
+<script src="js/gpu/sim-gpu.js"></script>
+<script src="js/gpu/render-gpu.js"></script>
+<script>
+'use strict';
+var LOG = [], errors = [], failures = [];
+function say(line) { LOG.push(line); document.getElementById('log').textContent = LOG.join('\n'); }
+function note(tag, line) { say('[' + tag + '] ' + line); }
+function fail(line) { say('[FAIL] ' + line); failures.push(line); }
+// Every console.error line (Dawn reports WebGPU validation errors there too) goes into the log.
+var consoleError = console.error;
+console.error = function () {
+	var line = Array.prototype.map.call(arguments, function (a) {
+		return a && a.stack ? a.stack : String(a);
+	}).join(' ');
+	errors.push(line);
+	consoleError.apply(console, arguments);
+};
+window.addEventListener('error', function (e) { errors.push('pageerror: ' + e.message); });
+window.addEventListener('unhandledrejection', function (e) { errors.push('unhandledrejection: ' + e.reason); });
+
+function adapterInfo(adapter) {
+	if (!adapter) return 'none';
+	var i = adapter.info || {};
+	return [i.description || [i.vendor, i.architecture, i.device].filter(Boolean).join('/') || 'unknown',
+		'features: ' + Array.from(adapter.features || []).join(',') || 'features: (empty)']
+		+ ' | ts-query: ' + (adapter.features.has('timestamp-query') ? 'yes' : 'no');
+}
+
+(async function () {
+	note('boot', 'date ' + new Date().toISOString());
+	note('boot', 'browser ' + navigator.userAgent);
+	if (!navigator.gpu) { fail('navigator.gpu missing - open in a browser with WebGPU (Chrome 113+/Firefox 141+)'); return finish(); }
+
+	var t0 = Date.now();
+	var adapter = await navigator.gpu.requestAdapter({ forceFallbackAdapter: false });
+	var usedFallback = false;
+	if (!adapter) { adapter = await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }); usedFallback = true; }
+	if (!adapter) { fail('no adapter at all'); return finish(); }
+	note('boot', 'adapter ' + (usedFallback ? '(fallback/SwiftShader) ' : '(hardware) ') + adapterInfo(adapter));
+
+	// Two identical worlds from the same seed: CPU reference and GPU run.
+	var level = Params.level, seed = Params.seed, dt = 0.1;
+	var cpu = new State(new Grid(level, seed).build(), seed);
+	var gpu = new State(new Grid(level, seed).build(), seed);
+	cpu.reset(seed); gpu.reset(seed);
+	cpu.ckptCap = 0; gpu.ckptCap = 0;
+	Sim.raster(cpu);
+	Sim.raster(gpu);
+
+	var S = await GpuSim.init(gpu, { fallback: false });
+	note('init', 'GpuSim.init ok in ' + S.built + ' ms, tsOn=' + GpuSim.S.tsOn +
+		', queries=' + (GpuSim.S.ts ? GpuSim.S.ts.count : 0));
+	var device = GpuSim.S.device;
+	device.onuncapturederror = function (e) { errors.push('webgpu uncaptured: ' + e.message); };
+	device.lost.then(function (info) { if (info.reason) errors.push('device lost: ' + info.message); });
+	if (!GpuSim.S.tsOn) note('init', 'timestamp-query not available - per-kernel timing off (not a failure)');
+	GpuSim.raster(gpu);
+	await GpuSim.download(gpu);
+
+	// Phase 1: five frames without an event boundary - the parity stretch.
+	Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt);
+	await GpuSim.advance(gpu, dt, 5);
+	await GpuSim.download(gpu);
+	var V = cpu.grid.V, ownerBad = 0, zMax = 0;
+	for (var c = 0; c < V; c++) {
+		if (cpu.owner[c] !== gpu.owner[c]) ownerBad++;
+		var dz = Math.abs(cpu.z[c] - gpu.z[c]); if (dz > zMax) zMax = dz;
+	}
+	note('parity', 'frame 5 dt ' + dt + ' · n cpu=' + cpu.n + ' gpu=' + gpu.n + ' · plates cpu=' +
+		cpu.plateCount + ' gpu=' + gpu.plateCount + ' · owner mismatch ' + ownerBad + '/' + V +
+		' · |dz| max ' + zMax.toFixed(1) + ' m');
+	note('parity', 'meanSpeed cpu=' + (cpu.meanSpeed / 10000).toFixed(3) + ' gpu=' +
+		(gpu.meanSpeed / 10000).toFixed(3) + ' cm/yr · maxSpeed cpu=' + (cpu.maxSpeed / 10000).toFixed(3) +
+		' gpu=' + (gpu.maxSpeed / 10000).toFixed(3) + ' cm/yr');
+	if (ownerBad > V * 0.005) fail('owner mismatch too high: ' + ownerBad + '/' + V);
+	if (Math.abs(cpu.plateCount - gpu.plateCount) > 2) fail('plate count drift ' + cpu.plateCount + ' vs ' + gpu.plateCount);
+	if (Math.abs(cpu.meanSpeed - gpu.meanSpeed) > 0.2 * Math.max(1, Math.abs(cpu.meanSpeed))) fail('meanSpeed drift > 20%');
+
+	// Phase 2: fifteen more frames - crosses the t=1 Myr event cycle (download+cycle+upload).
+	await GpuSim.advance(gpu, dt, 15);
+	await GpuSim.download(gpu);
+	var finite = Number.isFinite(gpu.meanSpeed + gpu.maxSpeed + gpu.plateCount) && gpu.n > 0;
+	note('events', 'frame 20 t=' + gpu.t.toFixed(1) + ' Myr · plates ' + gpu.plateCount +
+		' · columns ' + gpu.n + ' · finite=' + finite);
+	if (!finite) fail('GPU state not finite after the event cycle');
+
+	// Phase 3: timestamp pipeline (the ring the buggy usage used to break).
+	var tsWall = Date.now();
+	await GpuSim.tsCollect();
+	note('ts', 'tsCollect ' + (Date.now() - tsWall) + ' ms · ' + (GpuSim.tsReport() || 'no kernel timing'));
+
+	// Phase 4: the GPU renderer over every layer, including speed/age/force.
+	var renderer = new GpuRenderer(document.getElementById('map')).init(gpu);
+	var layers = ['plate', 'type', 'z', 'damage', 'owner', 'sediment', 'speed', 'age', 'force',
+		'oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
+	for (var l = 0; l < layers.length; l++) renderer.draw(layers[l]);
+	await new Promise(function (r) { setTimeout(r, 300); });
+	note('render', 'GPU renderer drew all ' + layers.length + ' layers (map visible below)');
+
+	finish();
+	function finish() {
+		note('errors', 'captured console/webgpu errors: ' + errors.length);
+		for (var i = 0; i < errors.length; i++) say('  ' + errors[i].split('\n').join('\n  '));
+		if (errors.length) fail('webgpu/page errors captured (see above)');
+		note('result', failures.length ? 'FAIL (' + failures.length + ')' : 'PASS');
+		note('result', 'total wall ' + (Date.now() - t0) + ' ms');
+	}
+})().catch(function (e) {
+	fail('uncaught: ' + (e && e.stack || e));
+	note('result', 'FAIL');
+});
+
+document.getElementById('save').addEventListener('click', function () {
+	var name = 'webgpu-smoke-' + new Date().toISOString().replace(/[:.]/g, '-') + '.log';
+	var link = document.createElement('a');
+	link.href = URL.createObjectURL(new Blob([LOG.join('\n')], { type: 'text/plain' }));
+	link.download = name;
+	link.click();
+	URL.revokeObjectURL(link.href);
+});
+document.getElementById('copy').addEventListener('click', function () {
+	navigator.clipboard && navigator.clipboard.writeText(LOG.join('\n'));
+});
+</script>
+</body>
+</html>

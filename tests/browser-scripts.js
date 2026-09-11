@@ -20,7 +20,7 @@ Sim.advance(state, 0.1, 10);
 renderer.draw('z'); renderer.draw('owner'); renderer.draw('type'); renderer.draw('sediment');
 Sim.advance(state, 0.1, 190);
 renderer.draw('plate'); renderer.draw('type'); renderer.draw('z'); renderer.draw('owner');
-renderer.draw('damage'); renderer.draw('sediment');
+renderer.draw('damage'); renderer.draw('sediment'); renderer.draw('speed'); renderer.draw('age'); renderer.draw('force');
 for (const ore of Renderer.ORE) renderer.draw(ore);
 const deposits = Extract.deposits(state, 0.01, 4, new Float64Array(state.grid.V));
 if (!Array.isArray(deposits)) throw new Error('extraction returns a list');

@@ -8,7 +8,8 @@ function GpuRenderer(canvas) {
 }
 
 GpuRenderer.LAYERS = { plate: 0, type: 1, z: 2, damage: 3, owner: 4, sediment: 5,
-	oVms: 10, oMaf: 11, oArc: 12, oOro: 13, oBas: 14, oPla: 15 };
+	oVms: 10, oMaf: 11, oArc: 12, oOro: 13, oBas: 14, oPla: 15,
+	speed: 20, age: 21, force: 22 };
 
 GpuRenderer.SHADER = `struct U { layer: u32 };
 @group(0) @binding(0) var<uniform> u: U;
@@ -75,6 +76,19 @@ fn cellColor(c: u32) -> vec3<f32> {
 	if (layer == 5u) {
 		let sed = min(1.0, colH(oi).y / 5000.0);
 		return vec3(52.0 + 170.0 * sed, 42.0 + 110.0 * sed, 30.0 + 55.0 * sed);
+	}
+	// Same ramps as Renderer.draw: cell vel block 0, wEq block 7, column age colH.z.
+	if (layer == 20u) {
+		let v = min(1.0, length(CELLF[c * 8u].xyz) / 80000.0);
+		return vec3(12.0 + 236.0 * v, 16.0 + 234.0 * v, 28.0 + 227.0 * v);
+	}
+	if (layer == 21u) {
+		let a = min(1.0, colH(oi).z / 1000.0);
+		return vec3(234.0 - 202.0 * a, 112.0 - 66.0 * a, 48.0 + 52.0 * a);
+	}
+	if (layer == 22u) {
+		let f = sqrt(min(1.0, length(CELLF[c * 8u + 7u].xyz) / 500000.0));
+		return vec3(16.0 + 239.0 * f, 16.0 + 204.0 * f * f, 30.0 + 26.0 * f);
 	}
 	let z = cellZ(c);
 	if (z < 0.0) {
