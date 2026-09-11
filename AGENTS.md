@@ -45,6 +45,7 @@
 0.1.5-compare.md - comparison and verdicts with measurements.
 0.1.5-final-design.md - normative design.
 0.2-plan.md - development plan built on the design.
+0.3-plan.md - GPU smoothness and measurement plan (post 0.2-H).
 experiments/ - measurement scripts (node), not loaded by the page.
 experiments/logs/ - keep useful
 

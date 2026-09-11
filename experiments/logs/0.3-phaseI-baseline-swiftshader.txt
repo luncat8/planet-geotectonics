@@ -1,0 +1,46 @@
+0.3 Phase I baseline — captured 2026-09-11 in the Arena sandbox (no display GPU).
+
+Environment
+  node v22.22.3, sparticuz chromium 126.0.0 + 119.0.2 tried, puppeteer-core 23,
+  LD_LIBRARY_PATH=/tmp/al2023/lib:/tmp (swiftshader + al2023 libnss3 set).
+
+Result: BENCH skip — no WebGPU adapter in this container.
+  navigator.gpu exists, but requestAdapter({}) and requestAdapter({
+  forceFallbackAdapter: true }) both return null under the standard flags
+  (--enable-unsafe-webgpu --enable-unsafe-swiftshader --in-process-gpu),
+  also with --enable-features=Vulkan / ANGLE-SwiftShader variants. The repo's
+  own tests/gpu-parity.js fails identically here ("no WebGPU adapter"), so the
+  container image no longer carries a working SwiftShader WebGPU path (the
+  0.2-H log was captured on an earlier image).
+  BENCH skip: no WebGPU adapter (engine fell back to CPU)
+
+Consequence: Phase I baseline numbers are owner-rig numbers.
+  - In-page: open index.html?bench=1 in a real-GPU browser (Chrome). The perf
+    strip shows per-kernel GPU ms (ts=on) while playing; the bench suite prints
+    iso1/iso5/iso20 ms/step + smooth med/p95/max/hitches.
+  - Headless: node experiments/gpu-bench.js --out=experiments/logs/... on a
+    machine where the rig has an adapter (PGT_CHROME / PGT_PUPPETEER /
+    PGT_LIBS), then replace this file with the real baseline. The driver
+    loads bench.html (the standalone bench GUI; index.html?bench=1
+    redirects there).
+  - Bench inputs: Levels / Steps / dt on the page, or
+    PGT_QUERY='level=6&steps=8&dt=0.1' for the driver (?level=&steps=&dt=
+    pre-fill the page). Default matrix L5,L6 x 1,5,20 steps, dt 0.1:
+    one row per config with iso ms/step + smooth med/p95/max/hitches/Myr/s,
+    plus a BENCH kernels: line (top-10 from the timestamp ring) when the
+    adapter has timestamp-query.
+
+CPU-side gates on this machine (2026-09-11, after Phase I changes):
+  node tests/run-all.js          -> PASS all tests (21 tests, incl. longrun)
+  node tests/gpu-parity.js       -> adapter-less in this image (see above)
+  node experiments/gpu-bench.js  -> BENCH skip line above; driver, URL params,
+                                    L5/L6 variants and file-write path verified
+
+I1/I2 overhead acceptance (< 0.1 ms/frame at L5), node experiments/overhead-instr.js:
+  frame() gap ring + EMA (I2, per frame):   0.045 us/frame
+  strip build Perf.update (I2, 2 Hz):       6.0 us/call -> 0.121 us/frame
+  ts slot bookkeeping (I1, JS, 67 dispatch): 0.678 us/frame
+  total:                                    0.844 us/frame (budget 100 us/frame) PASS
+  Note: the WebGPU driver calls (insertTimestamp / resolveQuerySet / mapAsync)
+  are outside this number; they are expected nanosecond-scale enqueues and are
+  covered on the owner's rig by the iso ms/step delta vs the pre-Phase-I build.

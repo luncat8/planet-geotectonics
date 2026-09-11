@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planet Geotectonics — GPU benchmark</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0f14; color: #dfe7ef;
+         font: 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  .wrap { display: flex; gap: 18px; padding: 18px; align-items: flex-start; flex-wrap: wrap; }
+  #c { width: 880px; max-width: 44vw; min-width: 420px; height: auto; aspect-ratio: 2/1;
+       background: #000; border-radius: 8px; flex: none; }
+  .panel { flex: 1 1 520px; min-width: 480px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p.sub { margin: 0 0 14px; color: #9fb0c0; max-width: 66ch; }
+  .ctl { display: flex; gap: 14px; align-items: center; margin: 10px 0 14px; flex-wrap: wrap; }
+  label.f { color: #9fb0c0; }
+  input[type=text] { width: 90px; background: #131a22; color: #dfe7ef; border: 1px solid #263241;
+                     border-radius: 6px; padding: 5px 7px; }
+  button { background: #1d6fe0; color: #fff; border: 0; border-radius: 6px; padding: 8px 16px;
+           font-weight: 600; cursor: pointer; }
+  button:disabled { background: #34414f; cursor: default; }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; }
+  th, td { padding: 6px 10px; text-align: right; border-bottom: 1px solid #1c2530; }
+  th:first-child, td:first-child, th:nth-child(2), td:nth-child(2) { text-align: left; }
+  thead th { color: #9fb0c0; font-weight: 600; border-bottom: 1px solid #34414f; }
+  tr.hd60 td { background: rgba(43,196,116,0.10); }
+  .fps { font-weight: 700; }
+  .g { color: #2bc474; } .y { color: #e7c14a; } .r { color: #e2555a; }
+  .status { color: #9fb0c0; margin: 8px 0; min-height: 1.4em; }
+  .note { color: #7f92a4; font-size: 12.5px; max-width: 74ch; margin-top: 14px; }
+  code { background: #131a22; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <canvas id="c" width="880" height="440"></canvas>
+  <div class="panel">
+    <h1>Planet Geotectonics — GPU (WebGPU) benchmark</h1>
+    <p class="sub">Two time-boxed measurements per config, on your GPU. <b>iso</b> = the kernel
+      graph only: submit <i>steps</i> frames and await
+      <code>onSubmittedWorkDone</code> — no event round trips, no drawing.
+      <b>smooth</b> = the full play path (<code>GpuSim.advance</code>, including the event and
+      checkpoint round trips) under <code>requestAnimationFrame</code>, reporting the frame-gap
+      distribution. Rows whose smooth median clears ~16.7 ms sustain 60 fps and are highlighted.
+      The top-kernel GPU ms table (timestamp queries) prints under the table when the adapter
+      supports it. Open this file in a real browser — a sandbox with no WebGPU adapter skips.</p>
+    <div class="ctl">
+      <label class="f">Levels <input id="levels" type="text" value="5,6"></label>
+      <label class="f">Steps/frame <input id="steps" type="text" value="1,5,20"></label>
+      <label class="f">dt <input id="dt" type="text" value="0.1"></label>
+      <button id="run">Run benchmark</button>
+    </div>
+    <div class="status" id="status">Ready.</div>
+    <table id="tbl">
+      <thead><tr>
+        <th>level</th><th>steps</th><th>cells</th>
+        <th>iso ms/step</th><th>smooth med</th><th>p95</th><th>max</th>
+        <th class="fps">hitches</th><th class="fps">Myr/s</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="status" id="kern"></div>
+    <div class="note">
+      <b>iso ms/step</b> is the GPU kernel graph for <i>steps</i> consecutive frames divided by
+      <i>steps</i> (one <code>onSubmittedWorkDone</code> per sample); the 1-vs-5 gap exposes the
+      per-step fixed cost. <b>smooth med/p95/max</b> are rAF frame gaps in ms; a <b>hitch</b> is a
+      gap over 2× the median. <b>Myr/s</b> = simulated time per wall second on the smooth path.
+      Sampling is time-boxed (~1.2 s per iso config, ~5 s per smooth config, capped sample counts)
+      so a heavy level returns in bounded time. <code>?fast=1</code> shrinks the boxes for a quick
+      pass on slow renderers; <code>?noauto=1</code> suppresses the auto-run;
+      <code>?level=6&amp;steps=8&amp;dt=0.1</code> pre-fills the inputs (used by
+      <code>experiments/gpu-bench.js</code> via <code>PGT_QUERY</code>).
+    </div>
+  </div>
+</div>
+
+<script src="js/geodesics.js"></script>
+<script src="js/params.js"></script>
+<script src="js/quat.js"></script>
+<script src="js/mantle.js"></script>
+<script src="js/diag.js"></script>
+<script src="js/state.js"></script>
+<script src="js/columns.js"></script>
+<script src="js/edges.js"></script>
+<script src="js/plates.js"></script>
+<script src="js/contact.js"></script>
+<script src="js/column-update.js"></script>
+<script src="js/surface.js"></script>
+<script src="js/events.js"></script>
+<script src="js/checkpoint.js"></script>
+<script src="js/perf.js"></script>
+<script src="js/extract.js"></script>
+<script src="js/sim.js"></script>
+<script src="js/gpu/wgsl-common.js"></script>
+<script src="js/gpu/wgsl-plates.js"></script>
+<script src="js/gpu/wgsl-mantle.js"></script>
+<script src="js/gpu/wgsl-columns.js"></script>
+<script src="js/gpu/wgsl-scan.js"></script>
+<script src="js/gpu/wgsl-edges.js"></script>
+<script src="js/gpu/wgsl-contact.js"></script>
+<script src="js/gpu/wgsl-column.js"></script>
+<script src="js/gpu/wgsl-surface.js"></script>
+<script src="js/gpu/wgsl-diag.js"></script>
+<script src="js/gpu/sim-gpu.js"></script>
+<script src="js/gpu/render-gpu.js"></script>
+<script>
+(function () {
+	var canvas = document.getElementById('c');
+	var tbody = document.querySelector('#tbl tbody');
+	var statusEl = document.getElementById('status');
+	var kernEl = document.getElementById('kern');
+	var runBtn = document.getElementById('run');
+	var levelsIn = document.getElementById('levels');
+	var stepsIn = document.getElementById('steps');
+	var dtIn = document.getElementById('dt');
+	// ?level= / ?steps= / ?dt= pre-fill (experiments/gpu-bench.js passes PGT_QUERY).
+	try {
+		var q = new URLSearchParams(location.search);
+		if (q.get('level')) levelsIn.value = q.get('level');
+		if (q.get('steps')) stepsIn.value = q.get('steps');
+		if (q.get('dt')) dtIn.value = q.get('dt');
+	} catch (e) {}
+
+	var FAST = /[?&]fast=1/.test(location.search);
+	var planet = null;   // { level, grid, state, renderer }
+	var running = false;
+	var lines = [];
+
+	function setStatus(s) { statusEl.textContent = s; }
+	function log(t) { lines.push(t); console.log(t); }
+	// Yield to the event loop: resolve on the next animation frame, but never
+	// wait longer than 50 ms — so a throttled/hidden tab (rAF drops to ~1 Hz)
+	// can't freeze the run. (Same pattern as the climate bench page.)
+	function nextFrame() {
+		return new Promise(function (r) {
+			var done = false, go = function () { if (!done) { done = true; r(); } };
+			requestAnimationFrame(go); setTimeout(go, 50);
+		});
+	}
+	function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[a.length >> 1]; }
+	function parseList(el, lo, hi) {
+		return el.value.split(',').map(function (s) { return +s.trim(); })
+			.filter(function (v) { return isFinite(v) && v >= lo && v <= hi; });
+	}
+
+	// One world per level. Reuses the WebGPU device across levels; GpuSim.init
+	// rebuilds the arenas for the new grid.
+	function buildPlanet(level) {
+		return new Promise(function (resolve, reject) {
+			var grid = new Grid(level, Params.seed).build();
+			var state = new State(grid, Params.seed);
+			GpuSim.init(state, { device: GpuSim.device, fallback: false })
+				.then(function () {
+					GpuSim.raster(state);
+					var renderer = new GpuRenderer(canvas).init(state);
+					renderer.draw('z');
+					planet = { level: level, grid: grid, state: state, renderer: renderer };
+					resolve(planet);
+				}, reject);
+		});
+	}
+
+	// iso sample: submit n frames, await the queue, report wall ms for the batch.
+	function isoBatch(state, dt, n) {
+		return new Promise(function (resolve) {
+			var t0 = performance.now();
+			for (var i = 0; i < n; i++) GpuSim.frame(state, dt);
+			GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+				resolve(performance.now() - t0);
+			});
+		});
+	}
+	function measureIso(state, dt, n) {
+		return new Promise(function (resolve) {
+			var t = [], total = 0, MAXN = FAST ? 12 : 40, budget = FAST ? 600 : 1200, i = 0;
+			(function sample() {
+				isoBatch(state, dt, n).then(function (d) {
+					if (i < 4) { i++; sample(); return; }        // warmup
+					t.push(d); total += d; i++;
+					if ((total < budget || t.length < 3) && t.length < MAXN) {
+						if ((t.length & 3) === 0) nextFrame().then(sample); else sample();
+					} else {
+						resolve(median(t) / n);
+					}
+				});
+			})();
+		});
+	}
+
+	// smooth sample: the real play path under rAF, box-time-limited.
+	function measureSmooth(state, dt, n) {
+		return new Promise(function (resolve) {
+			var box = FAST ? 2500 : 5000;
+			var gaps = [], last = 0, busy = false, done = 0, t0 = 0;
+			function finish() {
+				gaps.sort(function (a, b) { return a - b; });
+				var m = gaps.length, med = m ? gaps[m >> 1] : 0, h = 0;
+				for (var i = 0; i < m; i++) if (gaps[i] > 2 * med) h++;
+				resolve({
+					medMs: med,
+					p95Ms: m ? gaps[Math.min(m - 1, Math.floor(0.95 * (m - 1)))] : 0,
+					maxMs: m ? gaps[m - 1] : 0,
+					hitches: h, frames: m,
+					myrPerSec: (performance.now() - t0) > 0 ? done * dt * 1000 / (performance.now() - t0) : 0
+				});
+			}
+			function tick(now) {
+				if (last) gaps.push(now - last);
+				last = now;
+				if (!t0) t0 = now;
+				if (now - t0 >= box) { finish(); return; }
+				if (busy) return;
+				busy = true;
+				GpuSim.advance(state, dt, n).then(function () {
+					busy = false; done += n;
+					try { planet.renderer.draw('z'); } catch (e) {}
+					requestAnimationFrame(tick);
+				})['catch'](function () { busy = false; finish(); });
+			}
+			requestAnimationFrame(tick);
+		});
+	}
+
+	async function run() {
+		if (running) return;            // guard overlapping runs (double-click / auto-run)
+		running = true; runBtn.disabled = true;
+		tbody.innerHTML = ''; kernEl.textContent = ''; lines = [];
+		var levels = parseList(levelsIn, 4, 7);
+		var steps = parseList(stepsIn, 1, 16);
+		var dt = +dtIn.value;
+		if (!levels.length || !steps.length || !isFinite(dt) || dt <= 0) {
+			setStatus('Bad input: levels/steps are comma lists (levels 4–7, steps 1–16), dt > 0.');
+			running = false; runBtn.disabled = false;
+			return;
+		}
+		try {
+			setStatus('Building L' + levels[0] + '…');
+			await nextFrame();
+			await buildPlanet(levels[0]);
+			if (!GpuSim.S || !GpuSim.S.device) throw new Error('no WebGPU adapter');
+			log('BENCH engine=gpu ts=' + (GpuSim.S.tsOn ? 'on' : 'off')
+				+ ' levels=' + levels.join(',') + ' steps=' + steps.join(',') + ' dt=' + dt);
+			for (var li = 0; li < levels.length; li++) {
+				var level = levels[li];
+				if (planet.level !== level) {
+					setStatus('Building L' + level + '…');
+					await nextFrame();
+					await buildPlanet(level);
+				}
+				var cells = planet.grid.V;
+				for (var bi = 0; bi < steps.length; bi++) {
+					var n = steps[bi];
+					setStatus('L' + level + ' ×' + n + ': iso…');
+					await nextFrame();
+					var iso = await measureIso(planet.state, dt, n);
+					setStatus('L' + level + ' ×' + n + ': smooth…');
+					await nextFrame();
+					var sm = await measureSmooth(planet.state, dt, n);
+					var tr = document.createElement('tr');
+					if (sm.medMs > 0 && sm.medMs <= 16.7) tr.className = 'hd60';
+					var fps = sm.medMs > 0 ? 1000 / sm.medMs : 0;
+					tr.innerHTML =
+						'<td>L' + level + '</td><td>' + n + '</td>' +
+						'<td>' + cells.toLocaleString() + '</td>' +
+						'<td>' + iso.toFixed(3) + '</td>' +
+						'<td>' + sm.medMs.toFixed(1) + '</td>' +
+						'<td>' + sm.p95Ms.toFixed(1) + '</td>' +
+						'<td>' + sm.maxMs.toFixed(1) + '</td>' +
+						'<td class="fps ' + (fps >= 58 ? 'g' : fps >= 30 ? 'y' : 'r') + '">' + sm.hitches + '</td>' +
+						'<td class="fps">' + sm.myrPerSec.toFixed(1) + '</td>';
+					tbody.appendChild(tr);
+					log('BENCH L' + level + ' steps=' + n + ' iso ms/step=' + iso.toFixed(3)
+						+ ' smooth med=' + sm.medMs.toFixed(1) + ' p95=' + sm.p95Ms.toFixed(1)
+						+ ' max=' + sm.maxMs.toFixed(1) + ' hitches=' + sm.hitches
+						+ ' frames=' + sm.frames + ' myr/s=' + sm.myrPerSec.toFixed(1));
+				}
+			}
+			// Top-kernel GPU ms from the timestamp ring (needs timestamp-query).
+			try {
+				await GpuSim.tsCollect();
+				var rep = GpuSim.tsReport();
+				if (rep) { kernEl.textContent = 'kernels: ' + rep; log('BENCH kernels: ' + rep); }
+				else kernEl.textContent = 'kernel timing: adapter lacks timestamp-query';
+			} catch (e) {}
+			setStatus('Done. Lower ms is better; green hitches rows sustain 60 fps.');
+			log('BENCH done');
+		} catch (e) {
+			var msg = 'BENCH skip: ' + (e && e.message ? e.message : e);
+			log(msg);
+			setStatus('Benchmark skipped: ' + (e && e.message ? e.message : e));
+		} finally {
+			runBtn.disabled = false; running = false;
+			window.__benchReport = { lines: lines };
+			window.__benchDone = true;
+		}
+	}
+
+	runBtn.addEventListener('click', run);
+	// auto-run once on load (unless suppressed for scripted testing)
+	if (!/[?&]noauto=1/.test(location.search))
+		window.addEventListener('load', function () { setTimeout(run, 200); });
+})();
+</script>
+</body>
+</html>
