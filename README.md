@@ -65,6 +65,10 @@ node tests/run-all.js
 ```
 
 Uses only Node built-ins. The runner launches the retained-memory test with `--expose-gc`.
+The GPU path itself is verified in a real browser: double-click `webgpu-smoke.html`
+(`run-smoke.bat` / `run-smoke.command`), which boots the engine, runs a CPU/GPU parity
+stretch, exercises the timestamp ring and every map layer, and offers the full report
+as a downloadable log.
 The slower release profile extends the stability histories to 4500 Myr at dt 0.1 and 500 Myr
 at dt 0.01, and makes the 60 steps/s performance proxy strict:
 

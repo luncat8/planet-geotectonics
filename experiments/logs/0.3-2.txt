@@ -1,0 +1,50 @@
+Chrome 151
+
+index.html
+L5
+GPU
+108.4 fps · step 0.00 ms · frame 34.4 ms · 108 steps/s · 10.8 Myr/s · p95 66.6 ms · max 77.9 ms · events 4 (114.7 ms)
+
+CPU
+90.3 fps · step 8.97 ms · frame 11.3 ms · 90 steps/s · 9.0 Myr/s · p95 11.2 ms · max 16.7 ms
+
+
+bench.html
+level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+L5	1	10,242	8.900	5.6	111.1	122.3	33	6.3
+L5	5	10,242	7.220	100.0	155.5	183.3	0	6.2
+L6	1	40,962	21.500	16.6	405.6	472.1	9	2.1
+L6	5	40,962	19.880	388.8	566.5	672.1	0	1.8
+
+webgpu-smoke.html
+[boot] adapter (hardware) nvidia/ampere,features: depth32float-stencil8,rg11b10ufloat-renderable,texture-formats-tier1,bgra8unorm-storage,texture-compression-bc,dual-source-blending,core-features-and-limits,float32-filterable,indirect-first-instance,float32-blendable,depth-clip-control,texture-compression-bc-sliced-3d,timestamp-query,shader-f16,clip-distances,texture-formats-tier2,primitive-index,texture-component-swizzle,subgroups | ts-query: yes
+[init] GpuSim.init ok in 91 ms, tsOn=true, queries=140
+[parity] frame 5 dt 0.1 · n cpu=10242 gpu=10242 · plates cpu=16 gpu=16 · owner mismatch 0/10242 · |dz| max 139.0 m
+[parity] meanSpeed cpu=4.022 gpu=4.947 cm/yr · maxSpeed cpu=11.449 gpu=13.026 cm/yr
+[FAIL] meanSpeed drift > 20%
+[events] frame 20 t=2.0 Myr · plates 16 · columns 10210 · finite=true
+[ts] tsCollect 1 ms · winners 0.56 diagC 0.41 loserRank 0.29 diagA 0.26 ledgerReduceA 0.15
+[render] plate: mean|d| NaN max|d| 0 ch>16: 0
+[render] type: mean|d| NaN max|d| 0 ch>16: 0
+[render] z: mean|d| NaN max|d| 0 ch>16: 0
+[render] damage: mean|d| NaN max|d| 0 ch>16: 0
+[render] owner: mean|d| NaN max|d| 0 ch>16: 0
+[render] sediment: mean|d| NaN max|d| 0 ch>16: 0
+[render] speed: mean|d| NaN max|d| 0 ch>16: 0
+[render] age: mean|d| NaN max|d| 0 ch>16: 0
+[render] force: mean|d| NaN max|d| 0 ch>16: 0
+[render] dir: mean|d| NaN max|d| 0 ch>16: 0
+[render] oVms: mean|d| NaN max|d| 0 ch>16: 0
+[render] oMaf: mean|d| NaN max|d| 0 ch>16: 0
+[render] oArc: mean|d| NaN max|d| 0 ch>16: 0
+[render] oOro: mean|d| NaN max|d| 0 ch>16: 0
+[render] oBas: mean|d| NaN max|d| 0 ch>16: 0
+[render] oPla: mean|d| NaN max|d| 0 ch>16: 0
+[render] GPU renderer drew all 16 layers, pixel-parity checked (map below: dir)
+[errors] captured console/webgpu errors: 32
+  webgpu uncaptured: undefined
+  webgpu uncaptured: undefined
+
+[FAIL] webgpu/page errors captured (see above)
+[result] FAIL (2)
+[result] total wall 1798 ms

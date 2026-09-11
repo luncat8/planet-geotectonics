@@ -13,6 +13,30 @@ function Renderer(canvas, state) {
 		this.palette[p * 3 + 2] = 155 + 80 * Math.cos(a + 4.2);
 	}
 }
+// Hue helper for the plate-motion view: HSL hue->RGB channel, no allocation.
+function hue2rgb(p, q, t) {
+	if (t < 0) t += 1; if (t > 1) t -= 1;
+	if (t < 1 / 6) return p + (q - p) * 6 * t;
+	if (t < 1 / 2) return q;
+	if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+	return p;
+}
+// Plate-motion hue: compass angle of (east, north) velocity -> hue, exactly one wheel wrap
+// so each hue names exactly one direction. Anchors E 120 green, N 240 blue, W 0 red,
+// S 60 yellow; the unwrapped hue rises +360 over the turn (120->240->360->420->480), so
+// opposite directions are complementary (green/red, blue/yellow). The rejected wish list
+// (W yellow, S red = 120,240,60,0) winds 0 - see findings-pitfalls-skills.md.
+function dirHue(ve, vn) {
+	var t = Math.atan2(vn, ve) * 0.15915494309189535;
+	t -= Math.floor(t);
+	if (t < 0.5) return (120 + 480 * t) % 360;
+	return (240 + 240 * t) % 360;
+}
+Renderer.dirHue = dirHue;
+// Plate velocity (m/Myr, 1e4 per cm/yr) scaled so length~6 saturates, matching the 'speed'
+// view's 80000 (= 8 cm/yr) ramp.
+var DIR_SPEED_UNIT = 80000.0 / 6.0;
+
 // Layer names for the six metallogenic potentials (design §8), read straight off the state.
 Renderer.ORE = ['oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
 Renderer.prototype.draw = function (layer) {
@@ -83,6 +107,36 @@ Renderer.prototype.draw = function (layer) {
 			// equivalent basal velocity; sqrt ramp saturating at 50 cm/yr.
 			var fo = Math.sqrt(Math.min(1, Math.hypot(s.wEq[b], s.wEq[b + 1], s.wEq[b + 2]) / 500000));
 			colors[b] = 16 + 239 * fo; colors[b + 1] = 16 + 204 * fo * fo; colors[b + 2] = 30 + 26 * fo;
+			continue;
+		}
+		if (layer === 'dir') {
+			// Plate motion: direction is hue, speed is lightness. Project the rigid
+			// Ω×r velocity onto the local (east, north) tangent so the hue reads as
+			// compass direction on the equirectangular map (E green, N blue, W red, S yellow).
+			var vx = s.vel[b], vy = s.vel[b + 1], vz = s.vel[b + 2];
+			var px = g.pos[b], py = g.pos[b + 1], pz = g.pos[b + 2];
+			var invR = 1 / Math.sqrt(px * px + py * py + pz * pz);
+			var nx = px * invR, ny = py * invR, nz = pz * invR;
+			var horiz = Math.sqrt(px * px + pz * pz);
+			var ex, ey, ez;
+			if (horiz > 1e-9) { ex = -pz / horiz; ey = 0; ez = px / horiz; }
+			else { ex = 1; ey = 0; ez = 0; }
+			var nrx = -ny * nx, nry = 1 - ny * ny, nrz = -ny * nz;
+			var nrLen = Math.sqrt(nrx * nrx + nry * nry + nrz * nrz);
+			if (nrLen > 1e-9) { nrx /= nrLen; nry /= nrLen; nrz /= nrLen; }
+			var ve = (vx * ex + vz * ez) / DIR_SPEED_UNIT;
+			var vn = (vx * nrx + vy * nry + vz * nrz) / DIR_SPEED_UNIT;
+			// speedToHsl (0.3 plan): atan2(north, east) -> hue, |v| -> lightness.
+			var hue = dirHue(ve, vn);
+			var sp = Math.sqrt(ve * ve + vn * vn);
+			var nl = Math.min(sp * 0.166666667, 1.0);
+			var L = 0.05 + 0.65 * Math.pow(nl, 0.6);
+			var h = hue / 360;
+			var q = L < 0.5 ? L * 1.9 : L + 0.9 - L * 0.9;
+			var pp = 2 * L - q;
+			colors[b] = hue2rgb(pp, q, h + 1 / 3) * 255;
+			colors[b + 1] = hue2rgb(pp, q, h) * 255;
+			colors[b + 2] = hue2rgb(pp, q, h - 1 / 3) * 255;
 			continue;
 		}
 		var z = s.z[c];
