@@ -567,3 +567,54 @@
 	mutations with `cp backup file`, never git checkout, in a tree with uncommitted
 	work; and remember a long-running node process executes the code it loaded at
 	startup, not the file on disk.
+
+## 0.3 Phase I rig: headless WebGPU is environment-dependent (2026-09)
+
+	SwiftShader WebGPU did not come up in the current sandbox image: navigator.gpu
+	exists, but requestAdapter({}) and { forceFallbackAdapter: true } return null
+	under sparticuz chromium 126 and 119 with the documented flags (plus
+	--enable-features=Vulkan and ANGLE-SwiftShader variants). tests/gpu-parity.js
+	fails identically, so GPU numbers are owner-rig numbers until the image
+	regains a working SwiftShader path (the 0.2-H log predates the image change).
+	New sparticuz layout recipe: npm i @sparticuz/chromium@126.0.0
+	puppeteer-core@23; require(...).executablePath() extracts the binary +
+	swiftshader libs to /tmp; al2023.tar.br is brotli (zlib.brotliDecompressSync)
+	then tar -> /tmp/al2023/lib (libnss3 set); LD_LIBRARY_PATH=/tmp/al2023/lib:/tmp.
+	The classic getLddir/inflate API is gone in 119+.
+	The bench infrastructure is environment-independent: bench.html (standalone
+	GUI, the climate-repo pattern - dark panel, controls, results table with 60
+	fps highlight, time-boxed medians, auto-run, ?fast=1/?noauto=1, ?level/&steps/
+	&dt pre-fill) runs the two modes (iso: kernel graph only,
+	onSubmittedWorkDone per n frames; smooth: full play path under rAF with gap
+	distribution) and prints BENCH lines + window.__benchDone;
+	index.html?bench=1 redirects to bench.html so there is one implementation;
+	experiments/gpu-bench.js drives bench.html headless (--out log, PGT_QUERY
+	pre-fills the inputs). Machines without an adapter get a clean "BENCH skip"
+	line, so the driver never hangs.
+	/tmp is NOT persistent across turns in this sandbox (the sparticuz rig,
+	binary and libs vanish) - rebuild with the recipe above at the start of the
+	turn that needs it. Note: @sparticuz/chromium 119 extracts its al2023 lib
+	drop to /tmp/lib (not /tmp/al2023/lib as 126 did); LD_LIBRARY_PATH=/tmp/lib:/tmp.
+
+## 0.3 Phase I design: timestamp ring, not per-pass readback
+
+	Per-kernel GPU ms comes from one timestamp query set (2 queries per dispatch,
+	start/end inside the compute pass) resolved per frame into a 4-buffer ring;
+	collect reads the slot two submits back (its work and resolve are done; a
+	completed buffer maps in ms, and the 4-deep ring gives two free slots of
+	slack before reuse). The collect is 2 Hz (HUD) or per-step (node), never on
+	the frame path, and any map/resolve failure self-disables ts (tsOn=false)
+	rather than risking a device error. Query set creation is feature-gated
+	(requiredFeatures only when adapter.features.has('timestamp-query')), so
+	SwiftShader builds without it run the exact same frame with zero overhead.
+	Timestamp period is assumed 1 ns (ANGLE/Swiftshader convention) - the HUD
+	line is relative ms, which is all the comparison needs.
+
+	Pitfall caught by the node overhead harness: TypedArray.sort() has NO range
+	overload - the first argument is the compare function, so
+	`buf.sort(0, n)` throws in node and would have thrown in the browser's 2 Hz
+	strip too. The bug was latent because the bench page skips the normal frame
+	loop and no container test drives Perf.update. Rules: sort the whole scratch
+	buffer (pad the unused tail with Infinity first so the first n entries stay
+	the n real values), and any page-only code path (Perf.update, GpuSim.ts*)
+	must have at least one node-executable exercise, not just a load test.

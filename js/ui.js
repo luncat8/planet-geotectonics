@@ -213,8 +213,14 @@
 		if (Perf.due(now)) {
 			Perf.update(now);
 			perfMain.textContent = Perf.text;
-			perfKern.textContent = gpu.on && gpu.ready
-				? 'WebGPU frame · CPU mirror one event cycle old' : Perf.detail;
+			if (gpu.on && gpu.ready) {
+				GpuSim.tsCollect();
+				var ts = GpuSim.tsReport();
+				perfKern.textContent = (ts ? ts + ' · ' : 'no kernel timing · ')
+					+ 'CPU mirror one event cycle old';
+			} else {
+				perfKern.textContent = Perf.detail;
+			}
 		}
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';
@@ -224,5 +230,12 @@
 		}
 		requestAnimationFrame(frame);
 	}
-	requestAnimationFrame(frame);
+	if (/[?&]bench=1/.test(location.search)) {
+		// The benchmark lives in its own page (bench.html — the climate-repo GUI
+		// pattern): redirect, preserving the level/dt/steps query overrides.
+		var extra = location.search.slice(1).replace('bench=1', '').replace(/^&/, '');
+		location.replace('bench.html' + (extra ? '?' + extra : ''));
+	} else {
+		requestAnimationFrame(frame);
+	}
 }());

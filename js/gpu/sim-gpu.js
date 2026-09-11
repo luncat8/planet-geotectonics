@@ -20,10 +20,17 @@ var GpuKernels = typeof module !== 'undefined' && module.exports ? {
 	diag: require('./wgsl-diag.js')
 } : null;
 
+var GpuPerf = typeof module !== 'undefined' && module.exports
+	? require('../perf.js') : (typeof Perf !== 'undefined' ? Perf : null);
+
 var GpuSim = {
 	// Workgroup sizes are fixed per kernel family; SwiftShader caps at 256 invocations.
 	WG: 128,
 	ELEMS: 1024,
+	// Phase I1: timestamp queries. Two per dispatch (pass start/end), up to TS_MAX
+	// dispatches per frame. Adapters without the timestamp-query feature (some
+	// SwiftShader builds) fall back: no queries, no per-kernel GPU ms.
+	TS_MAX: 70,
 
 	layout: function (state) {
 		var g = state.grid, p = GpuParams;
@@ -109,16 +116,40 @@ var GpuSim = {
 			// The fattest kernels (spawn, columnStep) bind 9 storage buffers; the default
 			// stage limit is 8, so ask for the adapter's own ceiling when it is higher.
 			var req = {};
-			if (adapter.limits.maxStorageBuffersPerShaderStage > 8) {
-				req.requiredLimits = { maxStorageBuffersPerShaderStage:
-					Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 16) };
-			}
-			device = await adapter.requestDevice(req);
+		if (adapter.limits.maxStorageBuffersPerShaderStage > 8) {
+			req.requiredLimits = { maxStorageBuffersPerShaderStage:
+				Math.min(adapter.limits.maxStorageBuffersPerShaderStage, 16) };
+		}
+		// Per-kernel GPU timing (0.3-plan Phase I1) needs the timestamp-query
+		// feature; ask for it when the adapter offers it, stay silent when not.
+		if (adapter.features && adapter.features.has('timestamp-query')) {
+			req.requiredFeatures = ['timestamp-query'];
+		}
+		device = await adapter.requestDevice(req);
 		}
 		var l = GpuSim.layout(state);
-		var S = { state: state, device: device, l: l, K: {}, warnings: [] };
-		GpuSim.device = device;
-		GpuSim.S = S;
+	var S = { state: state, device: device, l: l, K: {}, warnings: [] };
+	GpuSim.device = device;
+	GpuSim.S = S;
+	// Timestamp ring (Phase I1): four resolve buffers, so a collect reads the
+	// frame two submits back while the next two slots are still free - the map
+	// of a completed buffer returns in ms, well before the slot is reused.
+	S.tsOn = false; S.ts = null; S.tsBufs = null;
+	S.tsSlotNames = new Int32Array(GpuSim.TS_MAX * 4);
+	S.tsSlotUsed = new Int32Array(4);
+	S.tsSlot = 0; S.tsRingI = 0; S.tsActive = false;
+	S.tsCollecting = false; S.tsValid = false;
+	S.tsNameTab = []; S.tsNameIdx = {};
+	S.tsMs = new Float64Array(GpuSim.TS_MAX);
+	try {
+		S.ts = device.createQuerySet({ type: 'timestamp', count: GpuSim.TS_MAX * 2 });
+		S.tsOn = true;
+		S.tsBufs = [0, 1, 2, 3].map(function () {
+			return device.createBuffer({ size: GpuSim.TS_MAX * 2 * 8, usage: 0x1 | 0x4 | 0x400 });
+		});
+	} catch (e) {
+		S.tsOn = false;   // adapter without timestamp-query: wall-clock only
+	}
 		S.buf = {};
 		var sizes = { gridF: l.gridF * 4, gridI: l.gridI * 4, colF: l.colF * 4, colI: l.colI * 4,
 			plateF: l.plateF * 4, plateI: l.plateI * 4, cellF: l.cellF * 4, cellI: l.cellI * 4,
@@ -347,9 +378,25 @@ var GpuSim = {
 		var k = S.K[name];
 		if (!k) throw new Error('missing kernel ' + name);
 		var pass = enc.beginComputePass();
+		// Phase I1: one start and one end timestamp per dispatch, tagged with the
+		// kernel name for the 2 Hz report. Only inside a timed frame (tsActive),
+		// so the boot raster and test paths stay untouched.
+		if (S.tsOn && S.tsActive) {
+			if (S.tsSlot >= GpuSim.TS_MAX) throw new Error('timestamp slots exhausted');
+			pass.insertTimestamp(S.ts, S.tsSlot * 2);
+			var idx = S.tsNameIdx[name];
+			if (idx === undefined) {
+				idx = S.tsNameTab.length;
+				S.tsNameIdx[name] = idx;
+				S.tsNameTab.push(name);
+			}
+			S.tsSlotNames[S.tsRingI * GpuSim.TS_MAX + S.tsSlot] = idx;
+			S.tsSlot++;
+		}
 		pass.setPipeline(k.pipe);
 		pass.setBindGroup(0, k.group);
 		pass.dispatchWorkgroups(groups);
+		if (S.tsOn && S.tsActive) pass.insertTimestamp(S.ts, (S.tsSlot - 1) * 2 + 1);
 		pass.end();
 	},
 
@@ -359,6 +406,7 @@ var GpuSim = {
 		var S = GpuSim.S, l = S.l, V = l.V, colCap = l.colCap, WG = GpuSim.WG;
 		GpuSim.uploadFrame(state, dt);
 		var enc = S.device.createCommandEncoder();
+		if (S.tsOn) { S.tsActive = true; S.tsSlot = 0; }
 		GpuSim.run(S, enc, 'zeroFrame', 6 + l.plateCap * 3 + l.colCap * 8, WG);
 		GpuSim.run(S, enc, 'integrate', l.plateCap, WG);
 		GpuSim.run(S, enc, 'move', colCap, WG);
@@ -423,7 +471,65 @@ var GpuSim = {
 		GpuSim.run(S, enc, 'diagB', 1, 1);
 		GpuSim.runGroups(S, enc, 'ledgerReduceA', l.nwgL, WG);
 		GpuSim.run(S, enc, 'ledgerReduceB', 7, WG);
+		if (S.tsOn) {
+			S.tsActive = false;
+			enc.resolveQuerySet(S.ts, 0, S.tsSlot * 2, S.tsBufs[S.tsRingI], 0);
+			S.tsSlotUsed[S.tsRingI] = S.tsSlot;
+			S.tsRingI = (S.tsRingI + 1) % 4;
+		}
 		S.device.queue.submit([enc.finish()]);
+	},
+
+	// Read the timestamps of the frame two submits back (its ring slot is free by
+	// now) and fold them into the per-kernel EMA. Runs off the frame path (2 Hz
+	// from the HUD, or per step in the node/test paths); never blocks a submit.
+	// Timestamp period is assumed 1 ns, the ANGLE/SwiftShader convention.
+	tsCollect: async function () {
+		var S = GpuSim.S;
+		if (!S || !S.tsOn || !S.tsBufs || S.tsCollecting) return;
+		S.tsCollecting = true;
+		// ringI points at the next slot to be written; two behind it sits the
+		// frame whose work (and resolve) has long since completed.
+		var slot = (S.tsRingI + 1) % 4, buf = S.tsBufs[slot], used = S.tsSlotUsed[slot];
+		try {
+			await buf.mapAsync(1);
+			if (used > 0) {
+				var range = buf.getMappedRange();
+				var u32 = new Uint32Array(range);
+				var f64 = new Float64Array(S.tsMs.length);
+				for (var s = 0; s < used; s++) {
+					var b = s * 4, i = S.tsSlotNames[slot * GpuSim.TS_MAX + s];
+					var t0 = (u32[b + 1] * 4294967296 + u32[b]) / 1e6;
+					var t1 = (u32[b + 3] * 4294967296 + u32[b + 2]) / 1e6;
+					f64[i] += t1 - t0;
+				}
+				for (var m = 0; m < S.tsMs.length; m++) {
+					S.tsMs[m] += (f64[m] - S.tsMs[m]) * 0.25;
+				}
+				S.tsValid = true;
+			}
+			S.tsSlotUsed[slot] = 0;
+			buf.unmap();
+		} catch (e) {
+			S.tsOn = false;   // buffer raced or device lost: fall back, stay quiet
+		}
+		S.tsCollecting = false;
+	},
+
+	// 2 Hz HUD line: per-kernel GPU ms (EMA over collected frames), biggest first.
+	tsReport: function () {
+		var S = GpuSim.S;
+		if (!S || !S.tsOn || !S.tsValid) return '';
+		var rows = [], tab = S.tsNameTab;
+		for (var i = 0; i < tab.length; i++) {
+			if (S.tsMs[i] >= 0.05) rows.push([S.tsMs[i], tab[i]]);
+		}
+		rows.sort(function (a, b) { return b[0] - a[0]; });
+		var line = '';
+		for (var r = 0; r < rows.length && r < 10; r++) {
+			line += (line ? ' ' : '') + rows[r][1] + ' ' + rows[r][0].toFixed(2);
+		}
+		return line;
 	},
 
 	// Boot pass for a freshly uploaded world: enough of the frame for painting.
@@ -573,19 +679,26 @@ var GpuSim = {
 	// Sync mode is for tests and the parity harness; the render loop calls frame()
 	// directly and downloads on its own cadence.
 	step: async function (state, dt, Events, Checkpoint, Params) {
+		// Phase I2: the round trip and the checkpoint push are exactly the
+		// candidates for the visible GPU-mode hitches, so the HUD sees their
+		// wall time (Perf is optional: the node parity paths run without it).
 		if (state.t - state.lastEvent >= Params.eventCadence) {
+			var t0 = GpuPerf ? GpuPerf.clock() : 0;
 			await GpuSim.download(state);
 			Events.cycle(state);
 			state.lastEvent = state.t;
 			await GpuSim.uploadState(state);
+			if (GpuPerf) GpuPerf.event(GpuPerf.clock() - t0);
 		}
 		GpuSim.frame(state, dt);
 		state.frame++;
 		state.t += dt;
 		if (state.ckptCap > 0 && state.t >= state.ckptDue) {
+			var t1 = GpuPerf ? GpuPerf.clock() : 0;
 			await GpuSim.download(state);
 			Checkpoint.push(state);
 			state.ckptDue = state.t + Params.ckptEvery;
+			if (GpuPerf) GpuPerf.ckpt(GpuPerf.clock() - t1);
 		}
 	},
 
