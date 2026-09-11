@@ -134,6 +134,11 @@ var GpuSim = {
 	// Timestamp ring (Phase I1): four resolve buffers, so a collect reads the
 	// frame two submits back while the next two slots are still free - the map
 	// of a completed buffer returns in ms, well before the slot is reused.
+	// Usage bits are the WebGPU spec GPUBufferUsage values throughout this file:
+	// 0x1 MAP_READ, 0x2 MAP_WRITE, 0x4 COPY_SRC, 0x8 COPY_DST, 0x10 INDEX, 0x20 VERTEX,
+	// 0x40 UNIFORM, 0x80 STORAGE, 0x100 INDIRECT, 0x200 QUERY_RESOLVE. Bits above
+	// 0x200 are reserved: in Dawn 0x400 is the texel-buffer usage and fails
+	// CreateBuffer with "WGSLLanguageFeatureName::TexelBuffers is not enabled".
 	S.tsOn = false; S.ts = null; S.tsBufs = null;
 	S.tsSlotNames = new Int32Array(GpuSim.TS_MAX * 4);
 	S.tsSlotUsed = new Int32Array(4);
@@ -145,7 +150,8 @@ var GpuSim = {
 		S.ts = device.createQuerySet({ type: 'timestamp', count: GpuSim.TS_MAX * 2 });
 		S.tsOn = true;
 		S.tsBufs = [0, 1, 2, 3].map(function () {
-			return device.createBuffer({ size: GpuSim.TS_MAX * 2 * 8, usage: 0x1 | 0x4 | 0x400 });
+			// resolveQuerySet destination + map readback: MAP_READ | COPY_DST | QUERY_RESOLVE
+			return device.createBuffer({ size: GpuSim.TS_MAX * 2 * 8, usage: 0x1 | 0x8 | 0x200 });
 		});
 	} catch (e) {
 		S.tsOn = false;   // adapter without timestamp-query: wall-clock only

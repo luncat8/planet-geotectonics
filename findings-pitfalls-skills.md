@@ -618,3 +618,50 @@
 	buffer (pad the unused tail with Infinity first so the first n entries stay
 	the n real values), and any page-only code path (Perf.update, GpuSim.ts*)
 	must have at least one node-executable exercise, not just a load test.
+
+## WebGPU buffer usage bits are the spec values; 0x400+ is the texel-buffer trap (2026-09)
+
+\tGPUBufferUsage bits (stable in the spec since 2021, identical in the
+\twebgpu-headers C API and wgpu's BufferUsagesWebGPU, so all shipped browsers
+\tagree): MAP_READ 0x1, MAP_WRITE 0x2, COPY_SRC 0x4, COPY_DST 0x8, INDEX 0x10,
+\tVERTEX 0x20, UNIFORM 0x40, STORAGE 0x80, INDIRECT 0x100, QUERY_RESOLVE 0x200.
+\tBits >= 0x400 are RESERVED. In Dawn (Chrome) 0x400 is the internal
+\ttexel-buffer usage: createBuffer with it fails validation with
+\t"WGSLLanguageFeatureName::TexelBuffers is not enabled." - Chrome 133+ appends
+\tthe call context "- While calling [Device].CreateBuffer([BufferDescriptor])."
+\twhich makes it look like an naga/shader error (it is not; Dawn's Buffer.cpp
+\tchecks the texel-buffer bit against the TexelBuffers language feature).
+\tThe timestamp-ring buffers in sim-gpu.js shipped as 0x1|0x4|0x400
+\t(MAP_READ|COPY_SRC|reserved) and broke GpuSim.init on Chrome; the resolve
+\tdestination needs MAP_READ|COPY_DST|QUERY_RESOLVE = 0x1|0x8|0x200. The other
+\trepo usages (0x8C storage, 0x48 uniform, 0x9 download staging) were already
+\tspec-correct - when a raw-usage bug is suspected, diff against the table,
+\tdon't "normalise" all of them.
+\tFurther spec rules: MAP_READ may only combine with COPY_DST (and MAP_WRITE
+\tonly with COPY_SRC); resolveQuerySet() requires QUERY_RESOLVE on the
+\tdestination; createBuffer validation errors do NOT throw (spec: validation
+\terror + invalidated buffer, reported via console/onuncapturederror), so a
+\ttry/catch around init does not catch them - capture device.onuncapturederror.
+
+## Session handoff (2026-09-11): TexelBuffers fix + 0.3 view modes done, owner-rig verify pending
+
+\tDone: (1) ts-ring buffer usage fixed to 0x1|0x8|0x200 (the
+\tWGSLLanguageFeatureName::TexelBuffers CreateBuffer error - see section above);
+\t(2) 0.3-plan-view-modes views added on BOTH engines: 'speed' (per-cell
+\t|omega x r|, 0-8 cm/yr ramp), 'age' (column age, 0-1000 Myr, young hot / old
+\tblue), 'force' (per-cell |wEq| = all boundary forces as equivalent basal
+\tvelocity, design 6.3, sqrt ramp to 50 cm/yr; single mode - the per-term
+\tsplit would need extra sim state and buffer plumbing, skipped as not worth it);
+\tCPU branches in render.js, WGSL branches (layer ids 20/21/22) in
+\trender-gpu.js reading CELLF block 0 (vel) / block 7 (wEq) / colH.z (age),
+\toptions in index.html; browser-scripts test now draws all three.
+\tNode suite passes (run-all, incl. longrun). NOT verified in a real browser:
+\tsandbox has no working SwiftShader (see 0.3 Phase I rig section), so the GPU
+\tpath is verified by the owner rig instead: double-click webgpu-smoke.html
+\t(run-smoke.bat on Windows / run-smoke.command elsewhere) in a WebGPU browser,
+\twait for [result], "Save log" and drop the .log into experiments/logs/.
+\tPASS = "[result] PASS" with 0 captured errors and the map showing layers;
+\treport the log file name to the next session. If it FAILs, the captured
+\tconsole/webgpu error lines in the log are the next thing to read.
+\tAfter a PASS: run the full parity gate on a SwiftShader rig
+\t(node tests/gpu-parity.js 500 5, then --ensemble) as before.

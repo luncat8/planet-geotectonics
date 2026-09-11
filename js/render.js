@@ -66,6 +66,25 @@ Renderer.prototype.draw = function (layer) {
 			colors[b] = 52 + 170 * sediment; colors[b + 1] = 42 + 110 * sediment; colors[b + 2] = 30 + 55 * sediment;
 			continue;
 		}
+		if (layer === 'speed') {
+			// Rigid plate velocity |omega x r| of the cell, cm/yr on a 0-8 ramp.
+			var sp = Math.min(1, Math.hypot(s.vel[b], s.vel[b + 1], s.vel[b + 2]) / 80000);
+			colors[b] = 12 + 236 * sp; colors[b + 1] = 16 + 234 * sp; colors[b + 2] = 28 + 227 * sp;
+			continue;
+		}
+		if (layer === 'age') {
+			// Crust age of the owning column, Myr on a 0-1000 ramp: young hot, old blue.
+			var ag = Math.min(1, s.age[owner] / 1000);
+			colors[b] = 234 - 202 * ag; colors[b + 1] = 112 - 66 * ag; colors[b + 2] = 48 + 52 * ag;
+			continue;
+		}
+		if (layer === 'force') {
+			// |wEq| (design 6.3): every boundary force except drag expressed as an
+			// equivalent basal velocity; sqrt ramp saturating at 50 cm/yr.
+			var fo = Math.sqrt(Math.min(1, Math.hypot(s.wEq[b], s.wEq[b + 1], s.wEq[b + 2]) / 500000));
+			colors[b] = 16 + 239 * fo; colors[b + 1] = 16 + 204 * fo * fo; colors[b + 2] = 30 + 26 * fo;
+			continue;
+		}
 		var z = s.z[c];
 		if (z < 0) {
 			var shallow = Math.max(0, 1 + z / 6500);
