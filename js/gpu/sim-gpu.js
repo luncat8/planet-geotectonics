@@ -131,15 +131,16 @@ var GpuSim = {
 	var S = { state: state, device: device, l: l, K: {}, warnings: [] };
 	GpuSim.device = device;
 	GpuSim.S = S;
-	// Timestamp ring (Phase I1): four resolve buffers, so a collect reads the
-	// frame two submits back while the next two slots are still free - the map
+	// Timestamp ring (Phase I1): four resolve+map buffer pairs, so a collect reads
+	// the frame two submits back while the next two slots are still free - the map
 	// of a completed buffer returns in ms, well before the slot is reused.
 	// Usage bits are the WebGPU spec GPUBufferUsage values throughout this file:
 	// 0x1 MAP_READ, 0x2 MAP_WRITE, 0x4 COPY_SRC, 0x8 COPY_DST, 0x10 INDEX, 0x20 VERTEX,
 	// 0x40 UNIFORM, 0x80 STORAGE, 0x100 INDIRECT, 0x200 QUERY_RESOLVE. Bits above
 	// 0x200 are reserved: in Dawn 0x400 is the texel-buffer usage and fails
 	// CreateBuffer with "WGSLLanguageFeatureName::TexelBuffers is not enabled".
-	S.tsOn = false; S.ts = null; S.tsBufs = null;
+	S.tsOn = false; S.ts = null; S.tsResolve = null; S.tsMap = null;
+	S.tsPassDesc = null; S.tsWrites = null;
 	S.tsSlotNames = new Int32Array(GpuSim.TS_MAX * 4);
 	S.tsSlotUsed = new Int32Array(4);
 	S.tsSlot = 0; S.tsRingI = 0; S.tsActive = false;
@@ -149,10 +150,19 @@ var GpuSim = {
 	try {
 		S.ts = device.createQuerySet({ type: 'timestamp', count: GpuSim.TS_MAX * 2 });
 		S.tsOn = true;
-		S.tsBufs = [0, 1, 2, 3].map(function () {
-			// resolveQuerySet destination + map readback: MAP_READ | COPY_DST | QUERY_RESOLVE
-			return device.createBuffer({ size: GpuSim.TS_MAX * 2 * 8, usage: 0x1 | 0x8 | 0x200 });
+		// Per slot: resolve lands in a QUERY_RESOLVE | COPY_SRC buffer, then a copy
+		// into a MAP_READ | COPY_DST buffer carries the readback - the spec allows
+		// MAP_READ combined with nothing but COPY_DST, so one buffer cannot do both.
+		S.tsResolve = [0, 1, 2, 3].map(function () {
+			return device.createBuffer({ size: GpuSim.TS_MAX * 2 * 8, usage: 0x4 | 0x200 });
 		});
+		S.tsMap = [0, 1, 2, 3].map(function () {
+			return device.createBuffer({ size: GpuSim.TS_MAX * 2 * 8, usage: 0x1 | 0x8 });
+		});
+		// Reused per dispatch: pass timestamps come from the beginComputePass
+		// descriptor (spec GPUComputePassTimestampWrites), never a per-frame literal.
+		S.tsWrites = { querySet: S.ts };
+		S.tsPassDesc = { timestampWrites: null };
 	} catch (e) {
 		S.tsOn = false;   // adapter without timestamp-query: wall-clock only
 	}
@@ -383,13 +393,14 @@ var GpuSim = {
 	runGroups: function (S, enc, name, groups, wg) {
 		var k = S.K[name];
 		if (!k) throw new Error('missing kernel ' + name);
-		var pass = enc.beginComputePass();
 		// Phase I1: one start and one end timestamp per dispatch, tagged with the
 		// kernel name for the 2 Hz report. Only inside a timed frame (tsActive),
-		// so the boot raster and test paths stay untouched.
+		// so the boot raster and test paths stay untouched. The spec writes pass
+		// timestamps from the beginComputePass descriptor (timestampWrites), not
+		// a mid-pass insertTimestamp call.
+		var desc = null, w = S.tsWrites;
 		if (S.tsOn && S.tsActive) {
 			if (S.tsSlot >= GpuSim.TS_MAX) throw new Error('timestamp slots exhausted');
-			pass.insertTimestamp(S.ts, S.tsSlot * 2);
 			var idx = S.tsNameIdx[name];
 			if (idx === undefined) {
 				idx = S.tsNameTab.length;
@@ -397,12 +408,16 @@ var GpuSim = {
 				S.tsNameTab.push(name);
 			}
 			S.tsSlotNames[S.tsRingI * GpuSim.TS_MAX + S.tsSlot] = idx;
+			w.beginningOfPassWriteIndex = S.tsSlot * 2;
+			w.endOfPassWriteIndex = S.tsSlot * 2 + 1;
+			S.tsPassDesc.timestampWrites = w;
 			S.tsSlot++;
+			desc = S.tsPassDesc;
 		}
+		var pass = enc.beginComputePass(desc);
 		pass.setPipeline(k.pipe);
 		pass.setBindGroup(0, k.group);
 		pass.dispatchWorkgroups(groups);
-		if (S.tsOn && S.tsActive) pass.insertTimestamp(S.ts, (S.tsSlot - 1) * 2 + 1);
 		pass.end();
 	},
 
@@ -479,9 +494,12 @@ var GpuSim = {
 		GpuSim.run(S, enc, 'ledgerReduceB', 7, WG);
 		if (S.tsOn) {
 			S.tsActive = false;
-			enc.resolveQuerySet(S.ts, 0, S.tsSlot * 2, S.tsBufs[S.tsRingI], 0);
-			S.tsSlotUsed[S.tsRingI] = S.tsSlot;
-			S.tsRingI = (S.tsRingI + 1) % 4;
+			// Resolve, then copy to the map buffer (MAP_READ cannot carry QUERY_RESOLVE).
+			var pair = S.tsRingI, size = GpuSim.TS_MAX * 2 * 8;
+			enc.resolveQuerySet(S.ts, 0, S.tsSlot * 2, S.tsResolve[pair], 0);
+			enc.copyBufferToBuffer(S.tsResolve[pair], 0, S.tsMap[pair], 0, size);
+			S.tsSlotUsed[pair] = S.tsSlot;
+			S.tsRingI = (pair + 1) % 4;
 		}
 		S.device.queue.submit([enc.finish()]);
 	},
@@ -492,11 +510,11 @@ var GpuSim = {
 	// Timestamp period is assumed 1 ns, the ANGLE/SwiftShader convention.
 	tsCollect: async function () {
 		var S = GpuSim.S;
-		if (!S || !S.tsOn || !S.tsBufs || S.tsCollecting) return;
+		if (!S || !S.tsOn || !S.tsMap || S.tsCollecting) return;
 		S.tsCollecting = true;
 		// ringI points at the next slot to be written; two behind it sits the
 		// frame whose work (and resolve) has long since completed.
-		var slot = (S.tsRingI + 1) % 4, buf = S.tsBufs[slot], used = S.tsSlotUsed[slot];
+		var slot = (S.tsRingI + 1) % 4, buf = S.tsMap[slot], used = S.tsSlotUsed[slot];
 		try {
 			await buf.mapAsync(1);
 			if (used > 0) {

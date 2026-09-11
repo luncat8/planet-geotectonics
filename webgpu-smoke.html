@@ -39,6 +39,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <script src="js/checkpoint.js"></script>
 <script src="js/perf.js"></script>
 <script src="js/sim.js"></script>
+<script src="js/render.js"></script>
 <script src="js/gpu/wgsl-common.js"></script>
 <script src="js/gpu/wgsl-columns.js"></script>
 <script src="js/gpu/wgsl-scan.js"></script>
@@ -140,13 +141,51 @@ function adapterInfo(adapter) {
 	await GpuSim.tsCollect();
 	note('ts', 'tsCollect ' + (Date.now() - tsWall) + ' ms · ' + (GpuSim.tsReport() || 'no kernel timing'));
 
-	// Phase 4: the GPU renderer over every layer, including speed/age/force.
+	// Phase 4: the GPU renderer over every layer, pixel-compared against the CPU renderer.
+	// A layer id routed into the wrong WGSL branch shows up here as a pixel delta, which
+	// drawing-and-eyeballing (the old phase 4) never caught.
 	var renderer = new GpuRenderer(document.getElementById('map')).init(gpu);
-	var layers = ['plate', 'type', 'z', 'damage', 'owner', 'sediment', 'speed', 'age', 'force',
+	var ref = new Renderer(document.createElement('canvas'), gpu);
+	var layers = ['plate', 'type', 'z', 'damage', 'owner', 'sediment', 'speed', 'age', 'force', 'dir',
 		'oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
-	for (var l = 0; l < layers.length; l++) renderer.draw(layers[l]);
+	var gw = renderer.canvas.width, gh = renderer.canvas.height;
+	var row = Math.ceil(gw * 4 / 256) * 256;
+	var bgra = renderer.format === 'bgra8unorm';
+	for (var l = 0; l < layers.length; l++) {
+		renderer.draw(layers[l]);
+		var tex = renderer.context.getCurrentTexture();
+		var rb = device.createBuffer({ size: row * gh, usage: 0x8 | 0x1 });
+		var enc = device.createCommandEncoder();
+		enc.copyTextureToBuffer({ texture: tex }, { buffer: rb, bytesPerRow: row }, [gw, gh]);
+		device.queue.submit([enc.finish()]);
+		await rb.mapAsync(0x1);
+		var gpx = new Uint8Array(rb.getMappedRange());
+		rb.unmap(); rb.destroy();
+		ref.draw(layers[l]);
+		var cpx = ref.image.data;
+		var sum = 0, worst = 0, loud = 0;
+		for (var y = 0; y < gh; y++) {
+			// 'dir' builds its tangent basis per pixel from lon/lat while the CPU renderer
+			// builds it per cell: at the poles the east direction spins within one cell, so
+			// the caps are the CPU undersampling, not a GPU fault - skip them there.
+			var polar = layers[l] === 'dir' && (y < gh * 0.06 || y > gh * 0.94);
+			for (var x = 0; x < gw; x++) {
+				if (polar) continue;
+				var o = y * row + x * 4, q = (y * gw + x) * 4;
+				for (var k = 0; k < 3; k++) {
+					var gv = gpx[o + (bgra ? 2 - k : k)], cv = cpx[q + k];
+					var d = gv > cv ? gv - cv : cv - gv;
+					sum += d; if (d > worst) worst = d; if (d > 16) loud++;
+				}
+			}
+		}
+		var mean = sum / (gw * gh * 3);
+		note('render', layers[l] + ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst + ' ch>16: ' + loud);
+		if (mean > 2 || worst > 32) fail('GPU/CPU pixels disagree on layer ' + layers[l]);
+	}
+	renderer.draw('dir');
 	await new Promise(function (r) { setTimeout(r, 300); });
-	note('render', 'GPU renderer drew all ' + layers.length + ' layers (map visible below)');
+	note('render', 'GPU renderer drew all ' + layers.length + ' layers, pixel-parity checked (map below: dir)');
 
 	finish();
 	function finish() {

@@ -1,0 +1,23 @@
+## Summary
+
+I implemented the new **"Plate motion (direction + speed)"** view mode from `0.3-plan-view-modes.md`, where **direction is hue and speed is lightness**, on both render engines:
+
+**CPU renderer** (`js/render.js`)
+- Added a module-level `hue2rgb` (numeric, zero-allocation — respecting the no-heap-alloc-in-hot-loop rule) and a `DIR_SPEED_UNIT` scale.
+- New `dir` branch in `draw()`: projects the rigid plate velocity (Ω×r, stored in `s.vel`) onto the local **(east, north)** tangent at each cell, then runs the plan's `speedToHsl` mapping.
+- Cardinal mapping: **East = green (120°), North = blue (240°), West = yellow (60°), South = red (0°)** — reading as compass direction on the equirectangular map.
+
+**GPU renderer** (`js/gpu/render-gpu.js`)
+- Same layer (`dir → 23`), same palettes, ported to WGSL: `speedToHsl`, `hslToRgb`, `hue2rgb` helpers plus the `cellColor` branch.
+- The tangent basis is built from each fragment's equirectangular (lon/lat), so it needs no extra position buffer — keeping the bind-group layout untouched.
+- `cellColor` now takes the pixel `x,y` so the basis matches the displayed pixel.
+
+**UI** (`index.html`)
+- Added the `<option value="dir">Plate motion (direction + speed)</option>` after "Plate speed".
+
+**Calibration choice:** velocities in this sim run ~50–125k cm/yr, so I scaled the velocity by `80000/6` so lightness saturates at the same 80000 cm/yr as the existing `speed` view (the plan's `speedToHsl` expects length≈6 to saturate). I used a `speedContrast` of `0.6` so slower plates stay visible; raise it toward 1.0 for a steeper brightness ramp.
+
+**Verification:**
+- Cardinal-direction unit tests confirm correct hues (E green, N blue, W yellow, S red).
+- Full CPU `dir` pass over a live state: 10,239 cells drawn, colors all in [0,255], no NaN/out-of-range.
+- Both files pass `node --check`; the render smoke test passes.

@@ -621,47 +621,117 @@
 
 ## WebGPU buffer usage bits are the spec values; 0x400+ is the texel-buffer trap (2026-09)
 
-\tGPUBufferUsage bits (stable in the spec since 2021, identical in the
-\twebgpu-headers C API and wgpu's BufferUsagesWebGPU, so all shipped browsers
-\tagree): MAP_READ 0x1, MAP_WRITE 0x2, COPY_SRC 0x4, COPY_DST 0x8, INDEX 0x10,
-\tVERTEX 0x20, UNIFORM 0x40, STORAGE 0x80, INDIRECT 0x100, QUERY_RESOLVE 0x200.
-\tBits >= 0x400 are RESERVED. In Dawn (Chrome) 0x400 is the internal
-\ttexel-buffer usage: createBuffer with it fails validation with
-\t"WGSLLanguageFeatureName::TexelBuffers is not enabled." - Chrome 133+ appends
-\tthe call context "- While calling [Device].CreateBuffer([BufferDescriptor])."
-\twhich makes it look like an naga/shader error (it is not; Dawn's Buffer.cpp
-\tchecks the texel-buffer bit against the TexelBuffers language feature).
-\tThe timestamp-ring buffers in sim-gpu.js shipped as 0x1|0x4|0x400
-\t(MAP_READ|COPY_SRC|reserved) and broke GpuSim.init on Chrome; the resolve
-\tdestination needs MAP_READ|COPY_DST|QUERY_RESOLVE = 0x1|0x8|0x200. The other
-\trepo usages (0x8C storage, 0x48 uniform, 0x9 download staging) were already
-\tspec-correct - when a raw-usage bug is suspected, diff against the table,
-\tdon't "normalise" all of them.
-\tFurther spec rules: MAP_READ may only combine with COPY_DST (and MAP_WRITE
-\tonly with COPY_SRC); resolveQuerySet() requires QUERY_RESOLVE on the
-\tdestination; createBuffer validation errors do NOT throw (spec: validation
-\terror + invalidated buffer, reported via console/onuncapturederror), so a
-\ttry/catch around init does not catch them - capture device.onuncapturederror.
+	GPUBufferUsage bits (stable in the spec since 2021, identical in the
+webgpu-headers C API and wgpu's BufferUsagesWebGPU, so all shipped browsers
+agree): MAP_READ 0x1, MAP_WRITE 0x2, COPY_SRC 0x4, COPY_DST 0x8, INDEX 0x10,
+VERTEX 0x20, UNIFORM 0x40, STORAGE 0x80, INDIRECT 0x100, QUERY_RESOLVE 0x200.
+Bits >= 0x400 are RESERVED. In Dawn (Chrome) 0x400 is the internal
+texel-buffer usage: createBuffer with it fails validation with
+"WGSLLanguageFeatureName::TexelBuffers is not enabled." - Chrome 133+ appends
+the call context "- While calling [Device].CreateBuffer([BufferDescriptor])."
+which makes it look like an naga/shader error (it is not; Dawn's Buffer.cpp
+checks the texel-buffer bit against the TexelBuffers language feature).
+The timestamp-ring buffers in sim-gpu.js shipped as 0x1|0x4|0x400
+(MAP_READ|COPY_SRC|reserved) and broke GpuSim.init on Chrome; the other
+repo usages (0x8C storage, 0x48 uniform, 0x9 download staging) were already
+spec-correct - when a raw-usage bug is suspected, diff against the table,
+don't "normalise" all of them.
+	Further spec rules: MAP_READ may only combine with COPY_DST (and MAP_WRITE
+only with COPY_SRC) - and Dawn enforces this strictly: MAP_READ|COPY_DST|
+QUERY_RESOLVE is REJECTED (Chrome 151: "If a buffer usage contains
+BufferUsage::MapRead the only other allowed usage is BufferUsage::CopyDst"),
+so the timestamp readback is a TWO-buffer pattern per ring slot: resolve
+destination QUERY_RESOLVE|COPY_SRC (0x204), then copyBufferToBuffer into a
+MAP_READ|COPY_DST (0x109) buffer that gets mapAsync'd (same as every WebGPU
+timestamp sample). createBuffer validation errors do NOT throw (spec:
+validation error + invalidated buffer, reported via console/onuncapturederror),
+so a try/catch around init does not catch them - capture
+device.onuncapturederror.
+	Spec API drift (Chrome 151, 2026-09): GPURenderPassEncoder/GPUComputePass
+Encoder insertTimestamp AND setTimestampWrites are GONE from the spec; pass
+timestamps now come from the begin-pass descriptor:
+beginComputePass({ timestampWrites: { querySet, beginningOfPassWriteIndex,
+endOfPassWriteIndex } }) (same shape for render passes). Sim's ring uses a
+reused scratch descriptor (S.tsPassDesc/S.tsWrites) - no per-dispatch object
+literals on the frame path. On a pre-drift browser the descriptor member is
+ignored and the ring silently collects zeros - GPU mode keeps working, only
+the kernel-timing HUD line stays empty.
 
 ## Session handoff (2026-09-11): TexelBuffers fix + 0.3 view modes done, owner-rig verify pending
 
-\tDone: (1) ts-ring buffer usage fixed to 0x1|0x8|0x200 (the
-\tWGSLLanguageFeatureName::TexelBuffers CreateBuffer error - see section above);
-\t(2) 0.3-plan-view-modes views added on BOTH engines: 'speed' (per-cell
-\t|omega x r|, 0-8 cm/yr ramp), 'age' (column age, 0-1000 Myr, young hot / old
-\tblue), 'force' (per-cell |wEq| = all boundary forces as equivalent basal
-\tvelocity, design 6.3, sqrt ramp to 50 cm/yr; single mode - the per-term
-\tsplit would need extra sim state and buffer plumbing, skipped as not worth it);
-\tCPU branches in render.js, WGSL branches (layer ids 20/21/22) in
-\trender-gpu.js reading CELLF block 0 (vel) / block 7 (wEq) / colH.z (age),
-\toptions in index.html; browser-scripts test now draws all three.
-\tNode suite passes (run-all, incl. longrun). NOT verified in a real browser:
-\tsandbox has no working SwiftShader (see 0.3 Phase I rig section), so the GPU
-\tpath is verified by the owner rig instead: double-click webgpu-smoke.html
-\t(run-smoke.bat on Windows / run-smoke.command elsewhere) in a WebGPU browser,
-\twait for [result], "Save log" and drop the .log into experiments/logs/.
-\tPASS = "[result] PASS" with 0 captured errors and the map showing layers;
-\treport the log file name to the next session. If it FAILs, the captured
-\tconsole/webgpu error lines in the log are the next thing to read.
-\tAfter a PASS: run the full parity gate on a SwiftShader rig
-\t(node tests/gpu-parity.js 500 5, then --ensemble) as before.
+	Done: (1) ts-ring buffer usage fixed for the
+WGSLLanguageFeatureName::TexelBuffers CreateBuffer error (see section above);
+(2) 0.3-plan-view-modes views added on BOTH engines: 'speed' (per-cell
+|omega x r|, 0-8 cm/yr ramp), 'age' (column age, 0-1000 Myr, young hot / old
+blue), 'force' (per-cell |wEq| = all boundary forces as equivalent basal
+velocity, design 6.3, sqrt ramp to 50 cm/yr; single mode - the per-term
+split would need extra sim state and buffer plumbing, skipped as not worth
+it); CPU branches in render.js, WGSL branches (layer ids 20/21/22) in
+render-gpu.js reading CELLF block 0 (vel) / block 7 (wEq) / colH.z (age),
+options in index.html; browser-scripts test now draws all three.
+Node suite passes (run-all, incl. longrun). Verification is owner-rig:
+sandbox has no working SwiftShader (see 0.3 Phase I rig section), so
+double-click webgpu-smoke.html (run-smoke.bat on Windows / run-smoke.command
+elsewhere) in a WebGPU browser, wait for [result], "Save log" and drop the
+.log into experiments/logs/. PASS = "[result] PASS" with 0 captured errors
+and the map showing layers; report the log file name to the next session.
+If it FAILs, the captured console/webgpu error lines in the log are the next
+thing to read. After a PASS: run the full parity gate on a SwiftShader rig
+(node tests/gpu-parity.js 500 5, then --ensemble) as before.
+	Status 2026-09-11, run 2: first owner-rig run (Chrome 151) exposed two more
+spec violations, both fixed since: (a) MAP_READ|COPY_DST|QUERY_RESOLVE buffer
+usage rejected -> split into resolve (0x204) + map (0x109) buffer pairs with
+a copy in frame(); (b) pass.insertTimestamp removed from the spec -> moved to
+the beginComputePass timestampWrites descriptor. Re-run the smoke page; a
+clean PASS (plus a non-empty [ts] line) confirms the whole ring end-to-end,
+then the parity gate.
+## Direction-to-hue maps: check the winding number before picking anchor colors
+
+	A direction->hue view is only readable if the map wraps the hue wheel exactly
+once per turn of the direction angle (winding number +/-1): then one hue names one
+direction. Test any candidate by sampling the hue over one turn and summing wrapped
+deltas (fold each delta into [-180,180)); the sum must be +/-360. The first cut at the
+0.3 'dir' view anchored E green 120 / N blue 240 / W yellow 60 / S red 0 and wound 0:
+in compass order those hues are not in wheel order, so green and orange each covered
+two arcs - around every rotation pole the eye read r-y-g-b clockwise AND anticlockwise
+from red. No lift of {120,240,60,0} to the line is monotone over the turn, so the wish
+list is unreachable at ANY interpolation; one anchor must move. The shipped map swaps
+the west/south colors so the wheel is monotone: E green 120 / N blue 240 / W red 0 /
+S yellow 60. The unwrapped hue rises +360 over the turn (120->240->360->420->480),
+opposite directions are complementary (green/red, blue/yellow) and all 360 degrees are
+used once. Keeping W yellow instead forces S to
+~90 (chartreuse); a uniform wheel keeps only E green. tests/view-dir.js pins the
+winding, the anchors and the renderer pixels; experiments/view-shots.js renders the
+old-vs-new pinwheel and a live CPU map to experiments/logs/.
+
+## GPU layer-id ranges: close both ends, and pixel-compare the engines in the smoke
+
+	cellColor in js/gpu/render-gpu.js routed the ore six-pack with `layer >= 10u`;
+the view ids 20..23 (speed/age/force/dir) are >= 10 too, so they fell into the ore
+branch and colOre indexed a vec4 at component 7..10 - out of bounds, which WGSL does
+not trap: it silently returns neighbouring/garbage floats. Symptom on the map: pure
+green + tan + near-navy speckle for 'dir' (v very negative -> (neg, huge, neg) clamps
+to (0,255,0)) and an almost black 'speed'. No validation error, no console output -
+drawing layers and eyeballing them never catches this class. The smoke page now draws
+every layer on BOTH engines and compares pixels on the device (phase 4: copyTextureToBuffer
+the GPU canvas, getImageData-equivalent from the CPU Renderer, fail at mean|d| > 2 or
+max|d| > 32; the 'dir' polar caps are excluded because the CPU builds its tangent basis
+per cell while the shader builds it per pixel). Keep new layer ids out of 10..15 and
+keep the parity loop covering every entry of GpuRenderer.LAYERS.
+
+## Session handoff (2026-09-12): dir hue wheel fixed, GPU ore-range fix, smoke pixel parity
+
+	Done: (1) 'dir' hue map replaced on both engines by the one-wrap wheel
+(render.js dirHue / render-gpu.js dirHue, anchors E120 N240 W0 S60 (green/blue/red/yellow)); (2) the
+`layer >= 10u` ore branch closed to 10..15, which also un-breaks GPU speed/age/force;
+(3) webgpu-smoke.html phase 4 pixel-parity gate over all 16 layers incl. dir;
+(4) tests/view-dir.js in run-all; (5) 0.3-plan-view-modes.md carries the corrected
+speedToHsl and the winding-number rule. Node suite green on this machine (kinematics
+~150 s and ores ~70 s dominate; longrun runs in background).
+	Open: owner-rig verification still owed - run webgpu-smoke.html in a WebGPU
+browser (run-smoke.bat / run-smoke.command), drop the .log into experiments/logs/;
+expect per-layer mean|d| ~0-2 and "[result] PASS". The 0.3-1.txt meanSpeed drift
+FAIL (cpu 4.02 vs gpu 4.95 cm/yr at frame 5) is a SIM parity issue, untouched by the
+view work and still open. The hue wheel was re-anchored to E120/N240/W0/S60 (green/blue
+/red/yellow: west red, south yellow); winding stays +1, so recheck the dirHue anchors in
+both files only if a real map's rose reads off.

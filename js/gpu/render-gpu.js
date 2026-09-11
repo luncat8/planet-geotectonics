@@ -9,7 +9,7 @@ function GpuRenderer(canvas) {
 
 GpuRenderer.LAYERS = { plate: 0, type: 1, z: 2, damage: 3, owner: 4, sediment: 5,
 	oVms: 10, oMaf: 11, oArc: 12, oOro: 13, oBas: 14, oPla: 15,
-	speed: 20, age: 21, force: 22 };
+	speed: 20, age: 21, force: 22, dir: 23 };
 
 GpuRenderer.SHADER = `struct U { layer: u32 };
 @group(0) @binding(0) var<uniform> u: U;
@@ -40,15 +40,54 @@ fn palette(p: u32) -> vec3<f32> {
 	return vec3(135.0 + 90.0 * cos(a), 145.0 + 80.0 * cos(a + 2.1), 155.0 + 80.0 * cos(a + 4.2));
 }
 
+// HSL -> RGB helpers for the plate-motion view.
+fn hue2rgb(pn: f32, qn: f32, t: f32) -> f32 {
+	var tt = t;
+	if (tt < 0.0) { tt = tt + 1.0; }
+	if (tt > 1.0) { tt = tt - 1.0; }
+	if (tt < 1.0 / 6.0) { return pn + (qn - pn) * 6.0 * tt; }
+	if (tt < 0.5) { return qn; }
+	if (tt < 2.0 / 3.0) { return pn + (qn - pn) * (2.0 / 3.0 - tt) * 6.0; }
+	return pn;
+}
+
+fn hslToRgb(hue: f32, sat: f32, lum: f32) -> vec3<f32> {
+	if (sat <= 0.0) { return vec3(lum, lum, lum); }
+	let h = hue / 360.0;
+	var qn = lum * (1.0 + sat);
+	if (lum >= 0.5) { qn = lum + sat - lum * sat; }
+	let pn = 2.0 * lum - qn;
+	return vec3(hue2rgb(pn, qn, h + 1.0 / 3.0), hue2rgb(pn, qn, h), hue2rgb(pn, qn, h - 1.0 / 3.0));
+}
+
+// Plate motion view (0.3 plan): direction -> hue (exactly one wheel wrap), speed -> lightness.
+// Anchors E 120 green, N 240 blue, W 0 red, S 60 yellow; see render.js dirHue for the
+// +360 unwrapped rise and why west is red (the rejected W-yellow wish list winds 0).
+fn dirHue(velocity: vec2<f32>) -> f32 {
+	var t = fract(atan2(velocity.y, velocity.x) * 0.15915494309189535);
+	var hue = 120.0 + 480.0 * t;
+	hue = select(hue, 240.0 + 240.0 * t, t >= 0.5);
+	return hue - floor(hue / 360.0) * 360.0;
+}
+
+fn speedToHsl(velocity: vec2<f32>, speedContrast: f32) -> vec3<f32> {
+	let speed = length(velocity);
+	let normalizedSpeed = min(speed * 0.166666667, 1.0);
+	let lightness = 0.05 + 0.65 * pow(normalizedSpeed, speedContrast);
+	return vec3(dirHue(velocity), 0.90, lightness);
+}
+
 // Same branches and hues as Renderer.draw, evaluated per fragment.
-fn cellColor(c: u32) -> vec3<f32> {
+fn cellColor(c: u32, px: u32, py: u32) -> vec3<f32> {
 	let o = owner(c);
 	var base = vec3(20.0, 26.0, 39.0);
 	if (o < 0) { return base; }
 	let oi = u32(o);
 	let layer = u.layer;
 	if (layer == 4u) { return vec3(78.0, 197.0, 167.0); }
-	if (layer >= 10u) {
+	// The ore six-pack is ids 10..15; the range must be closed at both ends or the
+	// speed/age/force/dir ids (20..23) land here and colOre indexes past the vec4.
+	if (layer >= 10u && layer <= 15u) {
 		let v = min(1.0, colOre(oi, layer - 10u));
 		return vec3(24.0 + 231.0 * v, 30.0 + 190.0 * v * v, 44.0 + 40.0 * v);
 	}
@@ -90,6 +129,21 @@ fn cellColor(c: u32) -> vec3<f32> {
 		let f = sqrt(min(1.0, length(CELLF[c * 8u + 7u].xyz) / 500000.0));
 		return vec3(16.0 + 239.0 * f, 16.0 + 204.0 * f * f, 30.0 + 26.0 * f);
 	}
+	if (layer == 23u) {
+		let v = CELLF[c * 8u].xyz;
+		// Equirectangular pixel -> lon/lat, then the local tangent basis (East, North).
+		let fx = (f32(px) + 0.5) / f32(W);
+		let fy = (f32(py) + 0.5) / f32(H);
+		let lon = fx * 6.28318530718 - 3.14159265359;
+		let lat = 1.57079632679 - fy * 3.14159265359;
+		let clo = cos(lon); let slo = sin(lon);
+		let cla = cos(lat); let sla = sin(lat);
+		let vEast = v.x * (-slo) + v.z * clo;
+		let vNorth = v.x * (-sla * clo) + v.y * cla + v.z * (-sla * slo);
+		let uv = vec2(vEast, vNorth) / 13333.3333;
+		let hsl = speedToHsl(uv, 0.6);
+		return hslToRgb(hsl.x, hsl.y, hsl.z) * 255.0;
+	}
 	let z = cellZ(c);
 	if (z < 0.0) {
 		let shallow = max(0.0, 1.0 + z / 6500.0);
@@ -111,7 +165,7 @@ struct Out { @location(0) color: vec4<f32> };
 	let y = u32(clamp(pos.y, 0.0, f32(H - 1u)));
 	let c = u32(LOOK[(H - 1u - y) * W + x]);
 	var o: Out;
-	o.color = vec4(cellColor(c) / 255.0, 1.0);
+	o.color = vec4(cellColor(c, x, y) / 255.0, 1.0);
 	return o;
 }
 `;
