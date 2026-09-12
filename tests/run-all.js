@@ -3,7 +3,7 @@ const path = require('node:path');
 const release = process.argv.includes('--release');
 for (const name of ['browser-scripts', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces', 'determinism',
 	'raster', 'kinematics', 'conveyor', 'rift', 'isostasy', 'erosion', 'collapse', 'split', 'checkpoint',
-	'ores', 'view-dir', 'perf', 'alloc', 'wgsl-struct', 'longrun']) {
+	'ores', 'view-dir', 'perf', 'alloc', 'wgsl-struct', 'gpu-play', 'longrun']) {
 	const args = ['--expose-gc', path.join(__dirname, name + '.js')];
 	if (release && (name === 'perf' || name === 'longrun')) args.push('--release');
 	const result = spawnSync(process.execPath, args, { stdio: 'inherit' });

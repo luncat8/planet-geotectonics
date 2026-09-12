@@ -170,7 +170,7 @@ struct Out { @location(0) color: vec4<f32> };
 }
 `;
 
-GpuRenderer.prototype.init = function (state) {
+GpuRenderer.prototype.init = function (state, opts) {
 	var S = GpuSim.S, device = S.device, g = state.grid;
 	this.context = this.canvas.getContext('webgpu');
 	this.canvas.width = g.lookupW;
@@ -180,7 +180,12 @@ GpuRenderer.prototype.init = function (state) {
 	var code = GpuRenderer.SHADER.replace('// layout constants appended here (V, W, H, SPLIT_DAMAGE)',
 		consts.join('\n'));
 	this.format = navigator.gpu.getPreferredCanvasFormat();
-	this.context.configure({ device: device, format: this.format, alphaMode: 'opaque' });
+	// The spec's default canvas usage is RENDER_ATTACHMENT alone, so copying pixels back
+	// out of the current texture (the smoke test's parity check) has to ask for COPY_SRC.
+	// The app never reads the canvas back, so it keeps the default usage.
+	var config = { device: device, format: this.format, alphaMode: 'opaque' };
+	if (opts && opts.readback) config.usage = 0x10 | 0x4;
+	this.context.configure(config);
 	// The lookup raster is static per grid, so it rides its own read-only buffer, uploaded once.
 	if (!S.buf.lookup) {
 		S.buf.lookup = device.createBuffer({ size: g.lookup.length * 4, usage: 0x80 | 0x4 | 0x8 });

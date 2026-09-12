@@ -51,7 +51,9 @@ Open `index.html` directly in a browser.
 - WebGPU engine (Phase H): the same kernel graph runs on the device (engine select in the
   controls). The map renders straight from the GPU buffers in a fragment shader, so playing
   never reads the state back; the CPU mirror is only pulled in for plate events (one cycle
-  late), the column probe, saving and the deposit extract. Same-device repeat runs are
+  late), the column probe, saving and the deposit extract. The event cadence travels light:
+  it ships only what the event cycle reads and writes (columns, plate table, frame
+  counters), because the frame kernels recompute every cell and edge array themselves. Same-device repeat runs are
   bit-identical, and 1000-frame CPU-vs-GPU ensembles stay within predeclared statistical
   bounds (`node tests/gpu-parity.js 1000 --ensemble`; boot/parity/determinism modes in the
   same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIBS`).
@@ -65,6 +67,9 @@ node tests/run-all.js
 ```
 
 Uses only Node built-ins. The runner launches the retained-memory test with `--expose-gc`.
+The JS side of the GPU engine - the mirror transfer and the play path's scheduling - runs
+headless against a stub device (`tests/gpu-play.js` on `tests/gpu-stub.js`), and
+`node experiments/roundtrip-cost.js` times the round trip.
 The GPU path itself is verified in a real browser: double-click `webgpu-smoke.html`
 (`run-smoke.bat` / `run-smoke.command`), which boots the engine, runs a CPU/GPU parity
 stretch, exercises the timestamp ring and every map layer, and offers the full report

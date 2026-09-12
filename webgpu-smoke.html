@@ -103,7 +103,11 @@ function adapterInfo(adapter) {
 	note('init', 'GpuSim.init ok in ' + S.built + ' ms, tsOn=' + GpuSim.S.tsOn +
 		', queries=' + (GpuSim.S.ts ? GpuSim.S.ts.count : 0));
 	var device = GpuSim.S.device;
-	device.onuncapturederror = function (e) { errors.push('webgpu uncaptured: ' + e.message); };
+	// GPUUncapturedErrorEvent carries the message on .error, not on the event itself -
+	// reading e.message logs "undefined" and throws the only useful detail away.
+	device.onuncapturederror = function (e) {
+		errors.push('webgpu uncaptured: ' + ((e.error && e.error.message) || e.message || JSON.stringify(e)));
+	};
 	device.lost.then(function (info) { if (info.reason) errors.push('device lost: ' + info.message); });
 	if (!GpuSim.S.tsOn) note('init', 'timestamp-query not available - per-kernel timing off (not a failure)');
 	GpuSim.raster(gpu);
@@ -111,9 +115,9 @@ function adapterInfo(adapter) {
 
 	// Phase 1: five frames without an event boundary - the parity stretch.
 	Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt);
-	await GpuSim.advance(gpu, dt, 5);
+	await GpuSim.play(gpu, dt, 5);
 	await GpuSim.download(gpu);
-	var V = cpu.grid.V, ownerBad = 0, zMax = 0;
+	var V = cpu.grid.V, V3 = cpu.grid.pos, ownerBad = 0, zMax = 0;
 	for (var c = 0; c < V; c++) {
 		if (cpu.owner[c] !== gpu.owner[c]) ownerBad++;
 		var dz = Math.abs(cpu.z[c] - gpu.z[c]); if (dz > zMax) zMax = dz;
@@ -126,12 +130,63 @@ function adapterInfo(adapter) {
 		' gpu=' + (gpu.maxSpeed / 10000).toFixed(3) + ' cm/yr');
 	if (ownerBad > V * 0.005) fail('owner mismatch too high: ' + ownerBad + '/' + V);
 	if (Math.abs(cpu.plateCount - gpu.plateCount) > 2) fail('plate count drift ' + cpu.plateCount + ' vs ' + gpu.plateCount);
+	// When the aggregate below trips, the mean alone cannot say why. This is the
+	// discriminator: the worst per-plate rotation-rate difference, and the same mean/max
+	// computed from the CPU's *unrelaxed* target omega. If the GPU's numbers land on the
+	// target line instead of the measured one, the omega relaxation is the suspect.
+	var worstOmega = 0, worstPlate = -1, tgtSum = 0, tgtMax = 0, tgtN = 0;
+	for (var p = 0; p < Math.min(cpu.plateCount, gpu.plateCount); p++) {
+		var w = p * 3, dOmega = Math.abs(Math.hypot(cpu.omega[w], cpu.omega[w + 1], cpu.omega[w + 2])
+			- Math.hypot(gpu.omega[w], gpu.omega[w + 1], gpu.omega[w + 2])) * Params.radius;
+		if (dOmega > worstOmega) { worstOmega = dOmega; worstPlate = p; }
+	}
+	for (var tc = 0; tc < V; tc++) {
+		var to = cpu.owner[tc];
+		if (to < 0) continue;
+		var tp = cpu.plate[to];
+		if (tp >= cpu.plateCount) continue;
+		var tw = tp * 3, tb = tc * 3, R = Params.radius;
+		var tvx = R * (cpu.omegaTarget[tw + 1] * V3[tb + 2] - cpu.omegaTarget[tw + 2] * V3[tb + 1]);
+		var tvy = R * (cpu.omegaTarget[tw + 2] * V3[tb] - cpu.omegaTarget[tw] * V3[tb + 2]);
+		var tvz = R * (cpu.omegaTarget[tw] * V3[tb + 1] - cpu.omegaTarget[tw + 1] * V3[tb]);
+		var tsp = Math.sqrt(tvx * tvx + tvy * tvy + tvz * tvz);
+		tgtSum += tsp; tgtN++; if (tsp > tgtMax) tgtMax = tsp;
+	}
+	// The decisive pair: each engine's OWN |omega| / |omegaTarget|, averaged over the
+	// plates. ~1.0 on the device means the relaxation is not running there; a ratio
+	// matching the CPU's means omega is fine and the gap is in the aggregate, not the
+	// rotation. Both engines relax with alpha = dt / tau_omega, so the two must agree.
+	var cpuR = 0, gpuR = 0, nRatio = 0, table = '';
+	for (var rp = 0; rp < Math.min(cpu.plateCount, gpu.plateCount); rp++) {
+		var rw = rp * 3;
+		var wc = Math.hypot(cpu.omega[rw], cpu.omega[rw + 1], cpu.omega[rw + 2]);
+		var tc = Math.hypot(cpu.omegaTarget[rw], cpu.omegaTarget[rw + 1], cpu.omegaTarget[rw + 2]);
+		var wg = Math.hypot(gpu.omega[rw], gpu.omega[rw + 1], gpu.omega[rw + 2]);
+		var tg = Math.hypot(gpu.omegaTarget[rw], gpu.omegaTarget[rw + 1], gpu.omegaTarget[rw + 2]);
+		if (!(tc > 0) || !(tg > 0)) continue;
+		cpuR += wc / tc; gpuR += wg / tg; nRatio++;
+		if (rp < 4) table += ' · p' + (rp + 1) + ' cpu ' + (wc / tc).toFixed(3) + ' gpu ' + (wg / tg).toFixed(3);
+	}
+	note('parity', 'omega relaxation: mean |omega|/|omegaTarget| cpu ' + (cpuR / Math.max(1, nRatio)).toFixed(3)
+		+ ' gpu ' + (gpuR / Math.max(1, nRatio)).toFixed(3) + ' over ' + nRatio + ' plates' + table);
+	note('parity', 'omega: worst |dR*w| plate ' + (worstPlate + 1) + ' = ' + (worstOmega / 10000).toFixed(3)
+		+ ' cm/yr · cpu from relaxed omega ' + (cpu.meanSpeed / 10000).toFixed(3) + '/' + (cpu.maxSpeed / 10000).toFixed(3)
+		+ ' · cpu from target omega ' + (tgtSum / Math.max(1, tgtN) / 10000).toFixed(3) + '/' + (tgtMax / 10000).toFixed(3)
+		+ ' · gpu ' + (gpu.meanSpeed / 10000).toFixed(3) + '/' + (gpu.maxSpeed / 10000).toFixed(3));
 	if (Math.abs(cpu.meanSpeed - gpu.meanSpeed) > 0.2 * Math.max(1, Math.abs(cpu.meanSpeed))) fail('meanSpeed drift > 20%');
 
 	// Phase 2: fifteen more frames - crosses the t=1 Myr event cycle (download+cycle+upload).
-	await GpuSim.advance(gpu, dt, 15);
-	await GpuSim.download(gpu);
-	var finite = Number.isFinite(gpu.meanSpeed + gpu.maxSpeed + gpu.plateCount) && gpu.n > 0;
+	// A throw here is reported and the run continues: the remaining phases do not need the
+	// mirror, and a capture that stops at the first failure wastes the whole trip to a rig.
+	var roundTripOk = true;
+	try {
+		await GpuSim.play(gpu, dt, 15);
+		await GpuSim.download(gpu);
+	} catch (e) {
+		roundTripOk = false;
+		fail('event round trip threw: ' + ((e && e.message) || e));
+	}
+	var finite = roundTripOk && Number.isFinite(gpu.meanSpeed + gpu.maxSpeed + gpu.plateCount) && gpu.n > 0;
 	note('events', 'frame 20 t=' + gpu.t.toFixed(1) + ' Myr · plates ' + gpu.plateCount +
 		' · columns ' + gpu.n + ' · finite=' + finite);
 	if (!finite) fail('GPU state not finite after the event cycle');
@@ -144,13 +199,15 @@ function adapterInfo(adapter) {
 	// Phase 4: the GPU renderer over every layer, pixel-compared against the CPU renderer.
 	// A layer id routed into the wrong WGSL branch shows up here as a pixel delta, which
 	// drawing-and-eyeballing (the old phase 4) never caught.
-	var renderer = new GpuRenderer(document.getElementById('map')).init(gpu);
+	var renderer = new GpuRenderer(document.getElementById('map')).init(gpu, { readback: true });
 	var ref = new Renderer(document.createElement('canvas'), gpu);
 	var layers = ['plate', 'type', 'z', 'damage', 'owner', 'sediment', 'speed', 'age', 'force', 'dir',
 		'oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
 	var gw = renderer.canvas.width, gh = renderer.canvas.height;
 	var row = Math.ceil(gw * 4 / 256) * 256;
 	var bgra = renderer.format === 'bgra8unorm';
+	if (!(gw > 0 && gh > 0)) fail('renderer canvas is ' + gw + 'x' + gh + ' - pixel parity cannot run');
+	note('render', 'canvas ' + gw + 'x' + gh + ' · format ' + renderer.format + ' · row ' + row);
 	for (var l = 0; l < layers.length; l++) {
 		renderer.draw(layers[l]);
 		var tex = renderer.context.getCurrentTexture();
@@ -160,6 +217,7 @@ function adapterInfo(adapter) {
 		device.queue.submit([enc.finish()]);
 		await rb.mapAsync(0x1);
 		var gpx = new Uint8Array(rb.getMappedRange());
+		if (gpx.length < row * gh) fail('readback short on layer ' + layers[l] + ': ' + gpx.length + ' of ' + row * gh + ' bytes');
 		rb.unmap(); rb.destroy();
 		ref.draw(layers[l]);
 		var cpx = ref.image.data;
@@ -181,7 +239,10 @@ function adapterInfo(adapter) {
 		}
 		var mean = sum / (gw * gh * 3);
 		note('render', layers[l] + ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst + ' ch>16: ' + loud);
-		if (mean > 2 || worst > 32) fail('GPU/CPU pixels disagree on layer ' + layers[l]);
+		// NaN comparisons are always false, so a degenerate readback used to sail through
+		// this gate: an empty comparison is a failure, not a pass.
+		if (!Number.isFinite(mean)) fail('pixel parity compared nothing on layer ' + layers[l] + ' (mean ' + mean + ')');
+		else if (mean > 2 || worst > 32) fail('GPU/CPU pixels disagree on layer ' + layers[l]);
 	}
 	renderer.draw('dir');
 	await new Promise(function (r) { setTimeout(r, 300); });

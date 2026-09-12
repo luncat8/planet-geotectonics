@@ -12,8 +12,11 @@ var Events = {
 	minCells: function (s) {
 		return Math.max(3, Math.round(EventsParams.minPlateCells * s.grid.V / 10242));
 	},
-	cycle: function (s) {
-		var span = s.t - s.lastEvent;
+	// span is the time this cycle covers; callers that already advanced s.t past the
+	// cadence (the GPU play path kicks the round trip and applies it later) pass it
+	// explicitly, everyone else gets the cadence since the last cycle.
+	cycle: function (s, span) {
+		if (span === undefined) span = s.t - s.lastEvent;
 		Events.compact(s);
 		Events.census(s);
 		Events.suture(s, span);

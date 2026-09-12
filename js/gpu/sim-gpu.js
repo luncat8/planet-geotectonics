@@ -268,90 +268,139 @@ var GpuSim = {
 		}
 	},
 
+	// Mirror transfer sets. FULL is everything; the event cadence needs less. Measured
+	// (experiments/roundtrip-cost.js, plus an array-diff of Events.cycle): the cycle reads
+	// the columns, the plate table, owner/cellPlate, the edge classification and the frame
+	// counters, and it writes only the columns, the plate table and the counters. It never
+	// writes owner, cellPlate, relN, relT, edgeType, polarity or any cell float - and those
+	// are exactly the arrays the frame kernels recompute from the columns every frame
+	// (raster, velocities, relatives, polarity, elevationZ), so shipping them back to the
+	// device is pure cost. Checkpoints keep the full set: Checkpoint.save serializes it.
+	FULL: ['colF', 'colI', 'plateF', 'plateI', 'cellF', 'cellI', 'edges', 'bins', 'scan', 'frameOut', 'diagOut'],
+	EVENT_READS: ['colF', 'colI', 'plateF', 'plateI', 'cellI', 'edges', 'frameOut', 'diagOut'],
+	EVENT_WRITES: ['colF', 'colI', 'plateF', 'plateI', 'frameOut'],
+
+	// Pack scratch, allocated once per engine. queue.writeBuffer copies the bytes at call
+	// time, so one set of arrays can back every transfer (no 4.5 MB per event cycle).
+	scratch: function (S) {
+		if (S.pack) return S.pack;
+		var l = S.l;
+		S.pack = {
+			colF: new Float32Array(l.colF), colI: new Int32Array(l.colI),
+			plateF: new Float32Array(l.plateF), plateI: new Int32Array(l.plateI),
+			cellF: new Float32Array(l.cellF), cellI: new Int32Array(l.cellI),
+			edges: new Int32Array(l.edges)
+		};
+		return S.pack;
+	},
+
 	// Pack the dynamic mirror into the GPU buffers. Everything the frame kernels read.
 	uploadState: async function (state) {
-		var S = GpuSim.S, l = S.l, d = S.device, g = state.grid, V = g.V, n = state.colCap;
-		var colF = new Float32Array(l.colF), colI = new Int32Array(l.colI);
-		for (var i = 0; i < n; i++) {
-			var b = i * 6, o = i * 4, w = i * 3;
-			colF[b * 4] = state.body[w]; colF[b * 4 + 1] = state.body[w + 1]; colF[b * 4 + 2] = state.body[w + 2]; colF[b * 4 + 3] = state.area[i];
-			colF[(b + 1) * 4] = state.world[w]; colF[(b + 1) * 4 + 1] = state.world[w + 1]; colF[(b + 1) * 4 + 2] = state.world[w + 2]; colF[(b + 1) * 4 + 3] = state.hFel[i];
-			colF[(b + 2) * 4] = state.hMaf[i]; colF[(b + 2) * 4 + 1] = state.hSed[i]; colF[(b + 2) * 4 + 2] = state.age[i]; colF[(b + 2) * 4 + 3] = state.damage[i];
-			colF[(b + 3) * 4] = state.fert[i]; colF[(b + 3) * 4 + 1] = state.oVms[i]; colF[(b + 3) * 4 + 2] = state.oMaf[i]; colF[(b + 3) * 4 + 3] = state.oArc[i];
-			colF[(b + 4) * 4] = state.oOro[i]; colF[(b + 4) * 4 + 1] = state.oBas[i]; colF[(b + 4) * 4 + 2] = state.oPla[i]; colF[(b + 4) * 4 + 3] = state.zDyn[i];
-			colF[(b + 5) * 4] = state.zDynNext[i]; colF[(b + 5) * 4 + 1] = state.collapseDelta[i];
-			colI[o] = state.plate[i]; colI[o + 1] = state.cell[i]; colI[o + 2] = state.consumedBy[i]; colI[o + 3] = state.alive[i];
+		return GpuSim.push(state, GpuSim.FULL);
+	},
+	uploadEvents: async function (state) {
+		return GpuSim.push(state, GpuSim.EVENT_WRITES);
+	},
+	push: async function (state, names) {
+		var S = GpuSim.S, l = S.l, d = S.device, g = state.grid, V = g.V, n = state.n, P = GpuSim.scratch(S);
+		if (names.indexOf('colF') >= 0 || names.indexOf('colI') >= 0) {
+			var colF = P.colF, colI = P.colI;
+			// Alive rows only: the device already ignores rows at or past aliveN, and the
+			// alive flag past n is zeroed below so a stale row can never come back to life.
+			for (var i = 0; i < n; i++) {
+				var b = i * 6, o = i * 4, w = i * 3;
+				colF[b * 4] = state.body[w]; colF[b * 4 + 1] = state.body[w + 1]; colF[b * 4 + 2] = state.body[w + 2]; colF[b * 4 + 3] = state.area[i];
+				colF[(b + 1) * 4] = state.world[w]; colF[(b + 1) * 4 + 1] = state.world[w + 1]; colF[(b + 1) * 4 + 2] = state.world[w + 2]; colF[(b + 1) * 4 + 3] = state.hFel[i];
+				colF[(b + 2) * 4] = state.hMaf[i]; colF[(b + 2) * 4 + 1] = state.hSed[i]; colF[(b + 2) * 4 + 2] = state.age[i]; colF[(b + 2) * 4 + 3] = state.damage[i];
+				colF[(b + 3) * 4] = state.fert[i]; colF[(b + 3) * 4 + 1] = state.oVms[i]; colF[(b + 3) * 4 + 2] = state.oMaf[i]; colF[(b + 3) * 4 + 3] = state.oArc[i];
+				colF[(b + 4) * 4] = state.oOro[i]; colF[(b + 4) * 4 + 1] = state.oBas[i]; colF[(b + 4) * 4 + 2] = state.oPla[i]; colF[(b + 4) * 4 + 3] = state.zDyn[i];
+				colF[(b + 5) * 4] = state.zDynNext[i]; colF[(b + 5) * 4 + 1] = state.collapseDelta[i];
+				colI[o] = state.plate[i]; colI[o + 1] = state.cell[i]; colI[o + 2] = state.consumedBy[i]; colI[o + 3] = state.alive[i];
+			}
+			for (var dead = n; dead < l.colCap; dead++) colI[dead * 4 + 3] = 0;
+			if (names.indexOf('colF') >= 0) d.queue.writeBuffer(S.buf.colF, 0, colF);
+			if (names.indexOf('colI') >= 0) d.queue.writeBuffer(S.buf.colI, 0, colI);
 		}
-		d.queue.writeBuffer(S.buf.colF, 0, colF);
-		d.queue.writeBuffer(S.buf.colI, 0, colI);
-		var plateF = new Float32Array(l.plateF), plateI = new Int32Array(l.plateI);
-		for (var p = 0; p < l.plateCap; p++) {
-			var pb = p * 8, po = p * 4, pw = p * 3, qb = p * 4;
-			plateF[pb * 4] = state.q[qb]; plateF[pb * 4 + 1] = state.q[qb + 1]; plateF[pb * 4 + 2] = state.q[qb + 2]; plateF[pb * 4 + 3] = state.q[qb + 3];
-			plateF[(pb + 1) * 4] = state.omega[pw]; plateF[(pb + 1) * 4 + 1] = state.omega[pw + 1]; plateF[(pb + 1) * 4 + 2] = state.omega[pw + 2]; plateF[(pb + 1) * 4 + 3] = state.plateBirth[p];
-			plateF[(pb + 2) * 4] = state.omegaTarget[pw]; plateF[(pb + 2) * 4 + 1] = state.omegaTarget[pw + 1]; plateF[(pb + 2) * 4 + 2] = state.omegaTarget[pw + 2];
-			plateF[(pb + 3) * 4] = state.M[p * 9]; plateF[(pb + 3) * 4 + 1] = state.M[p * 9 + 1]; plateF[(pb + 3) * 4 + 2] = state.M[p * 9 + 2];
-			plateF[(pb + 4) * 4] = state.M[p * 9 + 3]; plateF[(pb + 4) * 4 + 1] = state.M[p * 9 + 4]; plateF[(pb + 4) * 4 + 2] = state.M[p * 9 + 5];
-			plateF[(pb + 5) * 4] = state.M[p * 9 + 6]; plateF[(pb + 5) * 4 + 1] = state.M[p * 9 + 7]; plateF[(pb + 5) * 4 + 2] = state.M[p * 9 + 8];
-			plateF[(pb + 6) * 4] = state.rhs[pw]; plateF[(pb + 6) * 4 + 1] = state.rhs[pw + 1]; plateF[(pb + 6) * 4 + 2] = state.rhs[pw + 2]; plateF[(pb + 6) * 4 + 3] = state.arcFeed[p];
-			plateF[(pb + 7) * 4] = state.subRate[p]; plateF[(pb + 7) * 4 + 1] = state.seeds[p * 3]; plateF[(pb + 7) * 4 + 2] = state.seeds[p * 3 + 1]; plateF[(pb + 7) * 4 + 3] = state.seeds[p * 3 + 2];
-			plateI[po] = state.plateParent[p];
+		// One plate table block: plateF carries plateI.
+		if (names.indexOf('plateF') >= 0) {
+			var plateF = P.plateF, plateI = P.plateI;
+			for (var p = 0; p < l.plateCap; p++) {
+				var pb = p * 8, po = p * 4, pw = p * 3, qb = p * 4;
+				plateF[pb * 4] = state.q[qb]; plateF[pb * 4 + 1] = state.q[qb + 1]; plateF[pb * 4 + 2] = state.q[qb + 2]; plateF[pb * 4 + 3] = state.q[qb + 3];
+				plateF[(pb + 1) * 4] = state.omega[pw]; plateF[(pb + 1) * 4 + 1] = state.omega[pw + 1]; plateF[(pb + 1) * 4 + 2] = state.omega[pw + 2]; plateF[(pb + 1) * 4 + 3] = state.plateBirth[p];
+				plateF[(pb + 2) * 4] = state.omegaTarget[pw]; plateF[(pb + 2) * 4 + 1] = state.omegaTarget[pw + 1]; plateF[(pb + 2) * 4 + 2] = state.omegaTarget[pw + 2];
+				plateF[(pb + 3) * 4] = state.M[p * 9]; plateF[(pb + 3) * 4 + 1] = state.M[p * 9 + 1]; plateF[(pb + 3) * 4 + 2] = state.M[p * 9 + 2];
+				plateF[(pb + 4) * 4] = state.M[p * 9 + 3]; plateF[(pb + 4) * 4 + 1] = state.M[p * 9 + 4]; plateF[(pb + 4) * 4 + 2] = state.M[p * 9 + 5];
+				plateF[(pb + 5) * 4] = state.M[p * 9 + 6]; plateF[(pb + 5) * 4 + 1] = state.M[p * 9 + 7]; plateF[(pb + 5) * 4 + 2] = state.M[p * 9 + 8];
+				plateF[(pb + 6) * 4] = state.rhs[pw]; plateF[(pb + 6) * 4 + 1] = state.rhs[pw + 1]; plateF[(pb + 6) * 4 + 2] = state.rhs[pw + 2]; plateF[(pb + 6) * 4 + 3] = state.arcFeed[p];
+				plateF[(pb + 7) * 4] = state.subRate[p]; plateF[(pb + 7) * 4 + 1] = state.seeds[p * 3]; plateF[(pb + 7) * 4 + 2] = state.seeds[p * 3 + 1]; plateF[(pb + 7) * 4 + 3] = state.seeds[p * 3 + 2];
+				plateI[po] = state.plateParent[p];
+			}
+			d.queue.writeBuffer(S.buf.plateF, 0, plateF);
+			d.queue.writeBuffer(S.buf.plateI, 0, plateI);
 		}
-		d.queue.writeBuffer(S.buf.plateF, 0, plateF);
-		d.queue.writeBuffer(S.buf.plateI, 0, plateI);
-		var cellI = new Int32Array(l.cellI);
-		for (var c = 0; c < V; c++) {
-			var co = c * 13;
-			cellI[co] = state.owner[c]; cellI[co + 1] = state.cellPlate[c]; cellI[co + 2] = state.low[c];
-			cellI[co + 3] = state.spawnSlot[c]; cellI[co + 4] = state.gapPlate[c];
-			cellI[co + 5] = state.gapDonor[c * 3]; cellI[co + 6] = state.gapDonor[c * 3 + 1]; cellI[co + 7] = state.gapDonor[c * 3 + 2];
-			var frames = Math.min(state.gapFrames[c], 0xffff);
-			cellI[co + 8] = (state.trenchDist[c] & 3) | (frames << 4);
-			cellI[co + 9] = state.distance[c] === Infinity ? 0x7fffffff : Math.round(state.distance[c] * 256);
-			cellI[co + 10] = Math.round(state.gapTime[c] * 1e5);
-			cellI[co + 12] = state.gapDonorN[c];
+		if (names.indexOf('cellI') >= 0) {
+			var cellI = P.cellI;
+			for (var c = 0; c < V; c++) {
+				var co = c * 13;
+				cellI[co] = state.owner[c]; cellI[co + 1] = state.cellPlate[c]; cellI[co + 2] = state.low[c];
+				cellI[co + 3] = state.spawnSlot[c]; cellI[co + 4] = state.gapPlate[c];
+				cellI[co + 5] = state.gapDonor[c * 3]; cellI[co + 6] = state.gapDonor[c * 3 + 1]; cellI[co + 7] = state.gapDonor[c * 3 + 2];
+				var frames = Math.min(state.gapFrames[c], 0xffff);
+				cellI[co + 8] = (state.trenchDist[c] & 3) | (frames << 4);
+				cellI[co + 9] = state.distance[c] === Infinity ? 0x7fffffff : Math.round(state.distance[c] * 256);
+				cellI[co + 10] = Math.round(state.gapTime[c] * 1e5);
+				cellI[co + 12] = state.gapDonorN[c];
+			}
+			d.queue.writeBuffer(S.buf.cellI, 0, cellI);
 		}
-		d.queue.writeBuffer(S.buf.cellI, 0, cellI);
-		var cellF = new Float32Array(l.cellF);
-		for (var c2 = 0; c2 < V; c2++) {
-			var fb = c2 * 8, cb = c2 * 3;
-			cellF[fb * 4] = state.vel[cb]; cellF[fb * 4 + 1] = state.vel[cb + 1]; cellF[fb * 4 + 2] = state.vel[cb + 2]; cellF[fb * 4 + 3] = state.z[c2];
-			cellF[(fb + 1) * 4] = state.gradZ[cb]; cellF[(fb + 1) * 4 + 1] = state.gradZ[cb + 1]; cellF[(fb + 1) * 4 + 2] = state.gradZ[cb + 2]; cellF[(fb + 1) * 4 + 3] = state.slope[c2];
-			cellF[(fb + 2) * 4] = state.uMantle[cb]; cellF[(fb + 2) * 4 + 1] = state.uMantle[cb + 1]; cellF[(fb + 2) * 4 + 2] = state.uMantle[cb + 2]; cellF[(fb + 2) * 4 + 3] = state.plumeT[c2];
-			cellF[(fb + 3) * 4] = state.mobile[c2]; cellF[(fb + 3) * 4 + 1] = state.mobileFel[c2]; cellF[(fb + 3) * 4 + 2] = state.mobilePla[c2]; cellF[(fb + 3) * 4 + 3] = state.ext[c2];
+		if (names.indexOf('cellF') >= 0) {
+			var cellF = P.cellF;
+			for (var c2 = 0; c2 < V; c2++) {
+				var fb = c2 * 8, cb = c2 * 3;
+				cellF[fb * 4] = state.vel[cb]; cellF[fb * 4 + 1] = state.vel[cb + 1]; cellF[fb * 4 + 2] = state.vel[cb + 2]; cellF[fb * 4 + 3] = state.z[c2];
+				cellF[(fb + 1) * 4] = state.gradZ[cb]; cellF[(fb + 1) * 4 + 1] = state.gradZ[cb + 1]; cellF[(fb + 1) * 4 + 2] = state.gradZ[cb + 2]; cellF[(fb + 1) * 4 + 3] = state.slope[c2];
+				cellF[(fb + 2) * 4] = state.uMantle[cb]; cellF[(fb + 2) * 4 + 1] = state.uMantle[cb + 1]; cellF[(fb + 2) * 4 + 2] = state.uMantle[cb + 2]; cellF[(fb + 2) * 4 + 3] = state.plumeT[c2];
+				cellF[(fb + 3) * 4] = state.mobile[c2]; cellF[(fb + 3) * 4 + 1] = state.mobileFel[c2]; cellF[(fb + 3) * 4 + 2] = state.mobilePla[c2]; cellF[(fb + 3) * 4 + 3] = state.ext[c2];
+			}
+			d.queue.writeBuffer(S.buf.cellF, 0, cellF);
 		}
-		d.queue.writeBuffer(S.buf.cellF, 0, cellF);
-		var edges = new Int32Array(l.edges);
-		for (var e = 0; e < V * 6; e++) {
-			edges[e * 4] = reinterpretI32(state.relN[e]);
-			edges[e * 4 + 1] = reinterpretI32(state.relT[e]);
-			edges[e * 4 + 2] = (state.edgeType[e] & 0xff) | (((state.polarity[e] + 1) & 0xff) << 8);
+		if (names.indexOf('edges') >= 0) {
+			var edges = P.edges;
+			for (var e = 0; e < V * 6; e++) {
+				edges[e * 4] = reinterpretI32(state.relN[e]);
+				edges[e * 4 + 1] = reinterpretI32(state.relT[e]);
+				edges[e * 4 + 2] = (state.edgeType[e] & 0xff) | (((state.polarity[e] + 1) & 0xff) << 8);
+			}
+			d.queue.writeBuffer(S.buf.edges, 0, edges);
 		}
-		d.queue.writeBuffer(S.buf.edges, 0, edges);
-		// frameOut: n + cumulative counters + 64-bit ledger pairs + per-plate atomics.
-		var fo = new Int32Array(l.frameOut);
-		var ledBuf = new ArrayBuffer(4), ledF32 = new Float32Array(ledBuf), ledI32 = new Int32Array(ledBuf);
-		fo[0] = state.n;
-		var ledgers = [state.producedFel, state.producedMaf, state.erodedFel, state.erodedMaf,
-			state.subductedMaf, state.subductedSed, state.subductedArea];
-		for (var k = 0; k < 7; k++) {
-			// Running totals as f64-like hi/lo f32 pairs: the ledgerReduce kernels
-			// fold each frame's deltas in with twoSum, so nothing is lost to f32.
-			var v = ledgers[k];
-			ledF32[0] = v;
-			var hi = ledF32[0];
-			ledF32[0] = v - hi;
-			fo[l.foLedger0 + k * 2 + 1] = ledI32[0];
-			ledF32[0] = hi;
-			fo[l.foLedger0 + k * 2] = ledI32[0];
+		if (names.indexOf('frameOut') >= 0) {
+			// frameOut: n + cumulative counters + 64-bit ledger pairs + per-plate atomics.
+			var fo = P.frameOut || (P.frameOut = new Int32Array(l.frameOut));
+			var ledBuf = P.ledBuf || (P.ledBuf = new ArrayBuffer(4));
+			var ledF32 = P.ledF32 || (P.ledF32 = new Float32Array(ledBuf)), ledI32 = P.ledI32 || (P.ledI32 = new Int32Array(ledBuf));
+			fo[0] = state.n;
+			var ledgers = [state.producedFel, state.producedMaf, state.erodedFel, state.erodedMaf,
+				state.subductedMaf, state.subductedSed, state.subductedArea];
+			for (var k = 0; k < 7; k++) {
+				// Running totals as f64-like hi/lo f32 pairs: the ledgerReduce kernels
+				// fold each frame's deltas in with twoSum, so nothing is lost to f32.
+				var v = ledgers[k];
+				ledF32[0] = v;
+				var hi = ledF32[0];
+				ledF32[0] = v - hi;
+				fo[l.foLedger0 + k * 2 + 1] = ledI32[0];
+				ledF32[0] = hi;
+				fo[l.foLedger0 + k * 2] = ledI32[0];
+			}
+			for (var p2 = 0; p2 < l.plateCap; p2++) {
+				fo[l.foPlate0 + p2 * 5] = state.plateCells[p2];
+				fo[l.foPlate0 + p2 * 5 + 3] = state.plateLost[p2];
+				fo[l.foPlate0 + p2 * 5 + 4] = state.plateSpawned[p2];
+			}
+			d.queue.writeBuffer(S.buf.frameOut, 0, fo);
 		}
-		for (var p2 = 0; p2 < l.plateCap; p2++) {
-			fo[l.foPlate0 + p2 * 5] = state.plateCells[p2];
-			fo[l.foPlate0 + p2 * 5 + 3] = state.plateLost[p2];
-			fo[l.foPlate0 + p2 * 5 + 4] = state.plateSpawned[p2];
-		}
-		d.queue.writeBuffer(S.buf.frameOut, 0, fo);
-		await GpuSim.uploadFrame(state, 0.1);
+		await GpuSim.uploadFrame(state, GpuParams.dt);
 	},
 
 	// The per-frame scalar block: mantle bookkeeping stays on the CPU (cheap, sequential
@@ -597,87 +646,122 @@ var GpuSim = {
 		S.device.queue.submit([enc.finish()]);
 	},
 
-	// Full mirror sync back. One staging buffer per source, one submit, then unpack.
+	// Mirror sync back. One staging buffer per source, one submit, then unpack. `names`
+	// picks the set (GpuSim.FULL for an on-demand sync, GpuSim.EVENT_READS for the event
+	// cadence); staging buffers are reused, and only the alive column rows are unpacked.
 	download: async function (state) {
+		return GpuSim.pull(state, GpuSim.FULL);
+	},
+	downloadEvents: async function (state) {
+		return GpuSim.pull(state, GpuSim.EVENT_READS);
+	},
+	pull: async function (state, names) {
 		var S = GpuSim.S, l = S.l, d = S.device, g = state.grid, V = g.V;
-		var reads = ['colF', 'colI', 'plateF', 'plateI', 'cellF', 'cellI', 'edges', 'bins', 'scan', 'frameOut', 'diagOut'];
-		var enc = d.createCommandEncoder(), stage = {};
-		for (var r = 0; r < reads.length; r++) {
-			var name = reads[r];
-			stage[name] = d.createBuffer({ size: Math.max(16, S.buf[name].size), usage: 0x1 | 0x8 });
+		// A second transfer can overlap this one (a probe click during an event round
+		// trip); the shared staging set is only reused when it is free.
+		var shared = !S.stageBusy;
+		if (shared) { S.stageBusy = true; if (!S.stage) S.stage = {}; }
+		var stage = shared ? S.stage : {};
+		// `m` is what this transfer mapped; `stage` is the cache and can hold buffers from
+		// an earlier, wider download. Unpacking must test `m`, or a light event round trip
+		// reads a cached buffer that was never mapped and the device raises OperationError.
+		var m = {};
+		var enc = d.createCommandEncoder();
+		for (var r = 0; r < names.length; r++) {
+			var name = names[r];
+			if (!stage[name]) stage[name] = d.createBuffer({ size: Math.max(16, S.buf[name].size), usage: 0x1 | 0x8 });
 			enc.copyBufferToBuffer(S.buf[name], 0, stage[name], 0, S.buf[name].size);
+			m[name] = stage[name];
 		}
+		var tw0 = GpuPerf ? GpuPerf.clock() : 0;
 		d.queue.submit([enc.finish()]);
 		var maps = [];
-		for (var r2 = 0; r2 < reads.length; r2++) maps.push(stage[reads[r2]].mapAsync(1));
+		for (var r2 = 0; r2 < names.length; r2++) maps.push(stage[names[r2]].mapAsync(1));
 		await Promise.all(maps);
-		var colF = new Float32Array(stage.colF.getMappedRange());
-		var colI = new Int32Array(stage.colI.getMappedRange());
-		for (var i = 0; i < l.colCap; i++) {
-			var b = i * 6, o = i * 4, w = i * 3;
-			state.body[w] = colF[b * 4]; state.body[w + 1] = colF[b * 4 + 1]; state.body[w + 2] = colF[b * 4 + 2]; state.area[i] = colF[b * 4 + 3];
-			state.world[w] = colF[(b + 1) * 4]; state.world[w + 1] = colF[(b + 1) * 4 + 1]; state.world[w + 2] = colF[(b + 1) * 4 + 2]; state.hFel[i] = colF[(b + 1) * 4 + 3];
-			state.hMaf[i] = colF[(b + 2) * 4]; state.hSed[i] = colF[(b + 2) * 4 + 1]; state.age[i] = colF[(b + 2) * 4 + 2]; state.damage[i] = colF[(b + 2) * 4 + 3];
-			state.fert[i] = colF[(b + 3) * 4]; state.oVms[i] = colF[(b + 3) * 4 + 1]; state.oMaf[i] = colF[(b + 3) * 4 + 2]; state.oArc[i] = colF[(b + 3) * 4 + 3];
-			state.oOro[i] = colF[(b + 4) * 4]; state.oBas[i] = colF[(b + 4) * 4 + 1]; state.oPla[i] = colF[(b + 4) * 4 + 2]; state.zDyn[i] = colF[(b + 4) * 4 + 3];
-			state.zDynNext[i] = colF[(b + 5) * 4]; state.collapseDelta[i] = colF[(b + 5) * 4 + 1];
-			state.plate[i] = colI[o]; state.cell[i] = colI[o + 1]; state.consumedBy[i] = colI[o + 2]; state.alive[i] = colI[o + 3];
-		}
-		var plateF = new Float32Array(stage.plateF.getMappedRange());
-		var plateI = new Int32Array(stage.plateI.getMappedRange());
-		for (var p = 0; p < l.plateCap; p++) {
-			var pb = p * 8, pw = p * 3, qb = p * 4;
-			state.q[qb] = plateF[pb * 4]; state.q[qb + 1] = plateF[pb * 4 + 1]; state.q[qb + 2] = plateF[pb * 4 + 2]; state.q[qb + 3] = plateF[pb * 4 + 3];
-			state.omega[pw] = plateF[(pb + 1) * 4]; state.omega[pw + 1] = plateF[(pb + 1) * 4 + 1]; state.omega[pw + 2] = plateF[(pb + 1) * 4 + 2];
-			state.plateBirth[p] = plateF[(pb + 1) * 4 + 3];
-			state.omegaTarget[pw] = plateF[(pb + 2) * 4]; state.omegaTarget[pw + 1] = plateF[(pb + 2) * 4 + 1]; state.omegaTarget[pw + 2] = plateF[(pb + 2) * 4 + 2];
-			state.M[p * 9] = plateF[(pb + 3) * 4]; state.M[p * 9 + 1] = plateF[(pb + 3) * 4 + 1]; state.M[p * 9 + 2] = plateF[(pb + 3) * 4 + 2];
-			state.M[p * 9 + 3] = plateF[(pb + 4) * 4]; state.M[p * 9 + 4] = plateF[(pb + 4) * 4 + 1]; state.M[p * 9 + 5] = plateF[(pb + 4) * 4 + 2];
-			state.M[p * 9 + 6] = plateF[(pb + 5) * 4]; state.M[p * 9 + 7] = plateF[(pb + 5) * 4 + 1]; state.M[p * 9 + 8] = plateF[(pb + 5) * 4 + 2];
-			state.rhs[pw] = plateF[(pb + 6) * 4]; state.rhs[pw + 1] = plateF[(pb + 6) * 4 + 1]; state.rhs[pw + 2] = plateF[(pb + 6) * 4 + 2];
-			state.arcFeed[p] = plateF[(pb + 6) * 4 + 3];
-			state.subRate[p] = plateF[(pb + 7) * 4];
-			state.seeds[p * 3] = plateF[(pb + 7) * 4 + 1]; state.seeds[p * 3 + 1] = plateF[(pb + 7) * 4 + 2]; state.seeds[p * 3 + 2] = plateF[(pb + 7) * 4 + 3];
-			state.plateParent[p] = plateI[p * 4];
-		}
-		var cellF = new Float32Array(stage.cellF.getMappedRange());
-		var cellI = new Int32Array(stage.cellI.getMappedRange());
-		for (var c = 0; c < V; c++) {
-			var fb = c * 8, cb = c * 3, co = c * 13;
-			state.vel[cb] = cellF[fb * 4]; state.vel[cb + 1] = cellF[fb * 4 + 1]; state.vel[cb + 2] = cellF[fb * 4 + 2]; state.z[c] = cellF[fb * 4 + 3];
-			state.gradZ[cb] = cellF[(fb + 1) * 4]; state.gradZ[cb + 1] = cellF[(fb + 1) * 4 + 1]; state.gradZ[cb + 2] = cellF[(fb + 1) * 4 + 2]; state.slope[c] = cellF[(fb + 1) * 4 + 3];
-			state.uMantle[cb] = cellF[(fb + 2) * 4]; state.uMantle[cb + 1] = cellF[(fb + 2) * 4 + 1]; state.uMantle[cb + 2] = cellF[(fb + 2) * 4 + 2]; state.plumeT[c] = cellF[(fb + 2) * 4 + 3];
-			state.mobile[c] = cellF[(fb + 3) * 4]; state.mobileFel[c] = cellF[(fb + 3) * 4 + 1]; state.mobilePla[c] = cellF[(fb + 3) * 4 + 2]; state.ext[c] = cellF[(fb + 3) * 4 + 3];
-			state.outflow[c] = cellF[(fb + 4) * 4]; state.outflowFel[c] = cellF[(fb + 4) * 4 + 1]; state.outflowPla[c] = cellF[(fb + 4) * 4 + 2];
-			state.stay[c] = cellF[(fb + 5) * 4]; state.stayFel[c] = cellF[(fb + 5) * 4 + 1]; state.stayPla[c] = cellF[(fb + 5) * 4 + 2];
-			state.wEq[cb] = cellF[(fb + 7) * 4]; state.wEq[cb + 1] = cellF[(fb + 7) * 4 + 1]; state.wEq[cb + 2] = cellF[(fb + 7) * 4 + 2];
-			state.owner[c] = cellI[co]; state.cellPlate[c] = cellI[co + 1]; state.low[c] = cellI[co + 2];
-			state.spawnSlot[c] = cellI[co + 3]; state.gapPlate[c] = cellI[co + 4];
-			state.gapDonor[c * 3] = cellI[co + 5]; state.gapDonor[c * 3 + 1] = cellI[co + 6]; state.gapDonor[c * 3 + 2] = cellI[co + 7];
-			state.trenchDist[c] = cellI[co + 8] & 3;
-			state.gapFrames[c] = (cellI[co + 8] >>> 4) & 0xffff;
-			state.distance[c] = cellI[co + 9] === 0x7fffffff ? Infinity : cellI[co + 9] / 256;
-			state.gapTime[c] = cellI[co + 10] / 1e5;
-			state.gapDonorN[c] = cellI[co + 12];
-			state.wet[c] = state.z[c] < 0 ? 1 : 0;
-		}
-		var edges = new Int32Array(stage.edges.getMappedRange());
-		for (var e = 0; e < V * 6; e++) {
-			state.relN[e] = reinterpretF32(edges[e * 4]);
-			state.relT[e] = reinterpretF32(edges[e * 4 + 1]);
-			state.edgeType[e] = edges[e * 4 + 2] & 0xff;
-			state.polarity[e] = ((edges[e * 4 + 2] >> 8) & 0xff) - 1;
-		}
-		var bins = new Int32Array(stage.bins.getMappedRange());
-		var scan = new Int32Array(stage.scan.getMappedRange());
-		for (var c2 = 0; c2 < V; c2++) state.offset[c2] = scan[l.colCap + c2];
-		state.offset[V] = scan[l.colCap + V];
-		for (var c3 = 0; c3 < V; c3++) {
-			var begin = scan[l.colCap + c3], end = c3 === V - 1 ? scan[l.colCap + V] : scan[l.colCap + c3 + 1];
-			for (var at2 = begin; at2 < end; at2++) state.entries[at2] = bins[V + at2];
-		}
-		var fo = new Int32Array(stage.frameOut.getMappedRange());
+		var tw1 = GpuPerf ? GpuPerf.clock() : 0;
+		// The counters come first: n bounds the column unpack.
+		var fo = new Int32Array(m.frameOut.getMappedRange());
 		state.n = fo[0];
+		if (m.colF || m.colI) {
+			var colF = new Float32Array(m.colF.getMappedRange());
+			var colI = new Int32Array(m.colI.getMappedRange());
+			for (var i = 0; i < state.n; i++) {
+				var b = i * 6, o = i * 4, w = i * 3;
+				state.body[w] = colF[b * 4]; state.body[w + 1] = colF[b * 4 + 1]; state.body[w + 2] = colF[b * 4 + 2]; state.area[i] = colF[b * 4 + 3];
+				state.world[w] = colF[(b + 1) * 4]; state.world[w + 1] = colF[(b + 1) * 4 + 1]; state.world[w + 2] = colF[(b + 1) * 4 + 2]; state.hFel[i] = colF[(b + 1) * 4 + 3];
+				state.hMaf[i] = colF[(b + 2) * 4]; state.hSed[i] = colF[(b + 2) * 4 + 1]; state.age[i] = colF[(b + 2) * 4 + 2]; state.damage[i] = colF[(b + 2) * 4 + 3];
+				state.fert[i] = colF[(b + 3) * 4]; state.oVms[i] = colF[(b + 3) * 4 + 1]; state.oMaf[i] = colF[(b + 3) * 4 + 2]; state.oArc[i] = colF[(b + 3) * 4 + 3];
+				state.oOro[i] = colF[(b + 4) * 4]; state.oBas[i] = colF[(b + 4) * 4 + 1]; state.oPla[i] = colF[(b + 4) * 4 + 2]; state.zDyn[i] = colF[(b + 4) * 4 + 3];
+				state.zDynNext[i] = colF[(b + 5) * 4]; state.collapseDelta[i] = colF[(b + 5) * 4 + 1];
+				state.plate[i] = colI[o]; state.cell[i] = colI[o + 1]; state.consumedBy[i] = colI[o + 2]; state.alive[i] = colI[o + 3];
+			}
+		}
+		if (m.plateF) {
+			var plateF = new Float32Array(m.plateF.getMappedRange());
+			var plateI = new Int32Array(m.plateI.getMappedRange());
+			for (var p = 0; p < l.plateCap; p++) {
+				var pb = p * 8, pw = p * 3, qb = p * 4;
+				state.q[qb] = plateF[pb * 4]; state.q[qb + 1] = plateF[pb * 4 + 1]; state.q[qb + 2] = plateF[pb * 4 + 2]; state.q[qb + 3] = plateF[pb * 4 + 3];
+				state.omega[pw] = plateF[(pb + 1) * 4]; state.omega[pw + 1] = plateF[(pb + 1) * 4 + 1]; state.omega[pw + 2] = plateF[(pb + 1) * 4 + 2];
+				state.plateBirth[p] = plateF[(pb + 1) * 4 + 3];
+				state.omegaTarget[pw] = plateF[(pb + 2) * 4]; state.omegaTarget[pw + 1] = plateF[(pb + 2) * 4 + 1]; state.omegaTarget[pw + 2] = plateF[(pb + 2) * 4 + 2];
+				state.M[p * 9] = plateF[(pb + 3) * 4]; state.M[p * 9 + 1] = plateF[(pb + 3) * 4 + 1]; state.M[p * 9 + 2] = plateF[(pb + 3) * 4 + 2];
+				state.M[p * 9 + 3] = plateF[(pb + 4) * 4]; state.M[p * 9 + 4] = plateF[(pb + 4) * 4 + 1]; state.M[p * 9 + 5] = plateF[(pb + 4) * 4 + 2];
+				state.M[p * 9 + 6] = plateF[(pb + 5) * 4]; state.M[p * 9 + 7] = plateF[(pb + 5) * 4 + 1]; state.M[p * 9 + 8] = plateF[(pb + 5) * 4 + 2];
+				state.rhs[pw] = plateF[(pb + 6) * 4]; state.rhs[pw + 1] = plateF[(pb + 6) * 4 + 1]; state.rhs[pw + 2] = plateF[(pb + 6) * 4 + 2];
+				state.arcFeed[p] = plateF[(pb + 6) * 4 + 3];
+				state.subRate[p] = plateF[(pb + 7) * 4];
+				state.seeds[p * 3] = plateF[(pb + 7) * 4 + 1]; state.seeds[p * 3 + 1] = plateF[(pb + 7) * 4 + 2]; state.seeds[p * 3 + 2] = plateF[(pb + 7) * 4 + 3];
+				state.plateParent[p] = plateI[p * 4];
+			}
+		}
+		if (m.cellF) {
+			var cellF = new Float32Array(m.cellF.getMappedRange());
+			for (var c = 0; c < V; c++) {
+				var fb = c * 8, cb = c * 3;
+				state.vel[cb] = cellF[fb * 4]; state.vel[cb + 1] = cellF[fb * 4 + 1]; state.vel[cb + 2] = cellF[fb * 4 + 2]; state.z[c] = cellF[fb * 4 + 3];
+				state.gradZ[cb] = cellF[(fb + 1) * 4]; state.gradZ[cb + 1] = cellF[(fb + 1) * 4 + 1]; state.gradZ[cb + 2] = cellF[(fb + 1) * 4 + 2]; state.slope[c] = cellF[(fb + 1) * 4 + 3];
+				state.uMantle[cb] = cellF[(fb + 2) * 4]; state.uMantle[cb + 1] = cellF[(fb + 2) * 4 + 1]; state.uMantle[cb + 2] = cellF[(fb + 2) * 4 + 2]; state.plumeT[c] = cellF[(fb + 2) * 4 + 3];
+				state.mobile[c] = cellF[(fb + 3) * 4]; state.mobileFel[c] = cellF[(fb + 3) * 4 + 1]; state.mobilePla[c] = cellF[(fb + 3) * 4 + 2]; state.ext[c] = cellF[(fb + 3) * 4 + 3];
+				state.outflow[c] = cellF[(fb + 4) * 4]; state.outflowFel[c] = cellF[(fb + 4) * 4 + 1]; state.outflowPla[c] = cellF[(fb + 4) * 4 + 2];
+				state.stay[c] = cellF[(fb + 5) * 4]; state.stayFel[c] = cellF[(fb + 5) * 4 + 1]; state.stayPla[c] = cellF[(fb + 5) * 4 + 2];
+				state.wEq[cb] = cellF[(fb + 7) * 4]; state.wEq[cb + 1] = cellF[(fb + 7) * 4 + 1]; state.wEq[cb + 2] = cellF[(fb + 7) * 4 + 2];
+				state.wet[c] = state.z[c] < 0 ? 1 : 0;
+			}
+		}
+		if (m.cellI) {
+			var cellI = new Int32Array(m.cellI.getMappedRange());
+			for (var c1 = 0; c1 < V; c1++) {
+				var co = c1 * 13;
+				state.owner[c1] = cellI[co]; state.cellPlate[c1] = cellI[co + 1]; state.low[c1] = cellI[co + 2];
+				state.spawnSlot[c1] = cellI[co + 3]; state.gapPlate[c1] = cellI[co + 4];
+				state.gapDonor[c1 * 3] = cellI[co + 5]; state.gapDonor[c1 * 3 + 1] = cellI[co + 6]; state.gapDonor[c1 * 3 + 2] = cellI[co + 7];
+				state.trenchDist[c1] = cellI[co + 8] & 3;
+				state.gapFrames[c1] = (cellI[co + 8] >>> 4) & 0xffff;
+				state.distance[c1] = cellI[co + 9] === 0x7fffffff ? Infinity : cellI[co + 9] / 256;
+				state.gapTime[c1] = cellI[co + 10] / 1e5;
+				state.gapDonorN[c1] = cellI[co + 12];
+			}
+		}
+		if (m.edges) {
+			var edges = new Int32Array(m.edges.getMappedRange());
+			for (var e = 0; e < V * 6; e++) {
+				state.relN[e] = reinterpretF32(edges[e * 4]);
+				state.relT[e] = reinterpretF32(edges[e * 4 + 1]);
+				state.edgeType[e] = edges[e * 4 + 2] & 0xff;
+				state.polarity[e] = ((edges[e * 4 + 2] >> 8) & 0xff) - 1;
+			}
+		}
+		if (m.scan) {
+			var bins = new Int32Array(m.bins.getMappedRange());
+			var scan = new Int32Array(m.scan.getMappedRange());
+			for (var c2 = 0; c2 < V; c2++) state.offset[c2] = scan[l.colCap + c2];
+			state.offset[V] = scan[l.colCap + V];
+			for (var c3 = 0; c3 < V; c3++) {
+				var begin = scan[l.colCap + c3], end = c3 === V - 1 ? scan[l.colCap + V] : scan[l.colCap + c3 + 1];
+				for (var at2 = begin; at2 < end; at2++) state.entries[at2] = bins[V + at2];
+			}
+		}
 		state.overlaps = fo[1]; state.deaths = fo[2]; state.typeChanges = fo[3]; state.spawns = fo[4];
 		state.maxSpeed = fo[5] / 4096; state.finite = fo[6] ? 0 : 1;
 		var ledgers = ['producedFel', 'producedMaf', 'erodedFel', 'erodedMaf', 'subductedMaf', 'subductedSed', 'subductedArea'];
@@ -691,56 +775,84 @@ var GpuSim = {
 			state.plateLost[p2] = fo[l.foPlate0 + p2 * 5 + 3];
 			state.plateSpawned[p2] = fo[l.foPlate0 + p2 * 5 + 4];
 		}
-		var diag = new Float32Array(stage.diagOut.getMappedRange());
-		state.meanSpeed = diag[0]; state.massFel = diag[1]; state.massMaf = diag[2]; state.massSed = diag[3];
-		for (var k2 = 0; k2 < 6; k2++) state.oreSum[k2] = diag[4 + k2];
-		state.gaps = diag[10];
-		state.quatError = diag[12]; state.rigidError = Math.sqrt(diag[13]);
-		for (var r3 = 0; r3 < reads.length; r3++) stage[reads[r3]].unmap();
+		if (m.diagOut) {
+			var diag = new Float32Array(m.diagOut.getMappedRange());
+			state.meanSpeed = diag[0]; state.massFel = diag[1]; state.massMaf = diag[2]; state.massSed = diag[3];
+			for (var k2 = 0; k2 < 6; k2++) state.oreSum[k2] = diag[4 + k2];
+			state.gaps = diag[10];
+			state.quatError = diag[12]; state.rigidError = Math.sqrt(diag[13]);
+		}
+		for (var r3 = 0; r3 < names.length; r3++) m[names[r3]].unmap();
+		if (shared) S.stageBusy = false;
+		if (GpuPerf) { S.dlWait = tw1 - tw0; S.dlRead = GpuPerf.clock() - tw1; }
+	},
+
+	// One mirror round trip: pull, event cycle and/or checkpoint, push. The event cadence
+	// travels light (EVENT_READS / EVENT_WRITES); a checkpoint needs the whole mirror
+	// because Checkpoint.save serializes it. The three phases are timed separately so the
+	// strip shows where a hitch actually comes from (Phase I2).
+	roundTrip: async function (state, events, ckpt, Events, Checkpoint) {
+		var S = GpuSim.S;
+		Events = Events || GpuSim.Events; Checkpoint = Checkpoint || GpuSim.Checkpoint;
+		var t0 = GpuPerf ? GpuPerf.clock() : 0;
+		await (ckpt ? GpuSim.download(state) : GpuSim.downloadEvents(state));
+		var t1 = GpuPerf ? GpuPerf.clock() : 0;
+		if (events) {
+			// The span is taken at the due date, exactly as Sim.step's cycle sees it.
+			Events.cycle(state, state.t - state.lastEvent);
+			state.lastEvent = state.t;
+		}
+		var t2 = GpuPerf ? GpuPerf.clock() : 0;
+		if (events) await GpuSim.uploadEvents(state);
+		var t3 = GpuPerf ? GpuPerf.clock() : 0;
+		if (ckpt) {
+			Checkpoint.push(state);
+			state.ckptDue = state.t + GpuSim.Params.ckptEvery;
+		}
+		if (!GpuPerf) return;
+		GpuPerf.event(t3 - t0, t1 - t0, t2 - t1, t3 - t2, S.dlWait);
+		if (ckpt) GpuPerf.ckpt(GpuPerf.clock() - t3);
 	},
 
 	// One full step with events on the CPU mirror, mirroring Sim.step's contract.
-	// Sync mode is for tests and the parity harness; the render loop calls frame()
-	// directly and downloads on its own cadence.
 	step: async function (state, dt, Events, Checkpoint, Params) {
-		// Phase I2: the round trip and the checkpoint push are exactly the
-		// candidates for the visible GPU-mode hitches, so the HUD sees their
-		// wall time (Perf is optional: the node parity paths run without it).
 		if (state.t - state.lastEvent >= Params.eventCadence) {
-			var t0 = GpuPerf ? GpuPerf.clock() : 0;
-			await GpuSim.download(state);
-			Events.cycle(state);
-			state.lastEvent = state.t;
-			await GpuSim.uploadState(state);
-			if (GpuPerf) GpuPerf.event(GpuPerf.clock() - t0);
+			await GpuSim.roundTrip(state, true, false, Events, Checkpoint);
 		}
 		GpuSim.frame(state, dt);
 		state.frame++;
 		state.t += dt;
 		if (state.ckptCap > 0 && state.t >= state.ckptDue) {
-			var t1 = GpuPerf ? GpuPerf.clock() : 0;
-			await GpuSim.download(state);
-			Checkpoint.push(state);
-			state.ckptDue = state.t + Params.ckptEvery;
-			if (GpuPerf) GpuPerf.ckpt(GpuPerf.clock() - t1);
+			await GpuSim.roundTrip(state, false, true, Events, Checkpoint);
 		}
 	},
 
-	advance: async function (state, dt, frames) {
-		for (var i = 0; i < frames; i++) await GpuSim.step(state, dt, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params);
+	// The play path: n frames and their round trips in one call, the same device command
+	// sequence as n step() calls. Returns the frames submitted, so the frame loop counts
+	// real work instead of requested work; Phase III turns the loop into one encoder.
+	play: async function (state, dt, n) {
+		for (var i = 0; i < n; i++) {
+			await GpuSim.step(state, dt, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params);
+		}
+		return n;
 	}
 };
 
+// The edges buffer stores relN/relT as raw f32 bits in an i32 array, so every mirror
+// transfer reinterprets two values per edge - 123k calls at L5. One shared 4-byte buffer
+// instead of a fresh ArrayBuffer per call: the allocation was the whole cost of the
+// transfer (measured: 105 ms vs 1 ms for the same upload, experiments/roundtrip-cost.js).
+var castBuffer = new ArrayBuffer(4);
+var castF32 = new Float32Array(castBuffer), castI32 = new Int32Array(castBuffer);
+
 function reinterpretI32(f) {
-	var b = new ArrayBuffer(4);
-	new Float32Array(b)[0] = f;
-	return new Int32Array(b)[0];
+	castF32[0] = f;
+	return castI32[0];
 }
 
 function reinterpretF32(i) {
-	var b = new ArrayBuffer(4);
-	new Int32Array(b)[0] = i;
-	return new Float32Array(b)[0];
+	castI32[0] = i;
+	return castF32[0];
 }
 if (typeof module !== 'undefined' && module.exports) {
 	module.exports = GpuSim;
