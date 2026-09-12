@@ -16,9 +16,10 @@ var Perf = {
 	stepMs: 0, frameMs: 0, fps: 0, stepsPerSec: 0, myrPerSec: 0,
 	windowSteps: 0, lastFrame: 0, lastText: 0, text: '', detail: '',
 	gaps: new Float64Array(512), gapT: new Float64Array(512), gapI: 0, gapSort: new Float64Array(512),
-	// Event round trip (download + events + upload) and checkpoint push wall times,
-	// accumulated by the GPU step path and reported over the 2 Hz text window.
-	evMs: 0, evN: 0, ckMs: 0, ckN: 0,
+	// Event round trip wall times, split into the three phases that make it up
+	// (download / cycle / upload) so a hitch is attributable, plus the checkpoint push.
+	// Accumulated by the GPU step path, reported over the 2 Hz text window.
+	evMs: 0, evN: 0, evDl: 0, evCy: 0, evUp: 0, evWait: 0, ckMs: 0, ckN: 0,
 	clock: function () {
 		return performance.now();
 	},
@@ -29,6 +30,7 @@ var Perf = {
 		Perf.text = ''; Perf.detail = '';
 		Perf.gapI = 0; Perf.gaps.fill(0); Perf.gapT.fill(0);
 		Perf.evMs = 0; Perf.evN = 0; Perf.ckMs = 0; Perf.ckN = 0;
+		Perf.evDl = 0; Perf.evCy = 0; Perf.evUp = 0; Perf.evWait = 0;
 	},
 	// One lap per kernel: adds now - from to the kernel slot and returns the fresh stamp.
 	lap: function (id, from) {
@@ -40,8 +42,12 @@ var Perf = {
 		Perf.stepMs += (ms - Perf.stepMs) * (1 - Math.exp(-ms / Perf.TAU_STEP));
 		Perf.windowSteps++;
 	},
-	event: function (ms) {
+	// `wait` is the part of the download spent blocked on the device (submit to maps
+	// resolved); the rest of dl is the JS unpack. Without the split, a download that is
+	// slow for the wrong reason looks identical to a queue that is simply busy.
+	event: function (ms, dl, cy, up, wait) {
 		Perf.evMs += ms; Perf.evN++;
+		Perf.evDl += dl || 0; Perf.evCy += cy || 0; Perf.evUp += up || 0; Perf.evWait += wait || 0;
 	},
 	ckpt: function (ms) {
 		Perf.ckMs += ms; Perf.ckN++;
@@ -90,9 +96,13 @@ var Perf = {
 		Perf.windowSteps = 0;
 		Perf.detail = line;
 		var dist = Perf.gapStats(now);
-		var events = Perf.evN > 0 ? '  ·  events ' + Perf.evN + ' (' + (Perf.evMs / Perf.evN).toFixed(1) + ' ms)' : '';
+		var ev = Perf.evN || 1;
+		var events = Perf.evN > 0 ? '  ·  events ' + Perf.evN + ' (' + (Perf.evMs / ev).toFixed(1) + ' ms = dl '
+			+ (Perf.evDl / ev).toFixed(1) + ' [wait ' + (Perf.evWait / ev).toFixed(1) + '] + cyc '
+			+ (Perf.evCy / ev).toFixed(1) + ' + up ' + (Perf.evUp / ev).toFixed(1) + ')' : '';
 		var ckpt = Perf.ckN > 0 ? '  ·  ckpt ' + (Perf.ckMs / Perf.ckN).toFixed(1) + ' ms' : '';
 		Perf.evMs = 0; Perf.evN = 0; Perf.ckMs = 0; Perf.ckN = 0;
+		Perf.evDl = 0; Perf.evCy = 0; Perf.evUp = 0; Perf.evWait = 0;
 		Perf.text = Perf.fps.toFixed(1) + ' fps  ·  step ' + Perf.stepMs.toFixed(2) + ' ms  ·  frame '
 			+ Perf.frameMs.toFixed(1) + ' ms  ·  ' + Perf.stepsPerSec.toFixed(0) + ' steps/s  ·  '
 			+ Perf.myrPerSec.toFixed(1) + ' Myr/s' + (dist ? '  ·  ' + dist : '') + events + ckpt;

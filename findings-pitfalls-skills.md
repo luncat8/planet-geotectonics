@@ -735,3 +735,145 @@ FAIL (cpu 4.02 vs gpu 4.95 cm/yr at frame 5) is a SIM parity issue, untouched by
 view work and still open. The hue wheel was re-anchored to E120/N240/W0/S60 (green/blue
 /red/yellow: west red, south yellow); winding stays +1, so recheck the dirHue anchors in
 both files only if a real map's rose reads off.
+
+## The mirror transfer's real cost was a per-element ArrayBuffer (2026-09-12)
+
+	The GPU event round trip measured 114.7 ms on the owner's rig and ~200 ms headless at
+L5, and the obvious suspects were all wrong: `Events.cycle` is ~2 ms and the buffer
+copies are nothing. `reinterpretI32`/`reinterpretF32` did `var b = new ArrayBuffer(4)`
+per call, and the edges block calls them twice per edge - 123k allocations per transfer
+at L5, 491k at L6. One shared 4-byte cast buffer at module scope took uploadState from
+~105 ms to ~1 ms warm. Rule: a helper that "just reinterprets" is a hot-path allocation
+if it builds its own buffer; hoist the cast pair (`castF32`/`castI32` over one
+ArrayBuffer) and keep the helpers.
+	Measurement discipline that made this visible, now in
+`experiments/roundtrip-cost.js`: (1) throw away 2 warm-up reps - these loops JIT-warm
+and an unwarmed median reads 10x high (uploadEvents: 7.2/8.2/18.4/32.4 ms then 0.65 ms
+once hot); (2) report min-of-reps, the median on a shared box is noise; (3) never time a
+mutating function in a repeat loop - repeating `Events.cycle` on one world compacts it
+towards nothing and the "cost" collapses to 0.4 ms, which is how the first version of
+that script reported a 0.6 ms upload of 10232 columns. Warm the cycle on a throwaway
+world, then time one call.
+
+## A NaN comparison is a hole, not a gate (2026-09-12)
+
+	webgpu-smoke.html phase 4 printed `mean|d| NaN max|d| 0 ch>16: 0` for all 16 layers
+and PASSED, because `NaN > 2` is false and `worst` stayed 0: the readback had produced
+nothing to compare. Any gate of the form `if (metric > threshold) fail()` must first
+assert the metric is a finite number computed over a non-empty set - an empty comparison
+is a failure, not a pass. Same file: `device.onuncapturederror` gives a
+`GPUUncapturedErrorEvent`, whose `.message` is undefined; the text is on `e.error.message`,
+so 32 validation errors were logged as "webgpu uncaptured: undefined". And copying out of
+`getCurrentTexture()` needs `COPY_SRC` in the canvas `configure({usage})`: the spec's
+default is `RENDER_ATTACHMENT` alone and is not implicitly extended.
+
+## The GPU engine's JS is testable with no adapter (tests/gpu-stub.js)
+
+	`GpuSim.init` takes `opts.device`, so a ~50-line stub - createBuffer with a real
+ArrayBuffer behind it, writeBuffer/copyBufferToBuffer as memcpys, mapAsync resolved,
+shader/pipeline/bind-group factories returning {}, beginComputePass returning no-ops -
+runs `init`, `uploadState`/`uploadEvents`, `download`/`downloadEvents`, `roundTrip`,
+`step` and `play` headless. No WGSL is compiled and no dispatch executes, so it covers
+exactly what the browser rigs cover expensively: the mirror layout, what the event round
+trip ships, the alive-rows rule, and the frame/cadence scheduling. `tests/gpu-play.js`
+is in `run-all.js`. `GpuSim.S` is a singleton, so two engines cannot be live at once -
+run them sequentially. `createQuerySet` throwing is the easy way to get `tsOn = false`.
+
+## Do not "background" a JS round trip, and never upload a late mirror (2026-09-12)
+
+	Two dead ends worth remembering. (1) Kicking the mirror round trip as a background
+task and awaiting it later removes nothing from the frame gap: the pack and unpack loops
+still run on the main thread when the promise resolves, and the browser cannot composite
+through them. Only making the work smaller, splitting it across frames, or moving it to a
+worker helps. (2) Worse, a full-mirror upload that lands after the device has run k more
+frames reverts all k of them - `uploadState` carries colF, colI, plateF/plateI, cellF,
+cellI, edges and frameOut, i.e. everything the kernels advanced. "One more cycle of
+latency" is world corruption. If a transfer must overlap the simulation, it has to be a
+delta, not a mirror.
+	What the event cadence actually needs is small: an array diff of `Events.cycle`
+(compact/census/suture/absorb/retire/compactPlates/split/orphans) shows it writes only the
+columns, the plate table and the frame counters, and reads owner/cellPlate/relN/relT/
+edgeType/polarity in addition - and every one of those is recomputed by `raster`,
+`velocities`, `relatives`, `polarity` and `elevationZ` before anything reads it. Shipping
+them back was 62% of the bytes for nothing. When comparing state arrays for "changed",
+beware NaN: `s.z` holds NaN over uncovered gaps, so a naive `a[i] !== b[i]` diff reports
+every gap cell as changed on every call.
+
+## Session handoff (2026-09-12, later): 0.3 Phase II implemented headless
+
+	Done: (1) shared f32-bits cast buffer; (2) light event mirror (`GpuSim.EVENT_READS` /
+`EVENT_WRITES`, `downloadEvents`/`uploadEvents`), alive rows only with the alive flag past
+n zeroed, reused staging + pack scratch; (3) `GpuSim.play(state, dt, n)` replaces
+`advance`, `step` and `play` share `roundTrip()`, `Events.cycle(s, span)` takes the span
+explicitly; (4) the strip splits the round trip into `dl/cyc/up` and the frame loop counts
+submitted frames; (5) smoke repairs: no vacuous pixel parity, real uncaptured-error text,
+`{readback: true}` canvas usage, and the defect-D1 discriminator (worst per-plate |dR*w|
+plus the CPU mean/max from relaxed vs target omega); (6) `tests/gpu-stub.js`,
+`tests/gpu-play.js` (in run-all), `experiments/roundtrip-cost.js`; (7) 0.3-plan.md
+rewritten around the measurements, baseline log `0.3-II-roundtrip-cost.txt`.
+	Measured (stub device, this sandbox): L5 event round trip 200.05 -> 3.71 ms, L6
+847.79 -> 18.92 ms, against commit c706442 under the same method.
+	Open, needs the owner's GPU (no adapter in this container): a clean
+webgpu-smoke.html run - expect the pixel-parity lines to carry real numbers now and the
+32 errors to name themselves; a bench run with the missing 20-step rows; and defect D1
+(the frame-5 meanSpeed drift, gpu 4.947 vs cpu 4.022 cm/yr, which the new parity line
+should place against the target-omega hypothesis).
+
+## A reused staging cache must be tested against what THIS transfer mapped (2026-09-12)
+
+	The light event mirror introduced a crash that only a real device could show:
+`OperationError: getMappedRange failed` in `pull`, which rejected the play promise, so
+the run stopped dead until play was pressed again. `pull` reused a staging-buffer cache
+(`S.stage`) and then decided what to unpack with `if (stage.cellF)` - buffer *presence in
+the cache*, not membership in this transfer. A full sync (probe click, Save, deposit
+extract, or the 20 Myr checkpoint, which downloads FULL) leaves `cellF`/`diagOut` in the
+cache; the next light event round trip maps only EVENT_READS and then calls getMappedRange
+on a buffer it never mapped. In the app the trigger was deterministic, so runs died at a
+fixed point in time and survived a while after a restart - which reads like a random hang.
+Rule: when a resource is pooled across calls of different shapes, the unpack must iterate
+what this call acquired (`var m = {}; m[name] = stage[name]` in the copy loop, then test
+`m`), never the pool.
+	The second lesson is the stub's: `tests/gpu-stub.js` tracked `mapped` but never
+enforced it, so `tests/gpu-play.js` passed while the browser threw. Making `getMappedRange`
+throw when unmapped (and `writeBuffer` throw when mapped) reproduced the *identical* stack
+headless at sim-gpu.js:712 before the fix and passed after. A fake device is only worth
+keeping if it fails the way the real one does.
+
+## The diagnostics passes are ~40% of the GPU frame and nothing on the device reads them
+
+	On the owner's rig, with the event stall gone and the queue saturated: `winners 1.89
+diagC 1.69 loserRank 1.09 diagA 0.98 ledgerReduceA 0.61 subRateA 0.18 gaps 0.09 reduceA
+0.08 overlaps 0.07 resolve 0.06` ms - 6.74 ms in the top ten. `diagA` + `diagC` are 2.67 ms
+of that, and their output (`diag`, via `diagB`) is read only by the CPU mirror:
+`meanSpeed`, masses, oreSum, gaps, quatError, rigidError. The status line refreshes on a
+~150 ms tick and the light event round trip does not carry `diagOut` at all, so ~6 Hz is
+the honest cadence, not 60-180 Hz. Both kernels write only the `reduce` scratch, never
+frameOut, so skipping them cannot perturb the world; `zeroFrame` clears the accumulators
+every frame, so an on-demand pass reports that frame's values.
+	Also note that per-kernel ms roughly *tripled* when the event stall disappeared
+(winners 0.56 -> 1.89): kernels that used to run in the gaps between round trips now
+contend. A kernel-time table taken from a stalled queue understates every kernel, so
+re-read the table after each change to the frame cadence before ranking optimisations.
+	The bench's `hitches` column is a count against a threshold of 2x the *median*, so a
+faster run can show more hitches than the slower run it replaced (L5 5 steps: median
+100.0 -> 16.8 ms, hitches 0 -> 68, while max fell 183.3 -> 83.3 ms). It now prints
+hitches/frames; compare the fraction.
+
+## Session handoff (2026-09-12, evening): Phase II verified on device, D1 narrowed
+
+	Done: (1) the getMappedRange fix (`pull` unpacks only what the transfer mapped) plus a
+map-state-enforcing stub and a `tests/gpu-play.js` case for the full-sync-then-event
+sequence; (2) `dl` split into device wait vs JS read in the strip
+(`events N (ms = dl A [wait W] + cyc B + up C)`) via `S.dlWait`/`S.dlRead`; (3) the smoke
+prints each engine's own mean |omega|/|omegaTarget| plus the first four plates, and a
+throwing event round trip no longer aborts phases 3-5; (4) bench prints hitches/frames;
+(5) GPU engine errors reach the console in index.html; (6) 0.3-plan.md gains the on-device
+Phase II result, a new Phase III (diagnostics off the frame path) and renumbered phases,
+with the on-device capture in experiments/logs/0.3-II-ondevice.txt.
+	On device (nvidia/ampere, Chrome 151, L5, 1 step/frame): frame 34.4 -> 5.7 ms,
+p95 66.6 -> 5.6, max 77.9 -> 11.1, event round trip 114.7 -> 31.7 ms (dl 29.4 + cyc 2.0 +
+up 0.3), Myr/s 10.8 -> 12.2. The 10 ms event target is still open and is now a device-side
+problem, not a JS one.
+	Open: the D1 meanSpeed drift, waiting on the new |omega|/|omegaTarget| line; the
+20-step bench rows; and Phase III, which is the largest remaining win (~2.5 ms of ~8.7 ms
+per step at L5).

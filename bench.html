@@ -41,7 +41,7 @@
     <p class="sub">Two time-boxed measurements per config, on your GPU. <b>iso</b> = the kernel
       graph only: submit <i>steps</i> frames and await
       <code>onSubmittedWorkDone</code> — no event round trips, no drawing.
-      <b>smooth</b> = the full play path (<code>GpuSim.advance</code>, including the event and
+      <b>smooth</b> = the full play path (<code>GpuSim.play</code>, including the event and
       checkpoint round trips) under <code>requestAnimationFrame</code>, reporting the frame-gap
       distribution. Rows whose smooth median clears ~16.7 ms sustain 60 fps and are highlighted.
       The top-kernel GPU ms table (timestamp queries) prints under the table when the adapter
@@ -66,7 +66,9 @@
       <b>iso ms/step</b> is the GPU kernel graph for <i>steps</i> consecutive frames divided by
       <i>steps</i> (one <code>onSubmittedWorkDone</code> per sample); the 1-vs-5 gap exposes the
       per-step fixed cost. <b>smooth med/p95/max</b> are rAF frame gaps in ms; a <b>hitch</b> is a
-      gap over 2× the median. <b>Myr/s</b> = simulated time per wall second on the smooth path.
+      gap over 2× the median, shown as <i>hitches/frames sampled</i>. Compare the fraction, not
+      the count: a faster median lowers the 2× threshold, so a smoother run can show a higher
+      count than the slower run it replaced. <b>Myr/s</b> = simulated time per wall second.
       Sampling is time-boxed (~1.2 s per iso config, ~5 s per smooth config, capped sample counts)
       so a heavy level returns in bounded time. <code>?fast=1</code> shrinks the boxes for a quick
       pass on slow renderers; <code>?noauto=1</code> suppresses the auto-run;
@@ -213,7 +215,7 @@
 				if (now - t0 >= box) { finish(); return; }
 				if (busy) return;
 				busy = true;
-				GpuSim.advance(state, dt, n).then(function () {
+				GpuSim.play(state, dt, n).then(function () {
 					busy = false; done += n;
 					try { planet.renderer.draw('z'); } catch (e) {}
 					requestAnimationFrame(tick);
@@ -268,7 +270,7 @@
 						'<td>' + sm.medMs.toFixed(1) + '</td>' +
 						'<td>' + sm.p95Ms.toFixed(1) + '</td>' +
 						'<td>' + sm.maxMs.toFixed(1) + '</td>' +
-						'<td class="fps ' + (fps >= 58 ? 'g' : fps >= 30 ? 'y' : 'r') + '">' + sm.hitches + '</td>' +
+						'<td class="fps ' + (fps >= 58 ? 'g' : fps >= 30 ? 'y' : 'r') + '">' + sm.hitches + '/' + sm.frames + '</td>' +
 						'<td class="fps">' + sm.myrPerSec.toFixed(1) + '</td>';
 					tbody.appendChild(tr);
 					log('BENCH L' + level + ' steps=' + n + ' iso ms/step=' + iso.toFixed(3)

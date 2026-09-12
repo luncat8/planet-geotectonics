@@ -1,0 +1,40 @@
+## The "sim stops" bug: root cause found and fixed
+
+Your stack trace was the whole answer:
+
+```
+OperationError: getMappedRange failed
+  at pull (sim-gpu.js:712) ← roundTrip:789 ← step:811 ← play:826 ← webgpu-smoke.html:162
+```
+
+`pull` decided what to unpack by testing the **staging cache** (`if (stage.cellF)`), and the cache keeps buffers from an earlier, *wider* download. A light event round trip maps only `EVENT_READS`, then called `getMappedRange` on a cached `cellF` it had never mapped → `OperationError` → the play promise rejected → `ui.js`'s catch runs `setPlaying(false)`. That is literally "the sim stops until you press play again".
+
+The trigger is any **full sync followed by an event cycle**: a probe click, Save, the deposit extract — or the **20 Myr checkpoint**, which downloads the full mirror. That's why it died at a fixed point in time and then ran fine for a while after a restart.
+
+Fix: `pull` unpacks only what *that* transfer mapped. And `tests/gpu-stub.js` now enforces the map state, so `tests/gpu-play.js` **reproduces the identical stack headless at sim-gpu.js:712** before the fix and passes after. Engine errors now also reach `console.error` — the probe line was too easy to miss.
+
+## Your numbers, read
+
+| | before | after |
+|---|---|---|
+| frame / p95 / max | 34.4 / 66.6 / 77.9 ms | **5.7 / 5.6 / 11.1 ms** |
+| event round trip | 114.7 ms | **31.7** (dl 29.4 + cyc 2.0 + up 0.3) |
+| Myr/s (L5 / L6) | 10.8 / 2.1 | **12.2 / 4.8** |
+
+The plan's ≤10 ms event target is **not met**, but the split shows why it's no longer a JS problem: `cyc 2.0 + up 0.3` matches the headless measurement exactly, so ~28 ms is the device. I've split `dl` into `dl A [wait W]` (queue drain vs JS read) so the next capture says whether to attack the drain or the seven separate `mapAsync` round trips.
+
+Two measurement traps in your table, now fixed in the tool: the 5-step **hitch counts went up (0 → 68) because the median fell 6×** (100 → 16.8 ms), which lowers the 2×-median threshold — the bench now prints `hitches/frames`. And per-kernel ms *tripled* (winners 0.56 → 1.89) because kernels no longer run in the gaps around a 114 ms stall; a kernel table from a stalled queue understates every kernel.
+
+## Defect D1: narrowed, not closed — honestly
+
+The GPU's plate speeds land on the **unrelaxed fit**: gpu 4.947/13.026 vs cpu-from-target 5.040/13.052 (max within 0.2%), while the CPU's relaxed ω gives 4.022/11.449. I read every path that could explain it and they all match the CPU: the relaxation is identical in `js/plates.js:97-107` and `wgsl-plates.js:143-146`; `tauOmega: 0.5` feeds both (`params.js:7` → `wgsl-common.js:27`); `fDT()` is the uploaded 0.1; both boot with dt = τ_ω so both start at the fit (`js/sim.js:74`, `sim-gpu.js:613`); `plateOmega`/`plateOmegaTarget` slots agree and `velocities` reads the relaxed one (`wgsl-edges.js:16`). I also ruled out a stuck `prescribedOmega`/`fixedOmega` flag (only tests set them) and a missing `reduceB` dispatch. **The code does not explain it**, so the smoke now prints the decisive ratio — each engine's own mean |ω|/|ω_target| plus the first four plates — and a throwing round trip no longer aborts phases 3–5.
+
+## What the capture changed in the plan
+
+With the queue saturated, `diagA` + `diagC` = **2.67 ms of the 6.74 ms top-10 kernel total (~40%)**, and nothing on the device reads their output — they write only the `reduce` scratch, `diagB` folds it into `diag`, and only the CPU mirror reads that. The HUD refreshes every ~150 ms and the light event round trip doesn't carry `diagOut`, so those passes belong at ~6 Hz, not every frame. That's the new **Phase III**, ahead of N-steps-per-encoder (~13% at L5) and `loserRank` (now ~16%, not the 4% the old stalled table implied).
+
+**Verified:** `node tests/run-all.js` → `PASS all tests`, exit 0 — which executes the changed `pull`/`roundTrip`/`play`/`step` and the 5-arg `Perf.event` through `tests/gpu-play.js`, plus the CPU longrun.
+
+One housekeeping note: my earlier commit had vanished from `.git` (the reflog shows only the clone and the branch checkout) while the working tree kept every edit — nothing was lost, but I re-committed as `25d599c` and confirmed the push landed.
+
+For the next capture: `webgpu-smoke.html` (the ω ratio line settles D1), `bench.html?level=5&steps=1,5,20&dt=0.1` (the missing 20-step rows), and a long GPU play run past t = 20 Myr to confirm the checkpoint path no longer kills it.

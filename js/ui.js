@@ -11,13 +11,16 @@
 	var perfMain = document.getElementById('perf-main'), perfKern = document.getElementById('perf-kern');
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
 	var renderer = new Renderer(canvas, state), gpuRenderer = null, playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
+	// Frames the GPU play path has actually submitted since the last rAF: the strip counts
+	// real work, not the frames that were requested while a round trip held the queue.
+	var ran = 0;
 	var gpu = { on: false, ready: false, busy: false };
 	Sim.raster(state);
 	Perf.reset();
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
-	// and at the event cadence inside GpuSim.step, so no per-frame readback happens.
+	// and at the event cadence inside GpuSim.play, so no per-frame readback happens.
 	function bootEngine(done) {
 		if (engineInput.value === 'gpu') {
 			if (!navigator.gpu) {
@@ -67,7 +70,8 @@
 			GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params).then(function () {
 				gpu.busy = false; dirty = true;
 			})['catch'](function (error) {
-				gpu.busy = false; probe.textContent = 'GPU engine error: ' + error.message;
+				gpu.busy = false; console.error('GPU engine error', error);
+				probe.textContent = 'GPU engine error: ' + error.message;
 			});
 		} else {
 			Sim.step(state, +dtInput.value); dirty = true;
@@ -186,18 +190,21 @@
 			if (steps > 0) {
 				if (gpu.on && gpu.ready) {
 					// Frames submit to the device without any readback; only the event
-					// cadence inside GpuSim.step pulls the mirror back to the CPU.
+					// cadence inside GpuSim.play pulls the mirror back to the CPU.
 					if (!gpu.busy) {
 						gpu.busy = true;
-						GpuSim.advance(state, dt, steps).then(function () {
-							gpu.busy = false; dirty = true;
+						GpuSim.play(state, dt, steps).then(function (done) {
+							gpu.busy = false; ran += done; dirty = true;
 						})['catch'](function (error) {
 							gpu.busy = false; setPlaying(false);
+							// The probe line is easy to miss and the loop stops dead here, so
+							// the stack goes to the console too: an engine error must reach a log.
+							console.error('GPU engine error', error);
 							probe.textContent = 'GPU engine error: ' + error.message;
 						});
 					}
 				} else {
-					Sim.advance(state, dt, steps); dirty = true;
+					Sim.advance(state, dt, steps); ran += steps; dirty = true;
 				}
 			}
 			if (runTarget < Infinity && state.t >= runTarget - dt * 0.5) {
@@ -209,7 +216,7 @@
 			else renderer.draw(layerInput.value);
 			dirty = false;
 		}
-		Perf.frame(now, steps, dt);
+		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.update(now);
 			perfMain.textContent = Perf.text;

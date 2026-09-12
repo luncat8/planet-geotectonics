@@ -1,0 +1,60 @@
+0.3 Phase II — the event round trip, measured before and after
+==============================================================
+
+Rig: the Arena sandbox (no WebGPU adapter), node v22.22.3, so every number here is the
+JS side of the round trip on the stub device (tests/gpu-stub.js): the mirror pack, the
+event cycle and the unpack. No kernel runs and no GPU buffer is really copied; the
+browser rig adds the queue drain and the DMA on top. The owner's rig (0.3-2.txt,
+nvidia/ampere, Chrome 151) measured the whole round trip at 114.7 ms mean per event
+cycle at L5 while playing 1 step/frame.
+
+Method: experiments/roundtrip-cost.js (min of 9 warm reps, 2 warm-up reps discarded -
+an unwarmed median overstates these loops by ~10x). The "before" column is the same
+methodology run against commit c706442 in a separate worktree.
+
+  L5 (V 10242, colCap 15363, 10232 columns, t = 1 Myr)      before      after
+    event round trip: download                             98.60 ms    1.27 ms
+                      Events.cycle                          2.15 ms    2.09 ms
+                      upload                               99.30 ms    0.35 ms
+                      total                               200.05 ms    3.71 ms   (54x)
+    full on-demand sync (probe/save/deposits): download + upload
+                                                          197.90 ms    2.66 ms
+    mirror moved: full 4.79 MB · event reads 3.26 MB · event writes 1.74 MB
+
+  L6 (V 40962, colCap 61443, 40738 columns, t = 1 Myr)
+    event round trip total                                847.79 ms   18.92 ms   (45x)
+      download 429.70 -> 9.28 · cycle 7.84 -> 7.92 · upload 410.24 -> 1.72
+    mirror moved: full 19.11 MB · event reads 12.97 MB · event writes 6.90 MB
+
+Where the time went, in order of effect:
+
+  1. reinterpretI32/reinterpretF32 allocated a fresh ArrayBuffer plus two typed views
+     per call, and the edges block calls them twice per edge: 123k allocations per
+     transfer at L5, 491k at L6. One shared 4-byte cast buffer removes them. This alone
+     took uploadState at L5 from ~105 ms to ~1 ms warm (dbg: 105.54 -> 22.52 ms
+     unwarmed, and 1.21 ms in the warm benchmark).
+  2. The event cadence shipped the whole mirror. An array diff of Events.cycle
+     (tests/gpu-play.js asserts it) shows it reads the columns, the plate table,
+     owner/cellPlate, relN/relT/edgeType/polarity and the frame counters, and writes
+     only the columns, the plate table and the counters. owner, cellPlate, relN, relT,
+     edgeType, polarity and every cell float are recomputed by the frame kernels
+     (raster, velocities, relatives, polarity, elevationZ) before anything reads them,
+     so pushing them back was cost with no effect. Event writes are now
+     colF/colI/plateF/plateI/frameOut (1.74 MB of 4.79 MB).
+  3. Both directions walked colCap rows (15363) when only n (10232) are alive. Now the
+     alive rows are transferred and the alive flag past n is zeroed, so a row the device
+     spawned can never come back to life through a stale mirror.
+  4. Staging buffers (11 per download) and the pack scratch (4.79 MB per upload) were
+     allocated per call; both are reused, with a fresh-set fallback if a probe download
+     overlaps an event round trip.
+
+Consequence for the plan: the round trip was never expensive because it sat on the frame
+path - awaiting a promise does not move JS off the main thread, and a mirror that arrives
+late would have reverted every frame the GPU ran in between, because uploadState carries
+the whole mirror. Making the transfer cheap removes the hitch at the source, so the
+async/background-task design in the old Phase II is dropped.
+
+Not verified here (no adapter in this container): the on-device numbers. The owner's rig
+has to re-run webgpu-smoke.html and bench.html; the strip now splits the round trip into
+`events N (X ms = dl a + cyc b + up c)` so the next log says directly whether the
+remaining cost is the queue drain or the JS.

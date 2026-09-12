@@ -1,0 +1,89 @@
+0.3 Phase II — the light event mirror on hardware, and what the fix cost
+=======================================================================
+
+Rig: the owner's machine, Chrome 151, WebGPU adapter (hardware) nvidia/ampere,
+timestamp-query available, L5 (V 10242) unless noted, dt 0.1. Numbers transcribed
+from the owner's paste of index.html, bench.html and webgpu-smoke.html after the
+light-mirror round trip landed (commit 91a2652 plus the getMappedRange fix).
+
+index.html, GPU engine, playing 1 step/frame
+	178.3 fps · step 0.00 ms · frame 5.7 ms · 122 steps/s · 12.2 Myr/s
+	p95 5.6 ms · max 11.1 ms · events 6 (31.7 ms = dl 29.4 + cyc 2.0 + up 0.3)
+	winners 1.89 diagC 1.69 loserRank 1.09 diagA 0.98 ledgerReduceA 0.61
+	subRateA 0.18 gaps 0.09 reduceA 0.08 overlaps 0.07 resolve 0.06
+	CPU reference at the same settings: 90.0 fps · step 8.94 ms · frame 11.3 ms
+	· p95 11.2 ms · max 16.7 ms
+
+Comparison with the Phase I baseline (0.3-2.txt, same rig, same settings):
+
+	                  before            after           change
+	frame (ms)        34.4              5.7             6.0x faster
+	p95 (ms)          66.6              5.6            11.9x faster
+	max (ms)          77.9             11.1             7.0x faster
+	event round trip 114.7             31.7             3.6x faster
+	steps/s          108              122
+	Myr/s             10.8             12.2
+
+The round trip's own split says where the remaining 31.7 ms is: dl 29.4, cyc 2.0,
+up 0.3. The JS half of the transfer is now ~2 ms, matching the headless
+measurement (1.27 + 2.09 + 0.35); the other ~28 ms is the device - the queue
+drain plus seven separate mapAsync round trips. `dl` still conflates the two, so
+the strip now prints `dl A [wait W]`.
+
+bench.html (iso ms/step · smooth med · p95 · max · hitches/frames · Myr/s):
+
+	L5 1   8.745   5.6   27.8   45.3   22   12.6     (was 8.900  5.6  111.1 122.3 33  6.3)
+	L5 5   7.615  16.8   77.7   83.3   68   13.5     (was 7.220 100.0 155.5 183.3  0  6.2)
+	L6 1  22.445  16.9   94.4  127.8   19    4.8     (was 21.500 16.6 405.6 472.1  9  2.1)
+	L6 5  20.137  61.1  216.6  222.2   24    4.8     (was 19.880 388.8 566.5 672.1 0  1.8)
+
+Myr/s roughly doubled at both levels and p95/max fell 2-4x. The 5-step hitch
+*counts* went up (0 -> 68 at L5) only because the median fell 6x, which lowers
+the 2x-median threshold; the bench now prints hitches/frames so the fraction is
+what gets compared. The 20-step rows are still missing.
+
+webgpu-smoke.html: two FAILs, both now diagnosed.
+
+	[FAIL] meanSpeed drift > 20%
+	[FAIL] uncaught: OperationError: getMappedRange failed
+	       at pull (sim-gpu.js:712) <- roundTrip:789 <- step:811 <- play:826
+	       <- webgpu-smoke.html:162
+
+The second is the "GPU play stops until play is pressed again" bug, and it is
+fixed: `pull` unpacked the whole mirror by testing the *staging cache*, which
+keeps buffers from an earlier, wider download. A light event round trip therefore
+called getMappedRange on a cached cellF that this transfer never mapped, and the
+device raised OperationError. In the smoke the trigger is the full download at
+line 113; in the app it is any full sync - a probe click, Save, the deposit
+extract, or the 20 Myr checkpoint - followed by the next event cycle, which is
+why a run died at a fixed point in time and then survived a while after a
+restart. `tests/gpu-stub.js` now enforces the map state, so `tests/gpu-play.js`
+reproduces the identical stack headless and the regression cannot come back.
+
+The first is defect D1, now measured:
+
+	[parity] frame 5 · owner mismatch 0/10242 · |dz| max 139.0 m
+	[parity] meanSpeed cpu=4.022 gpu=4.947 · maxSpeed cpu=11.449 gpu=13.026
+	[parity] omega: worst |dR*w| plate 14 = 2.053 cm/yr
+	         cpu from relaxed omega 4.022/11.449
+	         cpu from target omega  5.040/13.052
+	         gpu                    4.947/13.026
+
+The device's plate speeds land on the *unrelaxed* least-squares fit (1.9% mean,
+0.2% max) rather than on the relaxed omega the CPU carries. Reading the code
+does not explain it: the relaxation is identical in js/plates.js and
+wgsl-plates.js reduceB (omega + (fit - omega) * min(1, dt/tau_omega)), tau_omega
+is 0.5 in both (params.js -> wgsl-common.js P_TAUOMEGA), dt is 0.1 in both
+(uploadFrame -> fDT), both boot with dt = tau_omega so both start at the fit, and
+the accessors are consistent (plateOmega = PLATEF[p*8+1], plateOmegaTarget =
+[p*8+2], written by setPlateOmega, read by velocities, contact and diag). The
+smoke now prints the decisive ratio - each engine's own mean |omega|/|omegaTarget|
+plus the first four plates - which separates "the device never relaxes" from
+"omega is fine and the aggregate differs".
+
+Kernel table note: per-kernel ms roughly tripled against 0.3-2.txt (winners
+0.56 -> 1.89, diagC 0.41 -> 1.69). The frames are no longer separated by a
+114 ms stall, so the queue is saturated and the kernels contend. Two
+consequences for the plan: loserRank is ~16% of the top-10 kernel time (not 4%),
+and diagA + diagC = 2.67 ms of the 6.74 ms top-10 total is diagnostics that
+nothing on the device reads.
