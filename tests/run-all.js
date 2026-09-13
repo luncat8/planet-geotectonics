@@ -1,7 +1,7 @@
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const release = process.argv.includes('--release');
-for (const name of ['browser-scripts', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces', 'determinism',
+for (const name of ['browser-scripts', 'gui', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces', 'determinism',
 	'raster', 'kinematics', 'conveyor', 'rift', 'isostasy', 'erosion', 'collapse', 'split', 'checkpoint',
 	'ores', 'view-dir', 'perf', 'clipboard', 'alloc', 'wgsl-struct', 'gpu-play', 'gpu-readback', 'longrun']) {
 	const args = ['--expose-gc', path.join(__dirname, name + '.js')];

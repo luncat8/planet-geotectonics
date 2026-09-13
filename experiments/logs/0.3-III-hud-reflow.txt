@@ -1,0 +1,105 @@
+0.3 Phase III — the perf strip's reserved size, measured before and after
+=========================================================================
+
+The owner's complaint (archive/0.3-3-log,task.txt): "this info has variable size
+that cause GUI elements move. need reserve size to avoid flicker and reflow."
+
+Method: experiments/hud-reflow.js serves two trees of this repo over 127.0.0.1 -
+HEAD as "old" (git archive) and the working tree as "new" - opens index.html on the
+CPU engine in headless Chromium (the @sparticuz rig; layout needs no adapter), and
+samples, in one evaluate per sample: the strip's box, the rows box, the number of
+rows shown and with text, and the top of every element below the strip, while the
+strip's content varies the way it really does: playing (the kernel table filling in
+and changing length), an injected event round-trip window appearing and closing
+again, an injected checkpoint line, and one update with all fourteen kernels over
+Perf.MIN_KERNEL_MS (the widest the kernel row ever gets, 160 chars). Waits are
+synchronised to the strip's own 2 Hz render, so a sample always catches the state
+the injection asked for.
+
+rig: @sparticuz/chromium 126 headless, LD_LIBRARY_PATH=/tmp/al2023/lib:/tmp,
+     CPU engine (no WebGPU adapter in this sandbox; layout does not need one)
+date: 2026-09-13
+
+--- 1440x900 -------------------------------------------------------------------
+
+old (pgt-old) — 11 samples at 1440x900, longest kernel row 160 chars
+	strip height      50 … 105.5  (moves 55.5)           px
+	rows box height   35 … 90.5  (moves 55.5)            px
+	rows shown        2 … 5  (moves 3)                    (with text: 2 … 5  (moves 3)                  )
+	document height   1128 … 1183  (moves 55)            px
+	.map-bottom       top 734.8 … 790.3  (moves 55.5)        px   h 30 … 30  (moves 0)                 px
+	.controls         top 765.8 … 821.3  (moves 55.5)        px   h 151 … 151  (moves 0)               px
+	.notes            top 924.8 … 980.3  (moves 55.5)        px   h 195.1 … 195.1  (moves 0)           px
+	#badge            top 16.5 … 16.5  (moves 0)             px   h 27 … 27  (moves 0)                 px
+	.clock            top 10 … 10  (moves 0)                 px   h 40 … 40  (moves 0)                 px
+	L- switch 0 ms      (this tree has no Resolution select) ·  · strip 0 px · controls top 0 px · doc 0 px · canvas - 0 colours, 0 painted samples
+
+new (working tree) — 13 samples at 1440x900, longest kernel row 160 chars
+	strip height      105.5 … 105.5  (moves 0)           px
+	rows box height   90.5 … 90.5  (moves 0)             px
+	rows shown        5 … 5  (moves 0)                    (with text: 2 … 5  (moves 3)                  )
+	document height   1224 … 1224  (moves 0)             px
+	.map-bottom       top 790.3 … 790.3  (moves 0)           px   h 30 … 30  (moves 0)                 px
+	.controls         top 821.3 … 821.3  (moves 0)           px   h 151 … 151  (moves 0)               px
+	.notes            top 980.3 … 980.3  (moves 0)           px   h 235.9 … 235.9  (moves 0)           px
+	#badge            top 16.5 … 16.5  (moves 0)             px   h 27 … 27  (moves 0)                 px
+	.clock            top 10 … 10  (moves 0)                 px   h 40 … 40  (moves 0)                 px
+	L6 switch 1227 ms   CPU · L6 · EQUIRECTANGULAR / 40,962 CELLS / 112 KM · strip 105.5 px · controls top 821.3 px · doc 1224 px · canvas 1024x512 16 colours, 5406 painted samples
+	L5 switch 902 ms    CPU · L5 · EQUIRECTANGULAR / 10,242 CELLS / 223 KM · strip 105.5 px · controls top 821.3 px · doc 1224 px · canvas 1024x512 16 colours, 5406 painted samples
+
+MOVED BY THE STRIP (max - min over the same samples):
+	strip height   55.5 px -> 0 px
+	controls top   55.5 px -> 0 px
+	notes top      55.5 px -> 0 px
+	document height 55 px -> 0 px
+	badge left/width 0 px -> 0 px (h)
+
+--- 1280x800 -------------------------------------------------------------------
+
+old (pgt-old) — 11 samples at 1280x800, longest kernel row 160 chars
+	strip height      50 … 105.5  (moves 55.5)           px
+	rows box height   35 … 90.5  (moves 55.5)            px
+	rows shown        2 … 5  (moves 3)                    (with text: 2 … 5  (moves 3)                  )
+	document height   1116 … 1172  (moves 56)            px
+	.map-bottom       top 702.8 … 758.3  (moves 55.5)        px   h 30 … 30  (moves 0)                 px
+	.controls         top 733.8 … 789.3  (moves 55.5)        px   h 151 … 151  (moves 0)               px
+	.notes            top 892.8 … 948.3  (moves 55.5)        px   h 215.5 … 215.5  (moves 0)           px
+	#badge            top 16.5 … 16.5  (moves 0)             px   h 27 … 27  (moves 0)                 px
+	.clock            top 10 … 10  (moves 0)                 px   h 40 … 40  (moves 0)                 px
+	L- switch 0 ms      (this tree has no Resolution select) ·  · strip 0 px · controls top 0 px · doc 0 px · canvas - 0 colours, 0 painted samples
+
+new (working tree) — 12 samples at 1280x800, longest kernel row 160 chars
+	strip height      105.5 … 105.5  (moves 0)           px
+	rows box height   90.5 … 90.5  (moves 0)             px
+	rows shown        5 … 5  (moves 0)                    (with text: 2 … 5  (moves 3)                  )
+	document height   1192 … 1192  (moves 0)             px
+	.map-bottom       top 758.3 … 758.3  (moves 0)           px   h 30 … 30  (moves 0)                 px
+	.controls         top 789.3 … 789.3  (moves 0)           px   h 151 … 151  (moves 0)               px
+	.notes            top 948.3 … 948.3  (moves 0)           px   h 235.9 … 235.9  (moves 0)           px
+	#badge            top 16.5 … 16.5  (moves 0)             px   h 27 … 27  (moves 0)                 px
+	.clock            top 10 … 10  (moves 0)                 px   h 40 … 40  (moves 0)                 px
+	L6 switch 1262 ms   CPU · L6 · EQUIRECTANGULAR / 40,962 CELLS / 112 KM · strip 105.5 px · controls top 789.3 px · doc 1192 px · canvas 1024x512 16 colours, 5406 painted samples
+
+MOVED BY THE STRIP (max - min over the same samples):
+	strip height   55.5 px -> 0 px
+	controls top   55.5 px -> 0 px
+	notes top      55.5 px -> 0 px
+	document height 56 px -> 0 px
+	badge left/width 0 px -> 0 px (h)
+
+--- L7 in a real browser (CPU engine, the resolution select at its widest) -----
+new (working tree) — 14 samples at 1440x900, longest kernel row 160 chars
+	L6 switch 1252 ms   CPU · L6 · EQUIRECTANGULAR / 40,962 CELLS / 112 KM · strip 105.5 px · controls top 821.3 px · doc 1224 px · canvas 1024x512 16 colours, 5406 painted samples
+	L7 switch 2556 ms   CPU · L7 · EQUIRECTANGULAR / 163,842 CELLS / 56 KM · strip 105.5 px · controls top 821.3 px · doc 1224 px · canvas 1024x512 16 colours, 5406 painted samples
+	L5 switch 907 ms    CPU · L5 · EQUIRECTANGULAR / 10,242 CELLS / 223 KM · strip 105.5 px · controls top 821.3 px · doc 1224 px · canvas 1024x512 16 colours, 5406 painted samples
+
+--- bench.html: a config the page will not run is now named --------------------
+$ PGT_QUERY="steps=1,5,20,99&levels=5,6,1" node experiments/gpu-bench.js
+BENCH ignored: steps 99 (outside 1-20)
+BENCH skip: no WebGPU adapter
+$ node experiments/gpu-bench.js   (the page's own defaults: levels 5,6 · steps 1,5,20)
+BENCH skip: no WebGPU adapter
+
+The skip line is this sandbox (no adapter), not the inputs: with the defaults,
+nothing is ignored now, where before this change the bench dropped its own
+default "20" through a 1-16 bound and reported nothing.

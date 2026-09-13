@@ -108,3 +108,26 @@ function sameState(a, b) {
 	assert.equal(Buffer.compare(Buffer.from(before), Buffer.from(after)), 0, 'a rejected blob must not mutate state');
 	console.log('PASS checkpoint: nine malformed blobs rejected, live state untouched');
 }
+
+// --- the header on its own -------------------------------------------------------------------
+// The GUI has to know a blob's level and seed before it can rebuild a world to load into: with a
+// Resolution select, a level-5 blob against an L6 world is the normal case, not a damaged file,
+// and "checkpoint level 5" is not an instruction.
+{
+	const s = new State(g, 7);
+	s.ckptCap = 0;
+	Sim.raster(s);
+	Sim.advance(s, dt, 50);
+	const blob = Checkpoint.save(s);
+	assert.deepEqual(Checkpoint.peek(blob), { level: g.level, seed: 7, V: g.V },
+		'the header the GUI rebuilds a world from');
+	assert.throws(function () { Checkpoint.peek(blob.subarray(0, 32)); }, RangeError, 'short header');
+	function head(name, word, value) {
+		const copy = Uint8Array.from(blob);
+		new Uint32Array(copy.buffer, word * 4, 1)[0] = value;
+		assert.throws(function () { Checkpoint.peek(copy); }, RangeError, name);
+	}
+	head('bad magic', 0, 0);
+	head('unknown version', 1, 99);
+	console.log('PASS checkpoint: peek reads level/seed/V, and rejects a blob load would reject');
+}

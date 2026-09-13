@@ -75,16 +75,25 @@ var Checkpoint = {
 		}
 		return new Uint8Array(buffer);
 	},
+	// The header on its own, for a GUI that has to rebuild the world before it can load into
+	// it: a checkpoint carries the level and seed it was written at, and since the page can
+	// switch levels a mismatch is the normal case rather than a corrupt blob.
+	peek: function (bytes) {
+		var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+		if (view.byteLength < Checkpoint.HEAD) throw new RangeError('checkpoint truncated in the header');
+		if (view.byteOffset % 8) throw new RangeError('checkpoint view is not 8-byte aligned');
+		var head = new Uint32Array(view.buffer, view.byteOffset, Checkpoint.WORDS);
+		if (head[0] !== Checkpoint.MAGIC) throw new RangeError('not a planet-geotectonics checkpoint');
+		if (head[1] !== Checkpoint.VERSION) throw new RangeError('checkpoint version ' + head[1]);
+		return { level: head[2], seed: head[3], V: head[4] };
+	},
 	// Throws on any inconsistency; the live state is untouched until every check has passed.
 	load: function (s, bytes) {
 		var view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
 		var scalars = Checkpoint.SCALARS, arrays = Checkpoint.ARRAYS, i;
-		if (view.byteLength < Checkpoint.HEAD) throw new RangeError('checkpoint truncated in the header');
-		if (view.byteOffset % 8) throw new RangeError('checkpoint view is not 8-byte aligned');
+		Checkpoint.peek(view);
 		var buffer = view.buffer, at0 = view.byteOffset;
 		var head = new Uint32Array(buffer, at0, Checkpoint.WORDS);
-		if (head[0] !== Checkpoint.MAGIC) throw new RangeError('not a planet-geotectonics checkpoint');
-		if (head[1] !== Checkpoint.VERSION) throw new RangeError('checkpoint version ' + head[1]);
 		if (head[2] !== s.grid.level) throw new RangeError('checkpoint level ' + head[2]);
 		if (head[3] !== (s.grid.seed >>> 0)) throw new RangeError('checkpoint seed ' + head[3]);
 		if (head[4] !== s.grid.V || head[5] !== s.colCap || head[6] !== s.plateCap) {

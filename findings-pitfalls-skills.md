@@ -595,6 +595,13 @@
 	binary and libs vanish) - rebuild with the recipe above at the start of the
 	turn that needs it. Note: @sparticuz/chromium 119 extracts its al2023 lib
 	drop to /tmp/lib (not /tmp/al2023/lib as 126 did); LD_LIBRARY_PATH=/tmp/lib:/tmp.
+	Install the node modules into /tmp/rig (npm i --prefix /tmp/rig ...) so the
+	PGT_PUPPETEER defaults of experiments/gpu-bench.js and tests/gpu-parity.js
+	resolve; the whole rebuild - npm install plus the brotli/tar extraction -
+	costs ~2 min. Layout and CPU-engine measurements need none of the WebGPU
+	path: experiments/hud-reflow.js drives index.html on the CPU engine and reads
+	boxes with getBoundingClientRect, which is exactly what a missing adapter
+	cannot block (2026-09-13).
 
 ## 0.3 Phase I design: timestamp ring, not per-pass readback
 
@@ -971,3 +978,72 @@ fallback throw `document is undefined` and the whole test die with an unhandled 
 	Also worth pinning while there: node 22's `global.navigator` is getter-only, so the stub has
 to go in with `Object.defineProperty(..., { configurable: true, writable: true })` and back out
 the same way.
+
+## A measurement tool that silently filters input measures less than it claims (2026-09-13)
+
+bench.html's steps field defaulted to `1,5,20` and was parsed with a 1-16 bound, so the
+auto-run on load dropped the 20 before the first config existed - and said nothing. Three
+owner captures in a row then showed a 2-row matrix under a header promising three, each
+read as operator error. A filter on measurement input has exactly two honest behaviours:
+accept the range the page offers (the app's Steps/frame select tops out at 20, so the
+bench's STEPS_MAX is 20), or name what it drops (`BENCH ignored: steps 99 (outside
+1-20)` on console, status line and copy). Silent truncation is the third and it converts
+a missing row into a wrong belief about whoever ran the tool.
+	Pin it where the bounds live: tests/gui.js asserts the bench's accepted ranges cover
+	every option index.html offers and that the bench's own defaults survive its own
+	filter - a bound that cannot drop the default cannot hide a row again.
+
+## Reserved HUD slots: measure the movement, not the intention (2026-09-13)
+
+The perf strip's rows appeared and vanished at 2 Hz as kernels crossed the 0.05 ms floor
+and event windows opened, so the strip's height walked between 50 and 105.5 px and took
+.map-bottom, .controls, .notes and the document height with it - the flicker the owner
+reported. The fix is structural: Perf.SLOTS line elements created once at mount, text
+rewritten in place, overflow-x scroll instead of wrap, empty slots keeping their track.
+The proof is experiments/hud-reflow.js: it serves HEAD and the working tree side by side
+over 127.0.0.1, opens both in headless Chromium and samples every box while the strip's
+content changes the way it really does (playing, an event window opening and closing, a
+checkpoint line, all fourteen kernels over the floor). Before: 55.5 px of movement on
+every element below the strip at both 1440x900 and 1280x800. After: 0 px, while the rows
+carrying text still vary between 2 and 5 - nothing was hidden to buy the stability.
+	Two traps when waiting for injected strip content: the strip renders at 2 Hz and a
+	text update consumes the event counters, so "inject then sleep 700 ms" can land on
+	the window after the one that showed it - wait for the row's text instead. And match
+	the row by text only that row has: `events` is also a CPU kernel lap, so the kernel
+	row can start with that word too; the round trip's " ms = dl " is in nothing else.
+	Row indices are no help across trees - the old strip drops empty parts, so every row
+	below a missing one shifts up, which is the defect being measured.
+
+## Page-level GUI tests in node: the real page, a stub DOM, the test's own realm (2026-09-13)
+
+tests/gui.js loads the real index.html markup through tests/dom-stub.js (a ~300-line
+DOM: querySelector over a parsed tree, classList, blobs, URL, a canvas 2D context that
+records draws) and runs the page's own <script> bodies with vm.runInThisContext, so the
+GUI's wiring - level select, engine toggle, reset, load, copy, strip - is tested as the
+page does it, with fake GpuSim/GpuRenderer standing in for the engine. Two findings from
+building it. vm.createContext gives the page its own realm and its own Object/Blob, so
+the test's blobs fail the page's instanceof checks and the sim runs ~6.6x slower (L5 boot
+1844 vs 280 ms); runInThisContext shares the test's realm and both problems vanish, at
+the price that page globals land on the test's globalThis - hence the careful
+installGlobals/restore around each page load. node 22's globalThis.navigator is a
+getter-only accessor, so Object.assign(globalThis, {navigator}) throws; page globals
+must go in with Object.defineProperty.
+	A GUI test that has never been seen to fail proves nothing: mutate the source three
+	ways (a smaller steps bound, a rebuild that does not wait for the in-flight
+	transfer, a strip that re-appends its rows per update) and require the test to catch
+	each. All three bit.
+
+## A rebuild that races an in-flight transfer, and a re-init that leaks arenas (2026-09-13)
+
+Switching level rebuilds the world under a possibly-playing engine, which exposed two
+hazards neither Reset world nor engine toggle had. A round trip in flight holds mapped
+ranges of the OLD world's staging buffer and sizes the download from the old world's
+counts, so any rebuild - level, reset, engine change, load - must first wait for the
+transfer and for the step queue to drain (whenGpuIdle); the Step button and the frame
+loop need the same guard or a click starts a second round trip over the first. And
+GpuSim.init on a new state used to build a second set of arenas beside the old ones
+(~30 MB at L5, ~120 MB at L7): init now releases the previous session's arenas,
+pipelines and staging buffers before building and keeps the device, so a level switch
+costs one world's memory, not two. tests/gpu-play.js section 6 pins both halves - the
+first session's arenas and staging buffers destroyed, the new session live on the same
+device.

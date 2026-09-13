@@ -45,7 +45,7 @@ function serve(dir) {
 	const server = await serve(ROOT);
 	// Tooling locations are overridable so the rig is not tied to one machine; the defaults
 	// match the @sparticuz/chromium extraction (chromium + al2023 libs + swiftshader in /tmp).
-	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/wgputest/node_modules/puppeteer-core';
+	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/rig/node_modules/puppeteer-core';
 	const chromeBin = process.env.PGT_CHROME || '/tmp/chromium';
 	const libDir = process.env.PGT_LIBS || '/tmp/al2023/lib';
 	const puppeteer = require(puppeteerDir);

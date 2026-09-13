@@ -1,0 +1,135 @@
+0.3 Phase III — third owner-rig capture: a 328 Myr play run survives the checkpoint path,
+the K11 share holds at ~41% in a late epoch, and the missing 20-step rows were never
+obtainable from the page that was asked for them
+================================================================================
+
+Rig: the owner's machine, Chrome 151, WebGPU adapter (hardware), timestamp-query
+available. Transcribed from the owner's paste (archive/0.3-3-log,task.txt): two
+index.html strips (file:// and http://), one bench run, and two TODOs. Same build as
+0.3-II-ondevice-2.txt (the light event mirror, the getMappedRange fix, the offscreen
+readback, the witness kernels) - no code changed between that capture and this one.
+
+index.html, GPU engine, L5, dt 0.1, 1 step/frame, seed 7 (two tabs of the same session)
+
+	file://  view speed  t 268.2 Myr
+		180.0 fps · step 0.00 ms · frame 5.6 ms · 126 steps/s · 12.6 Myr/s
+		p95 5.6 ms · max 5.7 ms
+		winners 1.85 diagC 1.82 loserRank 1.01 diagA 1.00 ledgerReduceA 0.61
+		subRateA 0.20 gaps 0.20 reduceA 0.08 resolve 0.06 thinning 0.05
+		· CPU mirror one event cycle old
+	http://  view z  t 328.6 Myr
+		180.0 fps · step 0.00 ms · frame 5.6 ms · 122 steps/s · 12.2 Myr/s
+		p95 5.6 ms · max 5.7 ms
+		events 7 (29.6 ms = dl 25.9 [wait 24.3] + cyc 3.2 + up 0.5)
+		winners 1.92 diagC 1.74 diagA 0.99 loserRank 0.94 ledgerReduceA 0.60
+		subRateA 0.19 gaps 0.17 reduceA 0.10 loserCount 0.08
+		· CPU mirror one event cycle old
+
+1. The long play run: the checkpoint path is confirmed fixed on hardware.
+
+   This was the third of the three captures 0.3-3-report.txt asked for, and it is the
+   one that closes the getMappedRange story: the old defect died at a fixed point in
+   time - a full sync followed by an event cycle, which the 20 Myr checkpoint is - and
+   this run passes t = 20 Myr and keeps going to 268.2 and 328.6 Myr, i.e. thirteen and
+   sixteen checkpoint cycles, with the event line still printing and the loop still
+   playing (122-126 steps/s). No uncaught error, no stuck sim. frame 5.6 ms and p95 =
+   max = 5.6-5.7 ms at 180 Hz, identical to the previous capture: the round trip did not
+   get worse with world age, which is the distribution claim Phase II made.
+
+   The event line itself moved a little and says where: 29.6 ms = dl 25.9 [wait 24.3]
+   + cyc 3.2 + up 0.5, against 28.5 = dl 26.2 [wait 25.5] + cyc 2.0 + up 0.3 at t = 2
+   Myr on the same rig. `wait` is still ~82% of the round trip, so the Phase IV reading
+   (the drain, once per step) stands; but `cyc` went 2.0 -> 3.2 ms, and that is
+   Events.cycle on a 328 Myr world (more plates, more ledger rows) rather than on the
+   boot world the headless rig measured (2.09 ms). Phase IV's one-drain-per-rAF will not
+   touch cyc, so the event total's floor at late epochs is ~3 ms of CPU cycle plus
+   whatever drain survives - worth carrying into Phase IV's acceptance text.
+
+2. Phase III's prize, measured in a late epoch for the first time: still ~41%.
+
+	diagA + diagC   top-10 sum   share
+	file  2.82         6.88       41.0%
+	http  2.73         6.73       40.6%
+	0.3-II-ondevice    2.67         6.74       39.6%
+	0.3-II-ondevice-2  2.31         5.66       40.8%
+
+   Four captures, two of them at t > 268 Myr with splits and sutures long past, and the
+   K11 passes are 40-41% of the timestamped kernel total every time. Nothing on the
+   device reads their output (only the CPU mirror does, at 6 Hz), so Phase III stays
+   the next move and its expected win is now known to hold across the whole run, not
+   just its start.
+
+   Two reading traps in these tables, both about the kernel row's *contents* varying:
+   the file:// row carries `resolve` and `thinning` (below the 0.05 ms floor in the
+   http window) and drops `loserCount`, and the bench's kernel line in the same paste
+   (winners 1.82 loserRank 1.05 diagC 0.59 diagA 0.31 ...) is an EMA over whichever
+   configs had just run, so it must not be compared per-kernel against a play strip.
+   This is the same variability the owner's second TODO is about: a strip whose rows
+   and row lengths change at 2 Hz moves the page under it.
+
+   One open question, cosmetic and unfixed: the file:// strip is playing at 126 steps/s
+   - an event round trip completes every ~79 ms - yet its copy has no events row, while
+   the http tab's does. The copy carries whatever the last 2 Hz update saw, so a copy
+   taken between a round trip's completion and the next update can miss it; that is the
+   only reading that fits, and it cannot be settled from a paste. With the reserved
+   strip the row set is positional (throughput, distribution, events, checkpoint,
+   kernels), so a future paste says which slots were empty instead of which rows the
+   copy happened to catch.
+
+3. bench.html: the 20-step rows were never obtainable from the page that was asked.
+
+	level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+	L5	1	10,242	9.650	5.6	33.3	61.1	66/603	12.0
+	L5	5	10,242	7.162	12.1	77.8	94.4	63/134	13.3
+	L6	1	40,962	21.365	16.6	111.1	177.8	23/233	4.6
+	L6	5	40,962	19.641	198.7	211.1	227.7	0/48	4.7
+
+   The paste header says `steps=1,5` and this is the third capture in a row without the
+   20-step rows, which 0.3-3-report.txt attributed to the operator editing the field.
+   The code says otherwise: bench.html parsed the steps field with
+   `parseList(stepsIn, 1, 16)` while its own input defaults to `1,5,20` - so the auto-run
+   on load, and any run with the defaults, silently filtered the 20 out before the first
+   config was built. Three captures missed a row of the matrix because the measurement
+   tool quietly measured less than the page said it was measuring. Fixed: the bound is
+   `STEPS_MAX = 20` (index.html's Steps/frame select tops out there, so the bench has to
+   reach it), and anything dropped from either field is now named - `BENCH ignored:
+   steps 99 (outside 1-20)` on the console, in the status line and in the copy - so a
+   config the page will not run can no longer look like one it did. tests/gui.js pins
+   both halves: the bench's accepted ranges must cover every option the app offers, and
+   the bench's own default field must survive its own filter.
+
+   The four rows that are here repeat the previous bench within ~5% (L5 1: 9.650 vs
+   8.520/8.800 iso; L6 5: 19.641 vs 19.799/19.829), so the matrix is stable and only the
+   missing column is news. L6 5's smooth med 198.7 ms with 0/48 hitches is the saturated-
+   queue signature again: at 5 steps/frame on L6 one rAF waits out ~200 ms of device work.
+
+TODOs from the paste, both done in this session:
+
+  - "add change L5,6,7 gui" - a Resolution select (L5 / L6 / L7 with their cell counts)
+    rebuilds the world exactly like Reset world does: new grid, new state, new renderer,
+    engine re-booted on the new state. The badge, the map-top line (now `EQUIRECTANGULAR
+    / 40,962 CELLS / 112 KM`, the design's resolution numbers) and the copy header all
+    follow the grid that is actually built; `GpuSim.init` reuses the device and releases
+    the previous level's arenas first (~120 MB at L7). Load follows the blob's own level
+    and seed (Checkpoint.peek) instead of failing with "checkpoint level 5", and a
+    rebuild waits for an in-flight GPU transfer, which would otherwise size the new
+    arenas against the old world's numbers. Measured end to end in headless Chromium:
+    L6 in 1.3 s, L7 in 2.5 s, L5 back in 0.9 s, canvas repainted each time.
+  - "this info has variable size ... reserve size to avoid flicker and reflow" - the
+    strip is five reserved line tracks (Perf.SLOTS) whose text is rewritten in place at
+    2 Hz; rows scroll instead of wrapping. Measured before/after at 1440x900 and
+    1280x800 (experiments/hud-reflow.js, experiments/logs/0.3-III-hud-reflow.txt): the
+    strip's height moved 55.5 px and took .map-bottom, .controls, .notes and the
+    document height with it; now all of those move 0 px while the rows with text still
+    vary between 2 and 5. The header clock and the column inspector got the same
+    treatment - they are the page's other variable-size readouts.
+
+For the next capture, unchanged in order:
+
+  1. webgpu-smoke.html - still the one page this capture did not include. The `device
+     K10:` line settles defect D1 and phase 4 should print real mean|d| for all 16
+     layers with 0 errors.
+  2. bench.html with the defaults (or ?level=5,6&steps=1,5,20&dt=0.1) - the 20-step rows
+     exist now; the page will say so in its BENCH header line.
+  3. Anything at L6 or L7 through the new Resolution select - index.html?level=7&engine=gpu
+     pre-fills it, and the copy header names the level the numbers came from.
