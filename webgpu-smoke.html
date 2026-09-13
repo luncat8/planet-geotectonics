@@ -52,6 +52,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <script src="js/gpu/wgsl-diag.js"></script>
 <script src="js/gpu/sim-gpu.js"></script>
 <script src="js/gpu/render-gpu.js"></script>
+<script src="js/clipboard.js"></script>
 <script>
 'use strict';
 var LOG = [], errors = [], failures = [];
@@ -173,7 +174,36 @@ function adapterInfo(adapter) {
 		+ ' cm/yr · cpu from relaxed omega ' + (cpu.meanSpeed / 10000).toFixed(3) + '/' + (cpu.maxSpeed / 10000).toFixed(3)
 		+ ' · cpu from target omega ' + (tgtSum / Math.max(1, tgtN) / 10000).toFixed(3) + '/' + (tgtMax / 10000).toFixed(3)
 		+ ' · gpu ' + (gpu.meanSpeed / 10000).toFixed(3) + '/' + (gpu.maxSpeed / 10000).toFixed(3));
-	if (Math.abs(cpu.meanSpeed - gpu.meanSpeed) > 0.2 * Math.max(1, Math.abs(cpu.meanSpeed))) fail('meanSpeed drift > 20%');
+	// Defect D1's own witnesses, reported by the device instead of inferred from the mirror:
+	// reduceB leaves one residual per plate (stored omega minus the omega the relaxation
+	// formula predicts) and diagB folds it, then reports the dt and alpha the same frame ran
+	// with. Together with the ratios above this closes every branch the code reading left
+	// open - the aggregate can only differ from the CPU's for one of these reasons.
+	// The device stores f32, so the expectation has to be the f32 of what the JS uploaded:
+	// 0.1 arrives as 0.10000000149011612 and a f64 comparison at 1e-6 would fail on the
+	// format, not on the physics.
+	var wantAlpha = Math.min(1, dt / Params.tauOmega), lag = gpuR / Math.max(1, nRatio);
+	note('parity', 'device K10: dt ' + (+gpu.gpuDt).toFixed(6) + ' (uploaded ' + dt + ') · alpha '
+		+ (+gpu.gpuAlpha).toFixed(6) + ' (expected ' + wantAlpha.toFixed(6) + ') · worst |stored - relaxed| omega '
+		+ (+gpu.gpuRelaxErr).toExponential(2) + ' rad/Myr');
+	if (!(Math.abs(gpu.gpuDt - Math.fround(dt)) < 1e-6)) fail('device ran dt ' + gpu.gpuDt + ', the JS uploaded ' + dt);
+	if (!(Math.abs(gpu.gpuAlpha - Math.fround(wantAlpha)) < 1e-6)) fail('device alpha ' + gpu.gpuAlpha
+		+ ' != min(1, dt/tauOmega) ' + wantAlpha);
+	if (!(gpu.gpuRelaxErr < 1e-5)) fail('stored omega is not the relaxed omega (worst residual '
+		+ gpu.gpuRelaxErr + ' rad/Myr)');
+	if (Math.abs(cpu.meanSpeed - gpu.meanSpeed) > 0.2 * Math.max(1, Math.abs(cpu.meanSpeed))) {
+		fail('meanSpeed drift > 20% (cpu ' + (cpu.meanSpeed / 10000).toFixed(3) + ' vs gpu '
+			+ (gpu.meanSpeed / 10000).toFixed(3) + ' cm/yr)');
+		// The aggregate tripped, so name which of the two remaining explanations it is.
+		if (lag > 0.95 && cpuR / Math.max(1, nRatio) < 0.9) {
+			fail('D1: the device carries the unrelaxed fit (its |omega|/|omegaTarget| is ' + lag.toFixed(3)
+				+ ', the CPU\'s ' + (cpuR / Math.max(1, nRatio)).toFixed(3)
+				+ ') while dt, alpha and the stored omega all say the relaxation ran');
+		} else {
+			fail('D1: omega lags the fit on both engines (device ratio ' + lag.toFixed(3) + ', cpu '
+				+ (cpuR / Math.max(1, nRatio)).toFixed(3) + ') - the aggregate differs for another reason');
+		}
+	}
 
 	// Phase 2: fifteen more frames - crosses the t=1 Myr event cycle (download+cycle+upload).
 	// A throw here is reported and the run continues: the remaining phases do not need the
@@ -198,30 +228,51 @@ function adapterInfo(adapter) {
 
 	// Phase 4: the GPU renderer over every layer, pixel-compared against the CPU renderer.
 	// A layer id routed into the wrong WGSL branch shows up here as a pixel delta, which
-	// drawing-and-eyeballing (the old phase 4) never caught.
-	var renderer = new GpuRenderer(document.getElementById('map')).init(gpu, { readback: true });
-	var ref = new Renderer(document.createElement('canvas'), gpu);
+	// drawing-and-eyeballing (the old phase 4) never caught. The pixels come out of the
+	// renderer's own offscreen texture, never out of the canvas: a real swapchain texture
+	// does not carry COPY_SRC (Chrome/D3D picks its usage itself), so a copy from
+	// getCurrentTexture() fails validation on hardware and leaves the comparison empty.
 	var layers = ['plate', 'type', 'z', 'damage', 'owner', 'sediment', 'speed', 'age', 'force', 'dir',
 		'oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
-	var gw = renderer.canvas.width, gh = renderer.canvas.height;
-	var row = Math.ceil(gw * 4 / 256) * 256;
-	var bgra = renderer.format === 'bgra8unorm';
-	if (!(gw > 0 && gh > 0)) fail('renderer canvas is ' + gw + 'x' + gh + ' - pixel parity cannot run');
-	note('render', 'canvas ' + gw + 'x' + gh + ' · format ' + renderer.format + ' · row ' + row);
-	for (var l = 0; l < layers.length; l++) {
+	// The rig builds its own readback path, and a throw in it must not take phases 1-3 down
+	// with the rest of the run: the report is the deliverable, so it gets written either way.
+	var renderer = null, rendererErr = null;
+	try {
+		renderer = new GpuRenderer(document.getElementById('map')).init(gpu, { readback: true });
+	} catch (e) { rendererErr = e; }
+	var ref = new Renderer(document.createElement('canvas'), gpu);
+	var gw = renderer ? renderer.canvas.width : 0, gh = renderer ? renderer.canvas.height : 0;
+	var row = renderer ? renderer.readRow : 0, bgra = renderer && renderer.format === 'bgra8unorm';
+	var wantBytes = row * gh, cpx = ref.image.data, wantCpu = gw * gh * 4;
+	var readbackOk = !rendererErr && renderer && renderer.offscreen && wantBytes > 0
+		&& cpx && cpx.length === wantCpu;
+	if (rendererErr) {
+		fail('renderer readback init threw: ' + ((rendererErr && rendererErr.stack) || rendererErr));
+	} else if (!readbackOk) {
+		fail('pixel parity cannot run: canvas ' + gw + 'x' + gh + ' · readback '
+			+ (renderer && renderer.offscreen ? wantBytes + ' bytes' : 'texture missing')
+			+ ' · cpu reference ' + (cpx ? cpx.length : 'none') + ' of ' + wantCpu + ' bytes');
+	}
+	note('render', 'canvas ' + gw + 'x' + gh + ' · format ' + (renderer ? renderer.format : 'none')
+		+ ' · row ' + row + ' · readback ' + wantBytes + ' B · cpu ref ' + (cpx ? cpx.length : 0) + ' B');
+	for (var l = 0; readbackOk && l < layers.length; l++) {
 		renderer.draw(layers[l]);
-		var tex = renderer.context.getCurrentTexture();
-		var rb = device.createBuffer({ size: row * gh, usage: 0x8 | 0x1 });
-		var enc = device.createCommandEncoder();
-		enc.copyTextureToBuffer({ texture: tex }, { buffer: rb, bytesPerRow: row }, [gw, gh]);
-		device.queue.submit([enc.finish()]);
-		await rb.mapAsync(0x1);
-		var gpx = new Uint8Array(rb.getMappedRange());
-		if (gpx.length < row * gh) fail('readback short on layer ' + layers[l] + ': ' + gpx.length + ' of ' + row * gh + ' bytes');
-		rb.unmap(); rb.destroy();
 		ref.draw(layers[l]);
-		var cpx = ref.image.data;
-		var sum = 0, worst = 0, loud = 0;
+		var gpx = null;
+		try {
+			gpx = await renderer.readPixels();
+		} catch (e) {
+			fail('readback threw on layer ' + layers[l] + ': ' + ((e && e.message) || e));
+			continue;
+		}
+		if (gpx.length < wantBytes) {
+			fail('readback short on layer ' + layers[l] + ': ' + gpx.length + ' of ' + wantBytes + ' bytes');
+			continue;
+		}
+		// Both sides are counted, not assumed: mean|d| divides by the samples actually
+		// compared, and a zero count is its own failure. A NaN or a 0/0 mean used to read as
+		// "nothing differs" because every comparison against NaN is false.
+		var sum = 0, worst = 0, loud = 0, samples = 0;
 		for (var y = 0; y < gh; y++) {
 			// 'dir' builds its tangent basis per pixel from lon/lat while the CPU renderer
 			// builds it per cell: at the poles the east direction spins within one cell, so
@@ -233,20 +284,26 @@ function adapterInfo(adapter) {
 				for (var k = 0; k < 3; k++) {
 					var gv = gpx[o + (bgra ? 2 - k : k)], cv = cpx[q + k];
 					var d = gv > cv ? gv - cv : cv - gv;
-					sum += d; if (d > worst) worst = d; if (d > 16) loud++;
+					sum += d; samples++;
+					if (d > worst) worst = d;
+					if (d > 16) loud++;
 				}
 			}
 		}
-		var mean = sum / (gw * gh * 3);
-		note('render', layers[l] + ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst + ' ch>16: ' + loud);
-		// NaN comparisons are always false, so a degenerate readback used to sail through
-		// this gate: an empty comparison is a failure, not a pass.
-		if (!Number.isFinite(mean)) fail('pixel parity compared nothing on layer ' + layers[l] + ' (mean ' + mean + ')');
-		else if (mean > 2 || worst > 32) fail('GPU/CPU pixels disagree on layer ' + layers[l]);
+		var mean = samples ? sum / samples : NaN;
+		note('render', layers[l] + ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst
+			+ ' ch>16: ' + loud + ' · ' + samples + ' samples');
+		if (!samples) fail('pixel parity compared nothing on layer ' + layers[l]);
+		else if (!Number.isFinite(mean)) fail('pixel parity is not finite on layer ' + layers[l]);
+		else if (mean > 2 || worst > 32) fail('GPU/CPU pixels disagree on layer ' + layers[l]
+			+ ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst);
 	}
-	renderer.draw('dir');
-	await new Promise(function (r) { setTimeout(r, 300); });
-	note('render', 'GPU renderer drew all ' + layers.length + ' layers, pixel-parity checked (map below: dir)');
+	if (renderer) {
+		renderer.draw('dir');
+		await new Promise(function (r) { setTimeout(r, 300); });
+	}
+	note('render', 'GPU renderer drew ' + (readbackOk ? 'all ' + layers.length + ' layers, pixel-parity checked'
+		: 'nothing - the readback path is broken, see the failures above') + ' (map below: dir)');
 
 	finish();
 	function finish() {
@@ -269,8 +326,13 @@ document.getElementById('save').addEventListener('click', function () {
 	link.click();
 	URL.revokeObjectURL(link.href);
 });
-document.getElementById('copy').addEventListener('click', function () {
-	navigator.clipboard && navigator.clipboard.writeText(LOG.join('\n'));
+// The log is the deliverable of a trip to the rig, so the copy has to work from file:// too:
+// navigator.clipboard is routinely refused there, and a capture retyped by hand is a capture
+// with transcription errors in the numbers. The copied log says it was copied, so the paste
+// and the on-screen log cannot silently differ.
+Clipboard.bind(document.getElementById('copy'), function () {
+	say('[log] copied ' + LOG.length + ' lines to the clipboard');
+	return LOG.join('\n');
 });
 </script>
 </body>

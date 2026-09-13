@@ -31,6 +31,11 @@ var GpuSim = {
 	// dispatches per frame. Adapters without the timestamp-query feature (some
 	// SwiftShader builds) fall back: no queries, no per-kernel GPU ms.
 	TS_MAX: 70,
+	// The DIAG buffer's slot table, the JS twin of the D_* constants in wgsl-common.js.
+	// tests/wgsl-struct.js pins every entry against the generated WGSL, so the two cannot
+	// drift; layout.diagOut is the size of this table.
+	DIAG: { MEANV: 0, MASSFEL: 1, MASSMAF: 2, MASSSED: 3, ORE0: 4, GAPS: 10, COLS: 11,
+		QUATERR: 12, RIGID2: 13, DT: 14, ALPHA: 15, RELAXERR: 16 },
 
 	layout: function (state) {
 		var g = state.grid, p = GpuParams;
@@ -60,12 +65,23 @@ var GpuSim = {
 		l.bins = V + colCap;
 		l.lose = colCap * 3;
 		l.reduceF = l.nwg10 * plateCap * 12 + l.nwg10 * plateCap + l.nwgD * 12 + l.nwgD * 4
-			+ 7 * colCap + 7 * l.nwgL;
+			+ 7 * colCap + 7 * l.nwgL + plateCap;
 		l.scan = 2 * colCap + 1 + l.nBlocksMax;
 		l.frameIn = 74;
 		l.frameOut = l.foPlate0 + plateCap * 5;
-		l.diagOut = 14;
+		// 0..13 world diagnostics, 14..16 the K10 relaxation witnesses (defect D1).
+		l.diagOut = 1 + Object.keys(GpuSim.DIAG).reduce(function (m, k) {
+			return Math.max(m, GpuSim.DIAG[k]);
+		}, 0);
 		return l;
+	},
+
+	// zeroFrame's thread count, in the order the kernel walks it: the frame counters, three
+	// atomic slots per plate, the scan input, one relaxation witness per plate and the seven
+	// per-column ledger deltas. Every dispatch site uses this, so the kernel's branch layout
+	// and the shape it is dispatched with cannot drift apart.
+	zeroThreads: function (l) {
+		return 6 + l.plateCap * 4 + l.colCap * 8;
 	},
 
 	// Static grid pack: positions, face normals, flux normals, edge lengths, collapse
@@ -477,7 +493,7 @@ var GpuSim = {
 		GpuSim.uploadFrame(state, dt);
 		var enc = S.device.createCommandEncoder();
 		if (S.tsOn) { S.tsActive = true; S.tsSlot = 0; }
-		GpuSim.run(S, enc, 'zeroFrame', 6 + l.plateCap * 3 + l.colCap * 8, WG);
+		GpuSim.run(S, enc, 'zeroFrame', GpuSim.zeroThreads(l), WG);
 		GpuSim.run(S, enc, 'integrate', l.plateCap, WG);
 		GpuSim.run(S, enc, 'move', colCap, WG);
 		GpuSim.run(S, enc, 'binCount', colCap, WG);
@@ -612,7 +628,11 @@ var GpuSim = {
 		// un-relaxed fit velocities; classify then re-runs velocities with that omega.
 		GpuSim.uploadFrame(state, GpuParams.tauOmega);
 		var enc = S.device.createCommandEncoder();
-		GpuSim.run(S, enc, 'zeroFrame', 6 + l.plateCap * 3 + l.colCap * 8, WG);
+		// zeroFrame also opens the boot pass, not only its second half: the reduce scratch is
+		// uninitialized memory until something writes it, and the witness region reduceB owns
+		// is only written when K10 runs. Without this the boot diagB would fold whatever the
+		// buffer was born with into D_RELAXERR.
+		GpuSim.run(S, enc, 'zeroFrame', GpuSim.zeroThreads(l), WG);
 		GpuSim.run(S, enc, 'move', l.colCap, WG);
 		GpuSim.run(S, enc, 'binCount', l.colCap, WG);
 		GpuSim.runGroups(S, enc, 'scanVA', Math.ceil(V / 1024), 256);
@@ -632,7 +652,7 @@ var GpuSim = {
 		// The boot mirror of Sim.raster's tail: classify starts with a second velocities
 		// pass over the just-solved omega. zeroFrame re-runs first because the CPU
 		// velocities call resets its own plateCells/maxSpeed accumulators.
-		GpuSim.run(S, enc, 'zeroFrame', 6 + l.plateCap * 3 + l.colCap * 8, WG);
+		GpuSim.run(S, enc, 'zeroFrame', GpuSim.zeroThreads(l), WG);
 		GpuSim.run(S, enc, 'velocities', V, WG);
 		GpuSim.run(S, enc, 'relatives', V, WG);
 		GpuSim.run(S, enc, 'polarity', V, WG);
@@ -776,11 +796,18 @@ var GpuSim = {
 			state.plateSpawned[p2] = fo[l.foPlate0 + p2 * 5 + 4];
 		}
 		if (m.diagOut) {
-			var diag = new Float32Array(m.diagOut.getMappedRange());
-			state.meanSpeed = diag[0]; state.massFel = diag[1]; state.massMaf = diag[2]; state.massSed = diag[3];
-			for (var k2 = 0; k2 < 6; k2++) state.oreSum[k2] = diag[4 + k2];
-			state.gaps = diag[10];
-			state.quatError = diag[12]; state.rigidError = Math.sqrt(diag[13]);
+			var diag = new Float32Array(m.diagOut.getMappedRange()), D = GpuSim.DIAG;
+			state.meanSpeed = diag[D.MEANV]; state.massFel = diag[D.MASSFEL];
+			state.massMaf = diag[D.MASSMAF]; state.massSed = diag[D.MASSSED];
+			for (var k2 = 0; k2 < 6; k2++) state.oreSum[k2] = diag[D.ORE0 + k2];
+			state.gaps = diag[D.GAPS];
+			state.quatError = diag[D.QUATERR]; state.rigidError = Math.sqrt(diag[D.RIGID2]);
+			// Defect D1's witnesses: the dt and alpha the device's K10 ran with, and the
+			// worst per-plate distance between the stored omega and the relaxed one. They
+			// ride the mirror instead of a separate readback so any full download carries
+			// them, and they live on the state (not on a GPU-only field) so the smoke and
+			// the parity harness can assert on them like any other mirrored number.
+			state.gpuDt = diag[D.DT]; state.gpuAlpha = diag[D.ALPHA]; state.gpuRelaxErr = diag[D.RELAXERR];
 		}
 		for (var r3 = 0; r3 < names.length; r3++) m[names[r3]].unmap();
 		if (shared) S.stageBusy = false;

@@ -8,7 +8,7 @@
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
 	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
-	var perfMain = document.getElementById('perf-main'), perfKern = document.getElementById('perf-kern');
+	var perfStrip = document.getElementById('perf-rows'), copyPerf = document.getElementById('copy-perf');
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
 	var renderer = new Renderer(canvas, state), gpuRenderer = null, playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
 	// Frames the GPU play path has actually submitted since the last rAF: the strip counts
@@ -182,6 +182,37 @@
 	}
 	canvas.addEventListener('click', probeClick);
 	gpuCanvas.addEventListener('click', probeClick);
+	// The perf strip is one row per part of the report (Perf.rows), plus the kernel line:
+	// on the GPU engine that is the device's own timestamp table, on the CPU engine the
+	// per-kernel JS laps Perf already folded in. Rows are rebuilt at 2 Hz, never per frame.
+	function stripRows() {
+		if (!(gpu.on && gpu.ready)) return Perf.rows;
+		GpuSim.tsCollect();
+		var ts = GpuSim.tsReport();
+		var rows = Perf.rows.slice(0, Perf.rows.length - 1);
+		rows.push(ts ? ts + ' · CPU mirror one event cycle old'
+			: 'no kernel timing (the adapter lacks timestamp-query) · CPU mirror one event cycle old');
+		return rows;
+	}
+	function showStrip(rows) {
+		for (var i = 0; i < rows.length; i++) {
+			var row = perfStrip.children[i];
+			if (!row) { row = document.createElement('span'); perfStrip.appendChild(row); }
+			row.textContent = rows[i];
+		}
+		while (perfStrip.children.length > rows.length) perfStrip.removeChild(perfStrip.lastChild);
+	}
+	// The capture an agent session needs, in one paste: which engine and world the numbers
+	// came from, then the strip exactly as it reads on screen.
+	function perfReport() {
+		return 'engine ' + (gpu.on && gpu.ready ? 'gpu' : 'cpu') + ' · L' + Params.level
+			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerInput.value
+			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
+			+ '\n' + stripRows().join('\n')
+			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
+	}
+	Clipboard.bind(copyPerf, perfReport);
+
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
 		if (playing) {
@@ -219,15 +250,7 @@
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.update(now);
-			perfMain.textContent = Perf.text;
-			if (gpu.on && gpu.ready) {
-				GpuSim.tsCollect();
-				var ts = GpuSim.tsReport();
-				perfKern.textContent = (ts ? ts + ' · ' : 'no kernel timing · ')
-					+ 'CPU mirror one event cycle old';
-			} else {
-				perfKern.textContent = Perf.detail;
-			}
+			showStrip(stripRows());
 		}
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';

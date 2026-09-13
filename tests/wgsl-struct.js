@@ -69,6 +69,7 @@ const consts = ['const V = ' + layout.V + 'u;', 'const W = ' + state.grid.lookup
 const rendererSrc = Renderer.SHADER.replace('// layout constants appended here (V, W, H, SPLIT_DAMAGE)',
 	consts.join('\n'));
 sources.push({ name: 'renderer', src: rendererSrc });
+sources.push({ name: 'rendererBlit', src: Renderer.BLIT });
 
 for (const { name, src } of sources) {
 	// Strip comments so words/braces inside them count neither as definitions nor references.
@@ -102,4 +103,27 @@ for (const { name, src } of sources) {
 	checks++;
 }
 assert.ok(sources.length > 40, 'the pack has a known size: ' + sources.length);
+
+// The JS side of two kernel contracts, pinned against the generated WGSL rather than
+// restated: the DIAG slot table (pull() unpacks by it, so a drift silently renames every
+// diagnostic) and zeroFrame's branch layout (the dispatch count comes from zeroThreads()).
+const diagPrelude = CommonWGSL.diag(CommonWGSL.B, layout);
+for (const key of Object.keys(GpuSim.DIAG)) {
+	const m = diagPrelude.match(new RegExp('const D_' + key + ': u32 = (\\d+)u;'));
+	assert.ok(m, 'wgsl-common declares D_' + key);
+	assert.equal(+m[1], GpuSim.DIAG[key], 'DIAG.' + key + ' slot matches the WGSL constant');
+}
+assert.equal(layout.diagOut, Math.max(...Object.values(GpuSim.DIAG)) + 1, 'diagOut covers the last slot');
+
+// The reduce scratch must actually hold the region reduceB writes and diagB folds.
+const reducePrelude = CommonWGSL.reduce(CommonWGSL.B, layout);
+const redRelax = +reducePrelude.match(/const RED_RELAX: u32 = RED_LPART \+ NWGL \* (\d+)u;/)[1];
+assert.equal(redRelax, 7, 'RED_RELAX starts after the ledger partials');
+assert.ok(layout.nwgL * redRelax + layout.plateCap <= layout.reduceF, 'reduceF covers RED_RELAX + plateCap');
+
+const zeroSrc = sources.find((s) => s.name === 'zeroFrame').src;
+for (const shape of ['t < 6u', 't < 6u + PLATECAP * 3u', 't < 6u + PLATECAP * 3u + COLCAP',
+	't < 6u + PLATECAP * 3u + COLCAP + PLATECAP', '7u * COLCAP']) {
+	assert.ok(zeroSrc.includes(shape), 'zeroFrame still branches on ' + shape);
+}
 console.log('PASS wgsl-struct: ' + checks + ' kernel sources balanced, entry-pointed, constants defined');
