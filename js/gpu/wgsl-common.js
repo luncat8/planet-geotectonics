@@ -259,6 +259,8 @@ var CommonWGSL = {
 			'const CHUNKL: u32 = ' + l.chunkL + 'u;\n' +
 			'const RED_LEDGER: u32 = RED_DIAGCELL + NWGD * 4u;\n' +
 			'const RED_LPART: u32 = RED_LEDGER + 7u * COLCAP;\n' +
+			// One f32 per plate slot: reduceB's relaxation witness, folded by diagB.
+			'const RED_RELAX: u32 = RED_LPART + NWGL * 7u;\n' +
 			'// Mass ledgers run ~1e14-1e15: fixed point overflows even i64, so each\n' +
 			'// column accumulates an f32 delta here (one writer per column per kernel)\n' +
 			'// and ledgerReduce folds them, in fixed order, into an f64-like hi/lo total.\n' +
@@ -316,6 +318,11 @@ var CommonWGSL = {
 			'fn addLost(p: u32) { atomicAdd(&FOUT[FO_PLATE0 + p * 5u + 3u], 1); }\n' +
 			'fn addSpawned(p: u32) { atomicAdd(&FOUT[FO_PLATE0 + p * 5u + 4u], 1); }\n';
 	},
+	// 12/13 are quatError/rigidError. 14..16 carry the K10 relaxation's own inputs
+	// (defect D1): reduceB reports the dt and alpha it actually ran with, and the worst
+	// per-plate distance between the omega it wrote and the omega the relaxation formula
+	// predicts. diagB only writes 0..13, so reduceB owns these three. tests/wgsl-struct.js
+	// pins the slot numbers against GpuSim.layout's diagOut size.
 	diag: function (b) {
 		return '@group(0) @binding(' + b.diagOut + ') var<storage, read_write> DIAG: array<f32>;\n' +
 			'const D_MEANV: u32 = 0u;\n' +
@@ -324,7 +331,12 @@ var CommonWGSL = {
 			'const D_MASSSED: u32 = 3u;\n' +
 			'const D_ORE0: u32 = 4u;\n' +
 			'const D_GAPS: u32 = 10u;\n' +
-			'const D_COLS: u32 = 11u;\n';
+			'const D_COLS: u32 = 11u;\n' +
+			'const D_QUATERR: u32 = 12u;\n' +
+			'const D_RIGID2: u32 = 13u;\n' +
+			'const D_DT: u32 = 14u;\n' +
+			'const D_ALPHA: u32 = 15u;\n' +
+			'const D_RELAXERR: u32 = 16u;\n';
 	},
 	// Shared math that needs no buffer declarations.
 	math: function () {

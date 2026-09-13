@@ -1,7 +1,15 @@
 /* gpu/render-gpu.js - the GPU twin of render.js: same layers, same palettes, computed in a
    fragment shader that samples the lookup raster and reads the sim buffers directly, so a
    frame needs no readback at all. One fullscreen-triangle draw per frame; the layer id rides
-   in a four-byte uniform. The CPU mirror stays one event cycle old (download runs there). */
+   in a four-byte uniform. The CPU mirror stays one event cycle old (download runs there).
+   The one exception is `init(state, { readback: true })`, which the parity rigs use to read
+   their own pixels back through an offscreen texture - see initReadback. */
+// Like the kernel modules, this file runs both as a classic script (GpuSim is already a
+// global) and under node, where the renderer's readback path is tested on the stub device.
+var GpuRendererNode = typeof module !== 'undefined' && module.exports;
+var GpuSimRef = typeof GpuSim !== 'undefined' ? GpuSim : (GpuRendererNode ? require('./sim-gpu.js') : null);
+var GpuRendererParams = typeof Params !== 'undefined' ? Params : require('../params.js');
+
 function GpuRenderer(canvas) {
 	this.canvas = canvas;
 	this.layer = 0;
@@ -170,22 +178,49 @@ struct Out { @location(0) color: vec4<f32> };
 }
 `;
 
+// One-triangle blit of the readback texture onto the canvas. The uv rides the same
+// fullscreen triangle and the sampler is nearest, so the blit is a texel-for-texel copy:
+// what the parity check reads out of the offscreen texture is what the map shows.
+GpuRenderer.BLIT = `@group(0) @binding(0) var SAMP: sampler;
+@group(0) @binding(1) var TEX: texture_2d<f32>;
+
+struct BlitOut { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> }
+
+@vertex fn vs(@builtin(vertex_index) v: u32) -> BlitOut {
+	var p = array<vec2<f32>, 3>(vec2(-1.0, -3.0), vec2(3.0, 1.0), vec2(-1.0, 1.0));
+	var o: BlitOut;
+	o.pos = vec4(p[v], 0.0, 1.0);
+	o.uv = p[v] * vec2<f32>(0.5, -0.5) + vec2<f32>(0.5);
+	return o;
+}
+
+struct Out { @location(0) color: vec4<f32> }
+
+@fragment fn fs(in: BlitOut) -> Out {
+	var o: Out;
+	o.color = textureSample(TEX, SAMP, in.uv);
+	return o;
+}
+`;
+
 GpuRenderer.prototype.init = function (state, opts) {
-	var S = GpuSim.S, device = S.device, g = state.grid;
+	var S = GpuSimRef.S, device = S.device, g = state.grid;
 	this.context = this.canvas.getContext('webgpu');
 	this.canvas.width = g.lookupW;
 	this.canvas.height = g.lookupH;
 	var consts = ['const V = ' + S.l.V + 'u;', 'const W = ' + g.lookupW + 'u;',
-		'const H = ' + g.lookupH + 'u;', 'const SPLIT_DAMAGE = ' + JSON.stringify(Params.splitDamage) + ';'];
+		'const H = ' + g.lookupH + 'u;', 'const SPLIT_DAMAGE = ' + JSON.stringify(GpuRendererParams.splitDamage) + ';'];
 	var code = GpuRenderer.SHADER.replace('// layout constants appended here (V, W, H, SPLIT_DAMAGE)',
 		consts.join('\n'));
 	this.format = navigator.gpu.getPreferredCanvasFormat();
-	// The spec's default canvas usage is RENDER_ATTACHMENT alone, so copying pixels back
-	// out of the current texture (the smoke test's parity check) has to ask for COPY_SRC.
-	// The app never reads the canvas back, so it keeps the default usage.
-	var config = { device: device, format: this.format, alphaMode: 'opaque' };
-	if (opts && opts.readback) config.usage = 0x10 | 0x4;
-	this.context.configure(config);
+	// The canvas keeps the spec's default usage (RENDER_ATTACHMENT alone). Asking for
+	// COPY_SRC there does not work on a real swapchain: Chrome/D3D backs the canvas with a
+	// D3DSharedImage whose usage it chooses itself, so `copyTextureToBuffer` out of
+	// `getCurrentTexture()` fails validation on hardware ("usage (TextureBinding|
+	// RenderAttachment) doesn't include TextureUsage::CopySrc") even though the same call is
+	// legal on a software adapter. Readback therefore renders into our own texture, which
+	// carries COPY_SRC, and blits it to the canvas for the visible map.
+	this.context.configure({ device: device, format: this.format, alphaMode: 'opaque' });
 	// The lookup raster is static per grid, so it rides its own read-only buffer, uploaded once.
 	if (!S.buf.lookup) {
 		S.buf.lookup = device.createBuffer({ size: g.lookup.length * 4, usage: 0x80 | 0x4 | 0x8 });
@@ -219,24 +254,93 @@ GpuRenderer.prototype.init = function (state, opts) {
 		fragment: { module: shaderModule, entryPoint: 'fs', targets: [{ format: this.format }] }
 	});
 	this.layerWord = new Uint32Array(4);
+	if (opts && opts.readback) this.initReadback(device);
 	return this;
+};
+
+// Readback rig (the smoke's pixel-parity check): an offscreen color texture the fragment
+// shader renders into, a staging buffer to copy it out through, and a blit pipeline that
+// puts the same pixels on the canvas. All three are allocated once, so a layer sweep is
+// allocation-free apart from the mapped-range view.
+GpuRenderer.prototype.initReadback = function (device) {
+	var w = this.canvas.width, h = this.canvas.height;
+	this.readRow = Math.ceil(w * 4 / 256) * 256;
+	this.readSize = this.readRow * h;
+	this.offscreen = device.createTexture({
+		size: [w, h], format: this.format,
+		usage: 0x10 | 0x4          // RENDER_ATTACHMENT | COPY_SRC
+	});
+	this.offView = this.offscreen.createView();
+	this.staging = device.createBuffer({ size: this.readSize, usage: 0x1 | 0x8 });   // MAP_READ | COPY_DST
+	var blit = device.createShaderModule({ code: GpuRenderer.BLIT });
+	this.blitPipeline = device.createRenderPipeline({
+		layout: 'auto',
+		vertex: { module: blit, entryPoint: 'vs' },
+		fragment: { module: blit, entryPoint: 'fs', targets: [{ format: this.format }] }
+	});
+	this.blitGroup = device.createBindGroup({
+		layout: this.blitPipeline.getBindGroupLayout(0),
+		entries: [
+			{ binding: 0, resource: device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' }) },
+			{ binding: 1, resource: this.offView }
+		]
+	});
+	return this;
+};
+
+// The pixels of the last draw(), row-padded to bytesPerRow, in the canvas format's byte
+// order (bgra8unorm on every current adapter: B at offset 0). Awaited, so it belongs to
+// the smoke and the parity rigs, never to the frame loop.
+GpuRenderer.prototype.readPixels = async function () {
+	var device = GpuSimRef.S.device;
+	if (this.readPending) await this.readPending;
+	var enc = device.createCommandEncoder();
+	enc.copyTextureToBuffer({ texture: this.offscreen },
+		{ buffer: this.staging, bytesPerRow: this.readRow },
+		[this.canvas.width, this.canvas.height]);
+	device.queue.submit([enc.finish()]);
+	this.readPending = this.staging.mapAsync(0x1);
+	await this.readPending;
+	this.readPending = null;
+	var bytes = new Uint8Array(this.staging.getMappedRange());
+	this.staging.unmap();
+	return bytes;
+};
+
+// One render pass into `view` with the layer uniform already written.
+GpuRenderer.prototype.passInto = function (enc, view) {
+	var pass = enc.beginRenderPass({ colorAttachments: [{
+		view: view, loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 }
+	}] });
+	pass.setPipeline(this.pipeline);
+	pass.setBindGroup(0, this.group);
+	pass.draw(3);
+	pass.end();
 };
 
 GpuRenderer.prototype.draw = function (layer) {
 	var id = GpuRenderer.LAYERS[layer];
 	if (id === undefined) id = 0;
 	this.layerWord[0] = id;
-	var device = GpuSim.S.device;
+	var device = GpuSimRef.S.device;
 	device.queue.writeBuffer(this.uniform, 0, this.layerWord);
 	var enc = device.createCommandEncoder();
-	var pass = enc.beginRenderPass({ colorAttachments: [{
+	if (!this.offscreen) {
+		this.passInto(enc, this.context.getCurrentTexture().createView());
+		device.queue.submit([enc.finish()]);
+		return;
+	}
+	this.passInto(enc, this.offView);
+	// The visible map is a copy of the texture the parity check reads, so the two can never
+	// disagree about what was drawn.
+	var blit = enc.beginRenderPass({ colorAttachments: [{
 		view: this.context.getCurrentTexture().createView(),
 		loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 }
 	}] });
-	pass.setPipeline(this.pipeline);
-	pass.setBindGroup(0, this.group);
-	pass.draw(3);
-	pass.end();
+	blit.setPipeline(this.blitPipeline);
+	blit.setBindGroup(0, this.blitGroup);
+	blit.draw(3);
+	blit.end();
 	device.queue.submit([enc.finish()]);
 };
 

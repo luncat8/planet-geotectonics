@@ -1,0 +1,158 @@
+## Your capture answered both questions. One of them was my own bad fix.
+
+Three things came back in `archive/0.3-2-log,task.txt`, and all three are now
+either fixed or turned into a number the next capture cannot dodge. The annotated
+transcript is `experiments/logs/0.3-II-ondevice-2.txt`; the raw paste is left
+untouched where you put it.
+
+### 1. The 32 errors named themselves, and the name is a Chrome/D3D fact
+
+```
+[Texture "D3DImageBacking_D3DSharedImage_WebGPUSwapBufferProvider_Pid:17956"]
+usage (TextureUsage::(TextureBinding|RenderAttachment)) doesn't include TextureUsage::CopySrc.
+ - While validating source [...] - While finishing [CommandEncoder (unlabeled)].
+[Invalid CommandBuffer] is invalid due to a previous error.
+```
+
+Two per layer, sixteen layers. Phase I4's fix — ask the canvas for `COPY_SRC`
+with `configure({ usage })`, then copy out of `getCurrentTexture()` — does not
+work on a presented canvas: Chrome backs it with a D3D shared image whose usage
+the swapchain picks, and the request is ignored. A software adapter honours it,
+which is exactly why the headless rig looked fine and the copy died on your
+machine. The empty comparison that followed is the same failure the previous
+session half-fixed: the staging buffer kept its zeros, and `mean|d| NaN max|d| 0`
+is a line nobody can interpret (`max|d| 0` says every difference compared false,
+`NaN` says the quotient was 0/0 — with two byte arrays, neither is reachable from
+the code as written).
+
+So the readback never touches the canvas now. `GpuRenderer.init(state,
+{ readback: true })` draws the layer into its own `RENDER_ATTACHMENT|COPY_SRC`
+texture, copies that into a reused staging buffer (`readPixels()`), and blits it
+to the canvas with one nearest-sampled fullscreen triangle — so the pixels the
+gate compares and the map you see are the same bytes. The app's renderer is
+untouched: default canvas usage, one pass, no offscreen texture, no staging.
+`tests/gpu-readback.js` (new, in `run-all.js`) pins that split on the stub device
+by recording commands: `configure` carries no usage, the texture is
+`RENDER_ATTACHMENT|COPY_SRC`, the order in one submit is draw → blit, the copy is
+its own submit and its source is never the canvas.
+
+Phase 4 also reports its inputs now — `ch>16: N · M samples` per layer, the mean
+divided by the samples actually compared, and a setup failure that prints all
+three sizes (canvas / readback / CPU reference) instead of silently comparing
+nothing. A throw anywhere in the readback path is caught and reported, so phases
+1–3 and the error list still make it into the log.
+
+### 2. D1 is a measurement now, and the device reports it
+
+Your capture is what settled the direction:
+
+```
+[parity] omega relaxation: mean |omega|/|omegaTarget| cpu 0.837 gpu 0.973 over 16 plates
+         · p1 cpu 0.943 gpu 0.991 · p2 cpu 0.691 gpu 0.966 · p3 cpu 0.871 gpu 0.828 · p4 cpu 0.863 gpu 1.167
+```
+
+The device's ω sits on the unrelaxed fit (0.973, and p4 is *above* its own target
+— something α = 0.2 can only do by inheriting a larger ω from the frame before),
+the CPU's lags it (0.837), and the speeds follow: gpu 4.947/13.026 against
+cpu-from-target 5.040/13.052 and cpu-from-relaxed 4.022/11.449. `reduceB` is
+line-for-line `Plates.reduce`, `P_TAUOMEGA` is literally `0.5` in the generated
+source (I printed it), and the previous session already ruled out the flags, the
+accessors and the dispatch. Reading code has nothing left to give, so I stopped
+reading and made the kernel talk:
+
+- `reduceB` leaves one witness per plate in the reduce scratch —
+  `|ω_stored − (ω_prev + (fit − ω_prev)·α)|`, reading ω *back* out of the buffer,
+  because the question is what is in the buffer.
+- `zeroFrame` clears that region (its shape is now `GpuSim.zeroThreads(l)`, one
+  source for the kernel's branches and the dispatch count), so a frame that never
+  runs K10 reports 0 rather than the previous frame or uninitialized scratch.
+  `GpuSim.raster` opens with `zeroFrame` for the same reason — the boot diagB was
+  folding whatever the scratch was born with.
+- `diagB` folds the witnesses into `DIAG[D_RELAXERR]` and reports `D_DT`/`D_ALPHA`
+  — the dt and α the *same* frame ran with, derived from the `frameIn` K10 read.
+- `pull` mirrors slots 14..16 to `state.gpuDt`/`gpuAlpha`/`gpuRelaxErr`, and the
+  smoke prints a `device K10:` line and fails with four different sentences:
+  the device ran a dt the JS did not upload · the device's α is not
+  `min(1, dt/τ_ω)` · the stored ω is not the relaxed ω · the device carries the
+  fit while all three of those say the relaxation ran. (Compared at f32 — 0.1
+  arrives as 0.10000000149011612, and a f64 comparison would fail on the format.)
+
+Those four are the only branches left, and each points at a different file. The
+slot table exists twice (WGSL `const D_*` and JS `GpuSim.DIAG`), so
+`tests/wgsl-struct.js` parses the generated prelude and pins every slot,
+`layout.diagOut`, `reduceF`'s coverage of `RED_RELAX + plateCap`, and
+`zeroFrame`'s branch shapes; `tests/gpu-play.js` writes known values into
+`DIAG[14..16]` on the stub and asserts they arrive as the three state fields.
+
+I did not fix D1, and I am not going to claim a cause I could not execute. What
+changed is that the next capture cannot come back ambiguous.
+
+### 3. `dl 26.2 [wait 25.5]` closes the transfer question
+
+The split you asked for is in your paste, and it says the round trip is no longer
+a transfer problem: **25.5 of 28.5 ms is the device retiring work that was
+already submitted**, and the seven `mapAsync` round trips plus the whole JS unpack
+are ~0.7 ms on top (`cyc 2.0 + up 0.3` matches the headless rig exactly). So one
+combined staging buffer and one map instead of seven is worth ≤ 0.7 ms — not the
+next move. Phase II's "≤ 10 ms" target is now marked as unreachable from inside
+Phase II: the drain has to stop happening once per step, which is Phase IV (n
+steps, one encoder, one submit per rAF). Phase III keeps its place ahead of it —
+`diagA 0.85 + diagC 1.46 = 2.31 ms` of your `5.66 ms` top ten (~41%; ~40% in the
+first capture, so the share is stable even though every kernel got faster).
+
+Your capture is also the repeatability statement the single runs did not have:
+same build as `0.3-II-ondevice.txt`, and frame 5.7 → 5.6 ms, Myr/s 12.2 → 12.6,
+event 31.7 → 28.5 ms, max 11.1 → 5.6 ms, kernels 6.74 → 5.66 ms total. Run-to-run
+noise on this rig is a few percent, so nothing smaller than that is a win. The two
+bench runs in the same paste agree to within 3% on every cell. The **20-step rows
+are still missing** — the page defaults to `steps=1,5,20`, so those runs were made
+with the field set to `1,5`; `bench.html?level=5,6&steps=1,5,20&dt=0.1` gets them.
+
+### Your three TODOs
+
+- *newline between parts of the info* — the strip is one row per part now
+  (`Perf.rows`: throughput / p95-max / events / ckpt / kernel table), rendered as
+  a column instead of one wrapped line. `Perf.text` is still the throughput line
+  and `Perf.detail` still the kernel laps, so nothing else moved.
+- *copy from running index.html* — a `Copy` button on the perf strip: engine,
+  level, dt, steps/frame, view, start, seed, then the rows exactly as they read,
+  then `t` and the badge.
+- *copy from bench.html* — a `Copy results` button: the table as tab-separated
+  text (header + rows, so it pastes straight back into a markdown table), the
+  kernel line, then the raw `BENCH` lines the headless driver reads.
+  `webgpu-smoke.html`'s `Copy log` went through the same module while I was in
+  there — it was a bare `navigator.clipboard &&` call, which does nothing at all
+  from `file://`, and the log is the one thing a trip to the rig produces.
+
+Both go through `js/clipboard.js`, which falls back to the hidden-textarea route
+when `navigator.clipboard` is missing or rejects — these pages are opened over
+`file://`, where the async API is not guaranteed. `tests/clipboard.js` (new, in
+`run-all.js`) covers the async write, the fallback, the refusal-then-fallback
+path and the both-ways failure, and pins that all three pages load the module
+before the file that binds the button. The provisional version of this coverage
+lived in `tests/browser-scripts.js`; it moved, so that file is back to what its
+name says and the suite does not report the same thing twice.
+
+**Verified here:** `node tests/run-all.js` → `PASS all tests` (25 tests, including
+the new `gpu-readback` and `clipboard`, plus `ores` and the 1500 Myr `longrun`: plates 6–40,
+middle epoch 9.05 cm/yr, continental 19.1% at 1500 Myr — the release profile is
+untouched, as it must be, since nothing in this session changes world evolution).
+`webgpu-smoke.html` itself cannot run in this sandbox — no WebGPU adapter, same as
+every session since the image changed — so the renderer's readback path and the
+witness kernels are verified structurally (generated WGSL, recorded command
+sequence, mirrored slots) and not executed. That is the honest boundary: the blit
+pipeline and `readPixels` have never met a device.
+
+One self-inflicted breakage on the way, now fixed and written up: a comment added
+to `js/gpu/wgsl-plates.js` used backticks around a variable name, and since the
+kernels are JS template literals that closed the string — every test that
+`require`d `sim-gpu.js` died with a `SyntaxError` pointing at the comment.
+`node --check` over `js/**/*.js` and `tests/*.js` is now the first thing run after
+touching a WGSL comment, because it costs a second and finds exactly this.
+
+**For the next capture**, in the order the plan needs them: `webgpu-smoke.html`
+(the `device K10:` line settles D1, and phase 4 should finally print real numbers
+for all 16 layers with 0 errors) · `bench.html?level=5,6&steps=1,5,20&dt=0.1`
+(the 20-step rows) · a long GPU play run past t = 20 Myr (the checkpoint path was
+the getMappedRange trigger; it should now survive). All three pages have a copy
+button, so a paste is enough.

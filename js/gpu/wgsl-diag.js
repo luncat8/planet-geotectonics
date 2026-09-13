@@ -20,8 +20,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	} else if (t < 6u + PLATECAP * 3u + COLCAP) {
 		let c = t - 6u - PLATECAP * 3u;
 		atomicStore(&SCAN[c], 0);
+	} else if (t < 6u + PLATECAP * 3u + COLCAP + PLATECAP) {
+		// One slot per plate: reduceB's relaxation witness (defect D1). Cleared every frame
+		// so a frame that never dispatches reduceB - the boot raster, prescribedOmega -
+		// reports 0 instead of the previous frame's value.
+		RED[RED_RELAX + t - 6u - PLATECAP * 3u - COLCAP] = 0.0;
 	} else {
-		let d = t - 6u - PLATECAP * 3u - COLCAP;
+		let d = t - 6u - PLATECAP * 4u - COLCAP;
 		if (d < 7u * COLCAP) { RED[RED_LEDGER + d] = 0.0; }
 	}
 }
@@ -109,7 +114,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `
 },
 {
-	name: 'diagB', groups: ['reduce', 'diag'],
+	name: 'diagB', groups: ['reduce', 'diag', 'plateF', 'frameIn'],
 	code: `
 // Fold partials into the diagnostics block (single invocation, fixed order).
 @compute @workgroup_size(1)
@@ -151,8 +156,19 @@ fn main() {
 	DIAG[D_ORE0 + 3u] = o3; DIAG[D_ORE0 + 4u] = o4; DIAG[D_ORE0 + 5u] = o5;
 	DIAG[D_GAPS] = gaps;
 	DIAG[D_COLS] = cols;
-	DIAG[12u] = qErr;
-	DIAG[13u] = rigid2;
+	DIAG[D_QUATERR] = qErr;
+	DIAG[D_RIGID2] = rigid2;
+	// Defect D1's three witnesses, folded in the same single invocation so they are
+	// deterministic: the worst per-plate relaxation residual reduceB left behind, and the
+	// dt / alpha this frame's K10 ran with. alpha == 1 with dt == 0.5 means the boot raster;
+	// alpha == 1 with dt == 0.1 means the device divided differently than the JS did.
+	var relax = 0.0;
+	for (var p = 0u; p < PLATECAP; p = p + 1u) {
+		relax = max(relax, RED[RED_RELAX + p]);
+	}
+	DIAG[D_RELAXERR] = relax;
+	DIAG[D_DT] = fDT();
+	DIAG[D_ALPHA] = min(1.0, fDT() / P_TAUOMEGA);
 }
 `
 },

@@ -877,3 +877,97 @@ problem, not a JS one.
 	Open: the D1 meanSpeed drift, waiting on the new |omega|/|omegaTarget| line; the
 20-step bench rows; and Phase III, which is the largest remaining win (~2.5 ms of ~8.7 ms
 per step at L5).
+
+## A canvas configured with COPY_SRC still cannot be copied from on real hardware (2026-09-13)
+
+	The Phase I "fix" for the smoke's empty pixel parity was `context.configure({ usage:
+RENDER_ATTACHMENT | COPY_SRC })` plus `copyTextureToBuffer(getCurrentTexture())`. On the
+owner's rig (nvidia/ampere, Chrome 151, D3D) that produced 32 uncaptured errors and 16
+empty comparisons:
+
+	webgpu uncaptured: [Texture "D3DImageBacking_D3DSharedImage_WebGPUSwapBufferProvider_Pid:17956"]
+	usage (TextureUsage::(TextureBinding|RenderAttachment)) doesn't include TextureUsage::CopySrc.
+	 - While validating source [...] - While finishing [CommandEncoder (unlabeled)].
+	webgpu uncaptured: [Invalid CommandBuffer] is invalid due to a previous error.
+
+	The usage the JS asks for is not the usage the swapchain texture gets: Chrome backs a
+presented canvas with a D3D shared image whose usage the swapchain chooses
+(TextureBinding|RenderAttachment), so the copy source is invalid no matter what
+`configure()` said. A software adapter honours it, which is why the headless rig never
+showed this. Rule: never read back from `getCurrentTexture()`. Render into your own texture
+(RENDER_ATTACHMENT|COPY_SRC), copy that to a MAP_READ|COPY_DST staging buffer, and blit the
+texture to the canvas so the visible map and the compared pixels are the same bytes. That is
+what `GpuRenderer.init(state, { readback: true })` now does (`initReadback` / `readPixels` /
+`passInto` / `GpuRenderer.BLIT`), and the canvas keeps the default usage in both modes.
+	The blit is one fullscreen triangle with the uv carried in the vertex output and a
+`nearest` sampler - a texel-for-texel copy, no `textureDimensions`, no second shader module
+to keep in sync with a canvas size.
+
+## A gate that cannot explain its own failure costs another trip to the rig (2026-09-13)
+
+	Phase 4 printed `mean|d| NaN max|d| 0 ch>16: 0` for all 16 layers. `max|d| 0` says every
+per-channel difference compared false and `mean NaN` says the quotient was 0/0 or a NaN
+summand - and with both buffers byte arrays neither is reachable from the code as written,
+so the line could not be interpreted at all. The gate was upgraded from "assert the metric is
+finite" to "report the inputs": the row now carries the sample count
+(`... ch>16: N · M samples`), the divisor is the count actually compared, and a missing
+readback texture or a wrong-sized CPU reference fails with the three sizes in the message
+instead of silently comparing nothing. When a rig visit is the only way to run a test, every
+failure line has to carry enough to act on without a second visit.
+
+## Defect D1: let the device report the numbers the theory needs (2026-09-13)
+
+	The owner-rig capture settled the direction of D1: `mean |omega|/|omegaTarget|` is 0.973
+on the device against 0.837 on the CPU (per plate: 0.991/0.943, 0.966/0.691, 0.828/0.871,
+1.167/0.863), i.e. the device's omega sits on the unrelaxed least-squares fit while the CPU's
+lags it - and `wgsl-plates.js reduceB` is line-for-line `js/plates.js reduce`. Reading code
+had already exhausted itself, so the kernel now reports instead:
+
+- `RED[RED_RELAX + p] = length(plateOmega(p) - (wPrev + (fit - wPrev) * alpha))` - one
+  witness per plate that the omega stored is the omega the formula produced. `zeroFrame`
+  clears the region (its thread count grows by plateCap; `GpuSim.zeroThreads(l)` is the
+  single source of the dispatch shape) so a frame that never runs K10 reports 0, not the
+  previous frame's value or uninitialized scratch.
+- `diagB` folds that into `DIAG[D_RELAXERR]` and adds `DIAG[D_DT] = fDT()` and
+  `DIAG[D_ALPHA] = min(1, fDT()/P_TAUOMEGA)` - the dt and alpha the same frame ran with.
+- `pull` mirrors slots 14..16 to `state.gpuDt` / `state.gpuAlpha` / `state.gpuRelaxErr`, so
+  any full download carries them and the smoke asserts on them like any other number:
+  `dt != uploaded`, `alpha != min(1, dt/tauOmega)`, `relaxErr >= 1e-5` and
+  "device ratio > 0.95 while the CPU's < 0.9" are four separate FAIL lines naming four
+  separate causes.
+
+	Slot tables that exist twice (WGSL `const D_*` and JS `GpuSim.DIAG`) get pinned, not
+duplicated: `tests/wgsl-struct.js` parses the generated `diag` prelude and asserts every JS
+slot equals its WGSL constant, that `layout.diagOut` covers the last one, that `reduceF`
+covers `RED_RELAX + plateCap`, and that `zeroFrame`'s branch thresholds are still the shapes
+`zeroThreads` assumes. The same file now also structurally checks `GpuRenderer.BLIT`.
+	A free side effect: `GpuSim.raster` now opens with `zeroFrame`, so the boot diag no
+longer folds whatever the reduce scratch was born with into D_RELAXERR (and the boot
+plateCells no longer start from the uploaded mirror before `velocities` adds to them - the
+CPU's `Edges.velocities` zeroes its own accumulators for exactly that reason).
+
+## A backtick in a comment inside generated WGSL is a syntax error in the JS around it (2026-09-13)
+
+Every kernel in `js/gpu/wgsl-*.js` is a template literal, so the WGSL comments live inside JS
+string syntax: prose like "not the local `w`" closes the literal at the first backtick and the
+rest of the file parses as code. The failure is loud but far from the cause - `SyntaxError:
+Unexpected identifier 'w'` at the comment line, raised from whichever test first `require`d the
+module (here `wgsl-plates.js` through `sim-gpu.js`). Use quotes or nothing in those comments.
+	The cheap gate that catches it before a 20-minute suite does: `for f in js/gpu/*.js js/*.js
+tests/*.js; do node --check $f; done`. It costs a second and finds exactly this class of edit,
+which is the class an agent session produces most often - prose added to a comment.
+
+## A refused clipboard write falls back one microtask later, and the test must survive that (2026-09-13)
+
+`Clipboard.writeText` returns `navigator.clipboard.writeText(t).then(() => true, () => legacy(t))`,
+so on a rejection the hidden-textarea path runs from the rejection handler, not from the click.
+Two consequences. In the browser: the fallback is a best effort, because the transient user
+activation `execCommand('copy')` needs may already be gone by the time the refusal arrives - it
+still costs nothing and is the only second chance there is. In a node test: a stubbed
+`global.document` must stay installed across that gap, so the refusal case cannot assert inside
+the same synchronous block that clicked the button; it needs a `setTimeout(..., 0)` around the
+label and `execCommand` assertions. Restoring the globals right after the click makes the
+fallback throw `document is undefined` and the whole test die with an unhandled rejection.
+	Also worth pinning while there: node 22's `global.navigator` is getter-only, so the stub has
+to go in with `Object.defineProperty(..., { configurable: true, writable: true })` and back out
+the same way.

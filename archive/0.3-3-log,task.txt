@@ -1,0 +1,36 @@
+## add change L5,6,7 gui
+
+## this info has variable size that cause GUI elements move. need reserve size to avoid flicker and reflow.
+
+
+file
+engine gpu · L5 · dt 0.1 · 1 steps/frame · view speed · map start · seed 7
+180.0 fps  ·  step 0.00 ms  ·  frame 5.6 ms  ·  126 steps/s  ·  12.6 Myr/s
+p95 5.6 ms · max 5.7 ms
+winners 1.85 diagC 1.82 loserRank 1.01 diagA 1.00 ledgerReduceA 0.61 subRateA 0.20 gaps 0.20 reduceA 0.08 resolve 0.06 thinning 0.05 · CPU mirror one event cycle old
+t 268.2 Myr · GPU · L5
+
+http
+engine gpu · L5 · dt 0.1 · 1 steps/frame · view z · map start · seed 7
+180.0 fps  ·  step 0.00 ms  ·  frame 5.6 ms  ·  122 steps/s  ·  12.2 Myr/s
+p95 5.6 ms · max 5.7 ms
+events 7 (29.6 ms = dl 25.9 [wait 24.3] + cyc 3.2 + up 0.5)
+winners 1.92 diagC 1.74 diagA 0.99 loserRank 0.94 ledgerReduceA 0.60 subRateA 0.19 gaps 0.17 reduceA 0.10 loserCount 0.08 · CPU mirror one event cycle old
+t 328.6 Myr · GPU · L5
+
+http
+level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+L5	1	10,242	9.650	5.6	33.3	61.1	66/603	12.0
+L5	5	10,242	7.162	12.1	77.8	94.4	63/134	13.3
+L6	1	40,962	21.365	16.6	111.1	177.8	23/233	4.6
+L6	5	40,962	19.641	198.7	211.1	227.7	0/48	4.7
+kernels: winners 1.82 loserRank 1.05 diagC 0.59 diagA 0.31 subRateA 0.20 ledgerReduceA 0.15 reduceA 0.15
+
+BENCH engine=gpu ts=on levels=5,6 steps=1,5 dt=0.1
+BENCH L5 steps=1 iso ms/step=9.650 smooth med=5.6 p95=33.3 max=61.1 hitches=66 frames=603 myr/s=12.0
+BENCH L5 steps=5 iso ms/step=7.162 smooth med=12.1 p95=77.8 max=94.4 hitches=63 frames=134 myr/s=13.3
+BENCH L6 steps=1 iso ms/step=21.365 smooth med=16.6 p95=111.1 max=177.8 hitches=23 frames=233 myr/s=4.6
+BENCH L6 steps=5 iso ms/step=19.641 smooth med=198.7 p95=211.1 max=227.7 hitches=0 frames=48 myr/s=4.7
+BENCH kernels: winners 1.82 loserRank 1.05 diagC 0.59 diagA 0.31 subRateA 0.20 ledgerReduceA 0.15 reduceA 0.15
+BENCH done
+

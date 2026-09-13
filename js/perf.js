@@ -15,6 +15,11 @@ var Perf = {
 	kern: new Float64Array(14),
 	stepMs: 0, frameMs: 0, fps: 0, stepsPerSec: 0, myrPerSec: 0,
 	windowSteps: 0, lastFrame: 0, lastText: 0, text: '', detail: '',
+	// The strip's rows, rebuilt with `text` at 2 Hz: throughput, frame-gap distribution,
+	// event round trips, checkpoint, kernel table. One line of all of them is unreadable and
+	// unpasteable, so the HUD renders one row per entry and the copy button joins them.
+	// Empty parts are dropped rather than printed as placeholders.
+	rows: [],
 	gaps: new Float64Array(512), gapT: new Float64Array(512), gapI: 0, gapSort: new Float64Array(512),
 	// Event round trip wall times, split into the three phases that make it up
 	// (download / cycle / upload) so a hitch is attributable, plus the checkpoint push.
@@ -27,7 +32,7 @@ var Perf = {
 		Perf.kern.fill(0);
 		Perf.stepMs = 0; Perf.frameMs = 0; Perf.fps = 0; Perf.stepsPerSec = 0; Perf.myrPerSec = 0;
 		Perf.windowSteps = 0; Perf.lastFrame = 0; Perf.lastText = 0;
-		Perf.text = ''; Perf.detail = '';
+		Perf.text = ''; Perf.detail = ''; Perf.rows.length = 0;
 		Perf.gapI = 0; Perf.gaps.fill(0); Perf.gapT.fill(0);
 		Perf.evMs = 0; Perf.evN = 0; Perf.ckMs = 0; Perf.ckN = 0;
 		Perf.evDl = 0; Perf.evCy = 0; Perf.evUp = 0; Perf.evWait = 0;
@@ -97,15 +102,26 @@ var Perf = {
 		Perf.detail = line;
 		var dist = Perf.gapStats(now);
 		var ev = Perf.evN || 1;
-		var events = Perf.evN > 0 ? '  ·  events ' + Perf.evN + ' (' + (Perf.evMs / ev).toFixed(1) + ' ms = dl '
+		var events = Perf.evN > 0 ? 'events ' + Perf.evN + ' (' + (Perf.evMs / ev).toFixed(1) + ' ms = dl '
 			+ (Perf.evDl / ev).toFixed(1) + ' [wait ' + (Perf.evWait / ev).toFixed(1) + '] + cyc '
 			+ (Perf.evCy / ev).toFixed(1) + ' + up ' + (Perf.evUp / ev).toFixed(1) + ')' : '';
-		var ckpt = Perf.ckN > 0 ? '  ·  ckpt ' + (Perf.ckMs / Perf.ckN).toFixed(1) + ' ms' : '';
+		var ckpt = Perf.ckN > 0 ? 'ckpt ' + (Perf.ckMs / Perf.ckN).toFixed(1) + ' ms' : '';
 		Perf.evMs = 0; Perf.evN = 0; Perf.ckMs = 0; Perf.ckN = 0;
 		Perf.evDl = 0; Perf.evCy = 0; Perf.evUp = 0; Perf.evWait = 0;
 		Perf.text = Perf.fps.toFixed(1) + ' fps  ·  step ' + Perf.stepMs.toFixed(2) + ' ms  ·  frame '
 			+ Perf.frameMs.toFixed(1) + ' ms  ·  ' + Perf.stepsPerSec.toFixed(0) + ' steps/s  ·  '
-			+ Perf.myrPerSec.toFixed(1) + ' Myr/s' + (dist ? '  ·  ' + dist : '') + events + ckpt;
+			+ Perf.myrPerSec.toFixed(1) + ' Myr/s';
+		Perf.rows.length = 0;
+		Perf.rows.push(Perf.text);
+		if (dist) Perf.rows.push(dist);
+		if (events) Perf.rows.push(events);
+		if (ckpt) Perf.rows.push(ckpt);
+		if (line) Perf.rows.push(line);
+	},
+	// The block the strip's copy button puts on the clipboard: one line per row, so a paste
+	// into a log or a chat keeps the parts separable instead of running them together.
+	report: function () {
+		return Perf.rows.join('\n');
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Perf;

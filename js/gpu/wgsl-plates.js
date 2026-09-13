@@ -142,11 +142,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	fit = fit + solve3(m0, m1, m2, r);
 	let alpha = min(1.0, fDT() / P_TAUOMEGA);
 	let cap = P_VMAX / R;
-	var w = plateOmega(p) + (fit - plateOmega(p)) * alpha;
+	let wPrev = plateOmega(p);
+	var w = wPrev + (fit - wPrev) * alpha;
 	let mag = length(w);
 	if (mag > cap) { w = w * (cap / mag); }
 	PLATEF[p * 8u + 2u] = vec4<f32>(fit, 0.0);
 	setPlateOmega(p, w);
+	// Defect D1: the device's plate speeds land on the *unrelaxed* fit while this code is
+	// line-for-line the CPU's. Each plate leaves one witness behind - the distance between
+	// the omega it just stored (read back, not the local w: the question is what is in the
+	// buffer, and only this invocation writes this slot) and the omega the relaxation
+	// predicts. A store that does not stick, a cap that fired, or an omega something else
+	// overwrites all become a number instead of a theory. diagB folds these into D_RELAXERR
+	// and reports the dt and alpha of the same frame beside them, which is what separates
+	// "the device never relaxes" from "the JS uploaded the wrong dt".
+	RED[RED_RELAX + p] = length(plateOmega(p) - (wPrev + (fit - wPrev) * alpha));
 	setPlateM(p, 0u, m0.x); setPlateM(p, 1u, m0.y); setPlateM(p, 2u, m0.z);
 	setPlateM(p, 3u, m1.x); setPlateM(p, 4u, m1.y); setPlateM(p, 5u, m1.z);
 	setPlateM(p, 6u, m2.x); setPlateM(p, 7u, m2.y); setPlateM(p, 8u, m2.z);

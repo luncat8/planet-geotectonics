@@ -54,6 +54,24 @@ function bytesOf(name) {
 	assert.deepEqual(Array.from(a.plate), Array.from(b.plate), 'column to plate map');
 	assert.deepEqual(Array.from(a.hFel.subarray(0, a.n)), Array.from(b.hFel.subarray(0, b.n)), 'hFel');
 
+	// 1b. the defect-D1 witnesses arrive in the mirror at the slots the WGSL writes. The
+	// stub runs no kernel, so this is a plumbing check: whatever the device puts in
+	// DIAG[14..16] must come out as gpuDt/gpuAlpha/gpuRelaxErr. tests/wgsl-struct.js pins
+	// the same slots against the generated `const D_*` declarations.
+	const diagSlot = GpuSim.DIAG;
+	const c = world(13);
+	await GpuSim.init(c, { device: makeDevice() });
+	const diagF32 = new Float32Array(bytesOf('diagOut').buffer);
+	diagF32[diagSlot.MEANV] = 1234;
+	diagF32[diagSlot.DT] = 0.1;
+	diagF32[diagSlot.ALPHA] = 0.2;
+	diagF32[diagSlot.RELAXERR] = 1.5e-7;
+	await GpuSim.download(c);
+	assert.equal(c.meanSpeed, 1234, 'meanSpeed still comes from slot 0');
+	assert.equal(c.gpuDt, Math.fround(0.1), 'DIAG[D_DT] mirrors to state.gpuDt (f32 on the device)');
+	assert.equal(c.gpuAlpha, Math.fround(Math.min(1, 0.1 / Params.tauOmega)), 'DIAG[D_ALPHA] mirrors to state.gpuAlpha');
+	assert.equal(c.gpuRelaxErr, Math.fround(1.5e-7), 'DIAG[D_RELAXERR] mirrors to state.gpuRelaxErr');
+
 	// 2. the event round trip leaves the cell and edge buffers alone.
 	const s = world(11);
 	await GpuSim.init(s, { device: makeDevice() });
@@ -97,6 +115,17 @@ function bytesOf(name) {
 		assert.equal(colI32[i * 4 + 3], 0, 'alive flag past n, row ' + i);
 	}
 	assert.ok(full.colCap > full.n, 'the rig has dead rows to check');
+
+	// 5. the buffers the K10 relaxation witnesses (defect D1) travel in are the size the
+	// kernels and the unpack agree on: diagB writes DIAG[14..16], reduceB writes one reduce
+	// scratch slot per plate. No dispatch runs on the stub, so a size drift here would only
+	// show up on a device as a validation error.
+	const L = GpuSim.S.l;
+	assert.ok(L.diagOut > GpuSim.DIAG.RELAXERR, 'diagOut covers the last witness slot');
+	assert.equal(bytesOf('diagOut').byteLength, L.diagOut * 4, 'diagOut buffer matches the layout');
+	assert.ok(L.reduceF >= L.nwgL * 7 + L.plateCap, 'reduceF covers RED_RELAX + plateCap');
+	assert.equal(GpuSim.zeroThreads(L), 6 + L.plateCap * 4 + L.colCap * 8,
+		'zeroFrame is dispatched with the thread count its branch layout needs');
 	console.log('PASS gpu-play: ' + FRAMES + ' frames, ' + cyclesPlayed + ' event cycles both paths, event round trip ships '
 		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer');
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });

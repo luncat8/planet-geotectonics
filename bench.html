@@ -62,6 +62,9 @@
       <tbody></tbody>
     </table>
     <div class="status" id="kern"></div>
+    <div class="ctl"><button id="copy-results" type="button">Copy results</button>
+      <label class="f">Table as tab-separated text, then the kernel line and the raw
+        <code>BENCH</code> lines — paste it straight into a log or a chat.</label></div>
     <div class="note">
       <b>iso ms/step</b> is the GPU kernel graph for <i>steps</i> consecutive frames divided by
       <i>steps</i> (one <code>onSubmittedWorkDone</code> per sample); the 1-vs-5 gap exposes the
@@ -107,6 +110,7 @@
 <script src="js/gpu/wgsl-diag.js"></script>
 <script src="js/gpu/sim-gpu.js"></script>
 <script src="js/gpu/render-gpu.js"></script>
+<script src="js/clipboard.js"></script>
 <script>
 (function () {
 	var canvas = document.getElementById('c');
@@ -298,6 +302,28 @@
 			window.__benchDone = true;
 		}
 	}
+
+	// The capture an agent session needs: the table as tab-separated text (it pastes straight
+	// back into a markdown table or a log), the kernel line, and the raw BENCH lines the
+	// headless driver reads. One click replaces transcribing four numbers by hand.
+	function tableText() {
+		var head = [], th = document.querySelectorAll('#tbl thead th');
+		for (var i = 0; i < th.length; i++) head.push(th[i].textContent.trim());
+		var out = [head.join('\t')];
+		for (var r = 0; r < tbody.children.length; r++) {
+			var cells = [], td = tbody.children[r].children;
+			for (var c = 0; c < td.length; c++) cells.push(td[c].textContent.trim());
+			out.push(cells.join('\t'));
+		}
+		return out.join('\n');
+	}
+	function benchReport() {
+		var text = tableText();
+		if (kernEl.textContent) text += '\n' + kernEl.textContent;
+		if (lines.length) text += '\n\n' + lines.join('\n');
+		return text;
+	}
+	Clipboard.bind(document.getElementById('copy-results'), benchReport);
 
 	runBtn.addEventListener('click', run);
 	// auto-run once on load (unless suppressed for scripted testing)
