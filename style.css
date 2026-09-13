@@ -53,3 +53,15 @@ h2 { color: #d4dfdf; text-transform: uppercase; font-weight: 500; }
    five lines keeps a click from lengthening the page and summoning a scrollbar. */
 #probe { white-space: pre-line; min-height: 8.5em; }
 @media (max-width: 640px) { main { padding: 24px 14px; } .notes { grid-template-columns: 1fr; gap: 16px; } .map-top { flex-wrap: wrap; } .map-bottom span:nth-child(2) { display: none; } .clock { min-width: 0; white-space: normal; } .clock strong { font-size: 20px; } }
+/* The map modes stay visible: switching layers is one click and the boundary key lives with
+   the mode it explains instead of masquerading as map coordinates. */
+header { padding: 5px 10px; }
+.clock { display: flex; align-items: baseline; justify-content: flex-end; gap: 14px; min-width: 0; }
+.clock strong, .clock span { display: inline; margin: 0;  }
+.map-top { display: grid; grid-template-columns: auto 1fr; align-items: start; padding: 6px 10px; }
+.view-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.view-modes legend { float: left; padding: 6px 8px 0 0; color: #d4dfdf; }
+.view-modes label { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; padding: 4px 0; cursor: pointer; white-space: nowrap; text-transform: none; letter-spacing: 0; }
+.view-modes input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: #9bdfba; }
+.boundary-key { padding: 5px 0; white-space: nowrap; color: #b7c5ca; }
+@media (max-width: 800px) { .map-top { grid-template-columns: 1fr; } #grid-info { padding: 0 0 4px; } .boundary-key { white-space: normal; } }

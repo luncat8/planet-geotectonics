@@ -109,11 +109,12 @@ Renderer.prototype.draw = function (layer) {
 			colors[b] = 16 + 239 * fo; colors[b + 1] = 16 + 204 * fo * fo; colors[b + 2] = 30 + 26 * fo;
 			continue;
 		}
-		if (layer === 'dir') {
-			// Plate motion: direction is hue, speed is lightness. Project the rigid
+		if (layer === 'dir' || layer === 'forceDir') {
+			// Motion/force: direction is hue, speed is lightness. Project the rigid
 			// Ω×r velocity onto the local (east, north) tangent so the hue reads as
 			// compass direction on the equirectangular map (E green, N blue, W red, S yellow).
-			var vx = s.vel[b], vy = s.vel[b + 1], vz = s.vel[b + 2];
+			var vector = layer === 'forceDir' ? s.wEq : s.vel;
+			var vx = vector[b], vy = vector[b + 1], vz = vector[b + 2];
 			var px = g.pos[b], py = g.pos[b + 1], pz = g.pos[b + 2];
 			var invR = 1 / Math.sqrt(px * px + py * py + pz * pz);
 			var nx = px * invR, ny = py * invR, nz = pz * invR;

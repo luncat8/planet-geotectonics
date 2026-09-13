@@ -17,7 +17,7 @@ function GpuRenderer(canvas) {
 
 GpuRenderer.LAYERS = { plate: 0, type: 1, z: 2, damage: 3, owner: 4, sediment: 5,
 	oVms: 10, oMaf: 11, oArc: 12, oOro: 13, oBas: 14, oPla: 15,
-	speed: 20, age: 21, force: 22, dir: 23 };
+	speed: 20, age: 21, force: 22, dir: 23, forceDir: 24 };
 
 GpuRenderer.SHADER = `struct U { layer: u32 };
 @group(0) @binding(0) var<uniform> u: U;
@@ -137,8 +137,9 @@ fn cellColor(c: u32, px: u32, py: u32) -> vec3<f32> {
 		let f = sqrt(min(1.0, length(CELLF[c * 8u + 7u].xyz) / 500000.0));
 		return vec3(16.0 + 239.0 * f, 16.0 + 204.0 * f * f, 30.0 + 26.0 * f);
 	}
-	if (layer == 23u) {
-		let v = CELLF[c * 8u].xyz;
+	if (layer == 23u || layer == 24u) {
+		var v = CELLF[c * 8u].xyz;
+		if (layer == 24u) { v = CELLF[c * 8u + 7u].xyz; }
 		// Equirectangular pixel -> lon/lat, then the local tangent basis (East, North).
 		let fx = (f32(px) + 0.5) / f32(W);
 		let fy = (f32(py) + 0.5) / f32(H);

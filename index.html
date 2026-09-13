@@ -7,15 +7,16 @@
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="eyebrow">Phase H — WebGPU</div><span class="badge" id="badge">CPU · L5</span><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div></header>
+	<header><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div><span class="badge" id="badge">CPU · L5</span><span id="grid-info">EQUIRECTANGULAR / 10,242 CELLS / 223 KM</span></header>
 	<main>
-		<div class="heading"><div><p>Plates rift apart, suture back together, and the planet cools — and the crust keeps the record of where the metal was.</p></div></div>
 		<section class="map-panel" aria-label="Planet map">
-			<div class="map-top"><span id="grid-info">EQUIRECTANGULAR / 10,242 CELLS / 223 KM</span><label>View <select id="layer"><option value="plate">Plate identity</option><option value="type">Boundary type</option><option value="z">Elevation</option><option value="damage">Rift damage</option><option value="owner">Column coverage</option><option value="sediment">Sediment</option><option value="speed">Plate speed (cm/yr)</option><option value="dir">Plate motion (direction + speed)</option><option value="age">Crust age (Myr)</option><option value="force">Forces (eq. basal)</option><option value="oVms">Ore · VMS</option><option value="oMaf">Ore · mafic</option><option value="oArc">Ore · arc</option><option value="oOro">Ore · orogenic</option><option value="oBas">Ore · basin</option><option value="oPla">Ore · placer</option></select></label></div>
+			<div class="map-top">
+				<fieldset id="layer" class="view-modes"><legend>View mode</legend>
+					<label><input type="radio" name="layer" value="plate" checked>Plate identity</label><label><input type="radio" name="layer" value="type">Boundary: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</label><label><input type="radio" name="layer" value="z">Elevation</label><label><input type="radio" name="layer" value="damage">Rift damage</label><label><input type="radio" name="layer" value="owner">Column coverage</label><label><input type="radio" name="layer" value="sediment">Sediment</label><label><input type="radio" name="layer" value="speed">Plate speed</label><label><input type="radio" name="layer" value="dir">Motion amount + direction</label><label><input type="radio" name="layer" value="age">Crust age</label><label><input type="radio" name="layer" value="force">Force amount</label><label><input type="radio" name="layer" value="forceDir">Force amount + direction</label><label><input type="radio" name="layer" value="oVms">Ore · VMS</label><label><input type="radio" name="layer" value="oMaf">Ore · mafic</label><label><input type="radio" name="layer" value="oArc">Ore · arc</label><label><input type="radio" name="layer" value="oOro">Ore · orogenic</label><label><input type="radio" name="layer" value="oBas">Ore · basin</label><label><input type="radio" name="layer" value="oPla">Ore · placer</label>
+				</fieldset></div>
 			<canvas id="map" aria-label="Equirectangular map of moving plates">Canvas support is required.</canvas>
 			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU)"></canvas>
 			<div class="perf" id="perf"><div class="rows" id="perf-rows"><span>performance counter idle</span></div><button id="copy-perf" class="copy" type="button" title="Copy the performance strip">Copy</button></div>
-			<div class="map-bottom"><span>90° S</span><span>Boundary type: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</span><span>180° E</span></div>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
 			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button>

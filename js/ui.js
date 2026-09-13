@@ -3,7 +3,9 @@
 	var play = document.getElementById('play'), step = document.getElementById('step');
 	var dtInput = document.getElementById('dt'), speedInput = document.getElementById('speed');
 	var runToInput = document.getElementById('run-to'), runToStart = document.getElementById('run-to-start');
-	var seedInput = document.getElementById('seed'), layerInput = document.getElementById('layer');
+	var seedInput = document.getElementById('seed'), layerGroup = document.getElementById('layer');
+	var currentLayer = 'plate';
+	function layerValue() { return currentLayer; }
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
@@ -152,7 +154,10 @@
 		if (runTarget <= state.t) { probe.textContent = 'Run-to target must be later than the current time.'; return; }
 		setPlaying(true);
 	});
-	layerInput.addEventListener('change', function () { dirty = true; });
+	layerGroup.addEventListener('change', function (event) {
+		if (event.target && event.target.name === 'layer') currentLayer = event.target.value;
+		dirty = true;
+	});
 	document.getElementById('reset').addEventListener('click', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
 		rebuildWhenIdle(grid.level, +seedInput.value, startInput.value === 'hot');
@@ -296,7 +301,7 @@
 	// came from, then the strip exactly as it reads on screen.
 	function perfReport() {
 		return 'engine ' + (gpu.on && gpu.ready ? 'gpu' : 'cpu') + ' · L' + grid.level
-			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerInput.value
+			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
 			+ '\n' + Perf.report(stripRows())
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
@@ -333,8 +338,8 @@
 			}
 		}
 		if (dirty) {
-			if (gpu.on && gpu.ready) gpuRenderer.draw(layerInput.value);
-			else renderer.draw(layerInput.value);
+			if (gpu.on && gpu.ready) gpuRenderer.draw(layerValue());
+			else renderer.draw(layerValue());
 			dirty = false;
 		}
 		Perf.frame(now, ran, dt); ran = 0;
