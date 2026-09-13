@@ -73,7 +73,9 @@
       the count: a faster median lowers the 2× threshold, so a smoother run can show a higher
       count than the slower run it replaced. <b>Myr/s</b> = simulated time per wall second.
       Sampling is time-boxed (~1.2 s per iso config, ~5 s per smooth config, capped sample counts)
-      so a heavy level returns in bounded time. <code>?fast=1</code> shrinks the boxes for a quick
+      so a heavy level returns in bounded time. Values outside the accepted ranges (levels 4–7,
+      steps 1–20) are named in the status line and in a <code>BENCH ignored:</code> line instead
+      of being dropped silently — a config the page did not run must not look like one it did. <code>?fast=1</code> shrinks the boxes for a quick
       pass on slow renderers; <code>?noauto=1</code> suppresses the auto-run;
       <code>?level=6&amp;steps=8&amp;dt=0.1</code> pre-fills the inputs (used by
       <code>experiments/gpu-bench.js</code> via <code>PGT_QUERY</code>).
@@ -130,6 +132,7 @@
 	} catch (e) {}
 
 	var FAST = /[?&]fast=1/.test(location.search);
+	var STEPS_MAX = 20;
 	var planet = null;   // { level, grid, state, renderer }
 	var running = false;
 	var lines = [];
@@ -146,9 +149,19 @@
 		});
 	}
 	function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a[a.length >> 1]; }
+	// Comma list -> the numbers inside [lo, hi], plus the ones that fell outside. The dropped
+	// half is the point: this page's own default (steps "1,5,20") was silently filtered to
+	// "1,5" by a 1-16 bound, so three owner-rig captures came back without the 20-step rows
+	// and nothing on screen said a config had been dropped. A measurement tool that quietly
+	// measures less than it was asked to is worse than one that refuses.
 	function parseList(el, lo, hi) {
-		return el.value.split(',').map(function (s) { return +s.trim(); })
-			.filter(function (v) { return isFinite(v) && v >= lo && v <= hi; });
+		var kept = [], dropped = [];
+		el.value.split(',').forEach(function (text) {
+			var v = +text.trim();
+			if (!text.trim()) return;
+			if (isFinite(v) && v >= lo && v <= hi) kept.push(v); else dropped.push(text.trim());
+		});
+		return { kept: kept, dropped: dropped, range: lo + '-' + hi };
 	}
 
 	// One world per level. Reuses the WebGPU device across levels; GpuSim.init
@@ -233,31 +246,41 @@
 		if (running) return;            // guard overlapping runs (double-click / auto-run)
 		running = true; runBtn.disabled = true;
 		tbody.innerHTML = ''; kernEl.textContent = ''; lines = [];
-		var levels = parseList(levelsIn, 4, 7);
-		var steps = parseList(stepsIn, 1, 16);
+		// index.html's Steps/frame select tops out at 20, so the bench has to reach 20: a
+		// setting the app offers and the bench cannot measure is a hole in the matrix.
+		var levels = parseList(levelsIn, 4, 7), steps = parseList(stepsIn, 1, STEPS_MAX);
 		var dt = +dtIn.value;
-		if (!levels.length || !steps.length || !isFinite(dt) || dt <= 0) {
-			setStatus('Bad input: levels/steps are comma lists (levels 4–7, steps 1–16), dt > 0.');
+		var ignored = [];
+		if (levels.dropped.length) ignored.push('levels ' + levels.dropped.join(',') + ' (outside ' + levels.range + ')');
+		if (steps.dropped.length) ignored.push('steps ' + steps.dropped.join(',') + ' (outside ' + steps.range + ')');
+		if (!levels.kept.length || !steps.kept.length || !isFinite(dt) || dt <= 0) {
+			setStatus('Bad input: levels/steps are comma lists (levels ' + levels.range + ', steps '
+				+ steps.range + '), dt > 0.' + (ignored.length ? ' Ignored ' + ignored.join(' and ') + '.' : ''));
+			if (ignored.length) log('BENCH ignored: ' + ignored.join('; '));
 			running = false; runBtn.disabled = false;
 			return;
 		}
 		try {
-			setStatus('Building L' + levels[0] + '…');
+			if (ignored.length) {
+				setStatus('Ignoring ' + ignored.join(' and ') + '; running the rest.');
+				log('BENCH ignored: ' + ignored.join('; '));
+			}
+			setStatus('Building L' + levels.kept[0] + '…');
 			await nextFrame();
-			await buildPlanet(levels[0]);
+			await buildPlanet(levels.kept[0]);
 			if (!GpuSim.S || !GpuSim.S.device) throw new Error('no WebGPU adapter');
 			log('BENCH engine=gpu ts=' + (GpuSim.S.tsOn ? 'on' : 'off')
-				+ ' levels=' + levels.join(',') + ' steps=' + steps.join(',') + ' dt=' + dt);
-			for (var li = 0; li < levels.length; li++) {
-				var level = levels[li];
+				+ ' levels=' + levels.kept.join(',') + ' steps=' + steps.kept.join(',') + ' dt=' + dt);
+			for (var li = 0; li < levels.kept.length; li++) {
+				var level = levels.kept[li];
 				if (planet.level !== level) {
 					setStatus('Building L' + level + '…');
 					await nextFrame();
 					await buildPlanet(level);
 				}
 				var cells = planet.grid.V;
-				for (var bi = 0; bi < steps.length; bi++) {
-					var n = steps[bi];
+				for (var bi = 0; bi < steps.kept.length; bi++) {
+					var n = steps.kept[bi];
 					setStatus('L' + level + ' ×' + n + ': iso…');
 					await nextFrame();
 					var iso = await measureIso(planet.state, dt, n);

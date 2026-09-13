@@ -18,7 +18,13 @@ var Perf = {
 	// The strip's rows, rebuilt with `text` at 2 Hz: throughput, frame-gap distribution,
 	// event round trips, checkpoint, kernel table. One line of all of them is unreadable and
 	// unpasteable, so the HUD renders one row per entry and the copy button joins them.
-	// Empty parts are dropped rather than printed as placeholders.
+	// Each part owns a fixed slot and `rows` is always SLOTS long ('' where the window has
+	// nothing to report), so the HUD can rewrite text in place: a part that appears or
+	// disappears - an event window, a checkpoint, the CPU engine's two empty transfer slots -
+	// neither shifts the rows below it nor changes the strip's height, and style.css reserves
+	// one line track per slot. Slot positions are the contract; report() drops the empties.
+	SLOT: { TEXT: 0, DIST: 1, EVENTS: 2, CKPT: 3, KERNELS: 4 },
+	SLOTS: 5,
 	rows: [],
 	gaps: new Float64Array(512), gapT: new Float64Array(512), gapI: 0, gapSort: new Float64Array(512),
 	// Event round trip wall times, split into the three phases that make it up
@@ -28,11 +34,15 @@ var Perf = {
 	clock: function () {
 		return performance.now();
 	},
+	clearRows: function () {
+		Perf.rows.length = 0;
+		for (var i = 0; i < Perf.SLOTS; i++) Perf.rows.push('');
+	},
 	reset: function () {
 		Perf.kern.fill(0);
 		Perf.stepMs = 0; Perf.frameMs = 0; Perf.fps = 0; Perf.stepsPerSec = 0; Perf.myrPerSec = 0;
 		Perf.windowSteps = 0; Perf.lastFrame = 0; Perf.lastText = 0;
-		Perf.text = ''; Perf.detail = ''; Perf.rows.length = 0;
+		Perf.text = ''; Perf.detail = ''; Perf.clearRows();
 		Perf.gapI = 0; Perf.gaps.fill(0); Perf.gapT.fill(0);
 		Perf.evMs = 0; Perf.evN = 0; Perf.ckMs = 0; Perf.ckN = 0;
 		Perf.evDl = 0; Perf.evCy = 0; Perf.evUp = 0; Perf.evWait = 0;
@@ -111,17 +121,26 @@ var Perf = {
 		Perf.text = Perf.fps.toFixed(1) + ' fps  ·  step ' + Perf.stepMs.toFixed(2) + ' ms  ·  frame '
 			+ Perf.frameMs.toFixed(1) + ' ms  ·  ' + Perf.stepsPerSec.toFixed(0) + ' steps/s  ·  '
 			+ Perf.myrPerSec.toFixed(1) + ' Myr/s';
-		Perf.rows.length = 0;
-		Perf.rows.push(Perf.text);
-		if (dist) Perf.rows.push(dist);
-		if (events) Perf.rows.push(events);
-		if (ckpt) Perf.rows.push(ckpt);
-		if (line) Perf.rows.push(line);
+		var S = Perf.SLOT;
+		Perf.clearRows();
+		Perf.rows[S.TEXT] = Perf.text;
+		Perf.rows[S.DIST] = dist;
+		Perf.rows[S.EVENTS] = events;
+		Perf.rows[S.CKPT] = ckpt;
+		Perf.rows[S.KERNELS] = line;
 	},
-	// The block the strip's copy button puts on the clipboard: one line per row, so a paste
-	// into a log or a chat keeps the parts separable instead of running them together.
-	report: function () {
-		return Perf.rows.join('\n');
+	// The block the strip's copy button puts on the clipboard: one line per part that has
+	// something to say, so a paste into a log or a chat keeps the parts separable instead of
+	// running them together - and carries no blank line for a reserved slot with nothing in it.
+	// `rows` defaults to the strip's own; the HUD passes its rows when it has substituted the
+	// device's timestamp table for the kernel slot.
+	report: function (rows) {
+		rows = rows || Perf.rows;
+		var out = [];
+		for (var i = 0; i < rows.length; i++) {
+			if (rows[i]) out.push(rows[i]);
+		}
+		return out.join('\n');
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Perf;

@@ -38,9 +38,9 @@ function serve(dir) {
 (async () => {
 	const out = arg('--out', null);
 	const server = await serve(ROOT);
-	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/wgputest/node_modules/puppeteer-core';
+	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/rig/node_modules/puppeteer-core';
 	const chromeBin = process.env.PGT_CHROME || '/tmp/chromium';
-	const libDir = process.env.PGT_LIBS || '';
+	const libDir = process.env.PGT_LIBS || '/tmp/al2023/lib';   // same default as tests/gpu-parity.js
 	const puppeteer = require(puppeteerDir);
 	if (libDir) process.env.LD_LIBRARY_PATH = libDir;
 	const browser = await puppeteer.launch({

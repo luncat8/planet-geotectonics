@@ -1,0 +1,137 @@
+0.3 Phase IV report — the two GUI tasks from your paste, the bench's missing 20-step rows
+solved, and your 328 Myr run read
+================================================================================
+
+Your paste (archive/0.3-3-log,task.txt) carried two TODOs and three strips. Both TODOs
+are implemented and measured, and the strips close the checkpoint story: a play run to
+t = 328.6 Myr on the GPU engine passes sixteen 20 Myr checkpoints without dying, which
+was the capture 0.3-3-report.txt was still waiting for. The annotated reading is in
+experiments/logs/0.3-III-ondevice-3.txt; the layout measurements are in
+experiments/logs/0.3-III-hud-reflow.txt.
+
+1. "add change L5,6,7 gui" - a Resolution select
+
+   The control panel now has a Resolution select: L5, L6, L7 (10,242 / 40,962 / 163,842
+   cells). Changing it rebuilds the world the way Reset world does - new grid, new
+   state, new renderer, engine re-booted on the new state, scratch released - so a level
+   change is exactly as safe as a reset and reuses the reset's code path. Measured in
+   headless Chromium on the CPU engine: L6 in 1.3 s, L7 in 2.5 s, back to L5 in 0.9 s,
+   the map repainted after each switch.
+
+   What follows the switch:
+   - The badge says `GPU · L6` / `CPU · L5` ... and is prefilled from the URL at boot, so
+     a capture or a paste always names the level it was taken at.
+   - The map-top line, which used to be just the view name, now reads
+     `EQUIRECTANGULAR / 40,962 CELLS / 112 KM` - the design's cell counts and km/px, from
+     the grid that is actually built.
+   - The Copy header names engine, level and seed, so the perf numbers you paste carry
+     their own provenance.
+   - `?level=7&engine=gpu&dt=0.2` pre-fills the controls (level, seed, engine, dt, steps),
+     which is how a fresh capture can open straight onto L7 GPU.
+   - Load a checkpoint of another level: the blob's own level and seed win now
+     (Checkpoint.peek reads the header). A level this page does not offer is refused
+     with `Load failed: that world is L4, this page offers L5-L7.` instead of a bare
+     parse error, and the old sim keeps running.
+
+   Two hazards the rebuild had to close, found while building it:
+   - A rebuild while a GPU round trip is in flight would size the new arenas against the
+     old world's numbers (the transfer's mapped ranges belong to buffers that no longer
+     exist). Every rebuild now waits for the in-flight transfer (and for the sim's step
+     queue to drain) before it swaps worlds; the Step button and the frame loop do the
+     same so a click cannot start a second round trip over one already going.
+   - Re-booting the GPU engine on a new state used to leak the old level's arenas -
+     ~30 MB at L5, ~120 MB at L7 - on top of the new ones. `GpuSim.init` now releases the
+     previous session's arenas, pipelines and staging buffers before building, and keeps
+     the device. tests/gpu-play.js §6 pins both halves: after a second init the first
+     session's arenas and staging buffers are destroyed and the new session is live on
+     the same device.
+
+2. "this info has variable size that cause GUI elements move" - a reserved strip
+
+   The perf strip is now five reserved line tracks, one per part of the readout
+   (throughput, step distribution, event round trip, checkpoint, kernel table). The
+   lines are created once at boot and their text is rewritten in place at 2 Hz, so the
+   strip's height cannot change after layout; a line that is longer than the strip
+   scrolls sideways instead of adding a wrapped line, and an empty line keeps its track
+   instead of vanishing. The same reservation went to the page's other variable-size
+   readouts: the clock is a fixed-width box with tabular figures (a 1-digit Myr number
+   and a 4-digit one occupy the same width), and the column inspector's box is reserved
+   to its filled height.
+
+   Measured, not asserted. experiments/hud-reflow.js serves HEAD and the working tree
+   side by side in headless Chromium, samples the strip and every element below it while
+   the strip's content changes the way it really does (playing, an event window opening
+   and closing, a checkpoint line, and one update with all fourteen kernels over the
+   floor - the widest the kernel line ever gets), and reports the movement:
+
+                          old (HEAD)      new        at 1440x900 and 1280x800 both
+     strip height        50 - 105.5 px    105.5 px   constant by construction
+     .map-bottom top     moves 55.5 px    0 px
+     .controls top       moves 55.5 px    0 px
+     .notes top          moves 55.5 px    0 px
+     document height     moves 55-56 px   0 px
+     rows with text      2 - 5            2 - 5      unchanged: nothing was hidden
+
+   So the flicker you saw was the strip growing from two lines to five and back at 2 Hz,
+   dragging the whole page below it; the reserved tracks cost a fixed ~56 px of empty
+   space on quiet windows and buy a page that never moves. tests/gui.js pins the
+   structure that makes it true: the strip must keep exactly Perf.SLOTS line elements,
+   must never add or remove one after mount, and must not change its height when the
+   kernel table goes from empty to its widest.
+
+3. The bench's 20-step rows: third capture missing them, and it was the bench, not you
+
+   bench.html parsed its steps field with a 1-16 bound while its own input defaults to
+   `1,5,20`, so the auto-run on load - and any run left at the defaults - silently
+   dropped the 20 before building the first config. That is why three captures in a row
+   show a 2-row matrix from a page whose header says `steps=1,5,20`: the tool measured
+   less than it claimed to, quietly. The bound is now STEPS_MAX = 20 (the app's
+   Steps/frame select tops out there, so the bench has to reach it), and anything
+   dropped from either field is named on the console, in the status line and in the
+   copy: `BENCH ignored: steps 99 (outside 1-20)`. A config the bench will not run can no
+   longer look like one it did. tests/gui.js pins the bench's accepted ranges to cover
+   every option index.html offers and its defaults to survive its own filter; the pin
+   bites (mutation-checked). On this sandbox's headless rig the defaults now parse clean
+   - no ignored line - and the run stops only at the missing WebGPU adapter.
+
+4. What your strips say
+
+   - t 268.2 and 328.6 Myr at 122-126 steps/s with p95 = max = 5.6-5.7 ms at 180 Hz: the
+     20 Myr checkpoint path - the old getMappedRange death point - is confirmed fixed on
+     hardware across thirteen and sixteen cycles. That capture request is closed.
+   - events 7 (29.6 ms = dl 25.9 [wait 24.3] + cyc 3.2 + up 0.5): wait is still ~82% of
+     the round trip, so Phase IV's diagnosis (the queue drain, once per step) stands.
+     New in this capture: `cyc` grew 2.0 -> 3.2 ms between t = 2 Myr and t = 328 Myr -
+     Events.cycle costs more on an old world - so Phase IV's floor at late epochs is
+     ~3 ms of cycle plus whatever drain survives, not the ~0.5 ms up-only path.
+   - The K11 passes (diagA + diagC) are 41.0% / 40.6% of the top-10 kernel sum at
+     t > 268 Myr, matching 39.6% and 40.8% in the two earlier captures: Phase III's prize
+     is stable across the whole run, and nothing on the device reads those buffers.
+     Phase III stays next after Phase IV.
+   - Reading traps to keep in mind: the kernel row's contents vary with the epoch (a
+     kernel under the 0.05 ms floor is absent), and the bench's kernel line is an EMA
+     over whichever configs just ran, so it must not be compared per-kernel against a
+     play strip.
+
+5. Tests and gates
+
+   Added this session: tests/gui.js (a page-level test that loads the real index.html
+   through a DOM stub and drives the GUI: level switch, engine toggle under an in-flight
+   transfer, reset, load of a foreign-level blob, copy header, strip structure) plus
+   tests/dom-stub.js; rewritten tests/perf.js for the slot model; new sections in
+   tests/gpu-play.js (init releases the previous session) and tests/checkpoint.js
+   (peek). The full suite passed before these GUI changes (25/25, ~17 min); the fast
+   subset - everything except longrun and perf - passes after them, including three
+   mutation checks that prove tests/gui.js bites.
+
+6. For the next capture, in this order
+
+   1. webgpu-smoke.html - the one page still missing from every capture. Its
+      `device K10:` line settles the adapter defect (D1) and phase 4 should print mean|d|
+      for all 16 layers with 0 errors. This sandbox has no WebGPU adapter at all, so it
+      cannot come from here.
+   2. bench.html at the defaults - the 20-step rows exist now; the BENCH header line will
+      name the configs it ran, and any ignored value is printed.
+   3. A strip from index.html?level=7 (or the Resolution select by hand) - the L7 GPU
+      numbers (iso ms/step at 163,842 cells, and the ~120 MB arena footprint) have never
+      been measured on hardware; the copy header will say L7.

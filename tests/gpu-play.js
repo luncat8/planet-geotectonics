@@ -126,6 +126,29 @@ function bytesOf(name) {
 	assert.ok(L.reduceF >= L.nwgL * 7 + L.plateCap, 'reduceF covers RED_RELAX + plateCap');
 	assert.equal(GpuSim.zeroThreads(L), 6 + L.plateCap * 4 + L.colCap * 8,
 		'zeroFrame is dispatched with the thread count its branch layout needs');
+	// 6. Re-init releases the world it replaces. The app's Resolution select and the bench's
+	// one planet per level both re-init on a live device, and at L7 a set of arenas is ~120 MB
+	// of device memory: what a level switch must not do is leave the previous level's buffers -
+	// including the staging cache of its last transfer - waiting on a GC that is free to hold
+	// them. No dispatch runs here, so this is the bookkeeping half; the device half is that
+	// destroy() on a buffer nobody has mapped is legal, which js/ui.js guarantees by waiting
+	// for the in-flight transfer before it rebuilds (tests/gui.js pins that ordering).
+	{
+		const next = world(17);
+		await GpuSim.init(next, { device: makeDevice() });
+		await GpuSim.play(next, DT, 12);
+		await GpuSim.download(next);
+		const oldS = GpuSim.S, oldBuf = GpuSim.S.buf, oldStage = GpuSim.S.stage, device = GpuSim.S.device;
+		assert.ok(oldStage && Object.keys(oldStage).length > 0, 'the rig has a staging cache to release');
+		await GpuSim.init(world(19), { device: device });
+		assert.notEqual(GpuSim.S, oldS, 'the session is a new one');
+		assert.equal(GpuSim.S.device, device, 'on the device it was given');
+		for (const name in oldBuf) assert.equal(oldBuf[name].destroyed, true, 'replaced arena ' + name);
+		for (const name in oldStage) assert.equal(oldStage[name].destroyed, true, 'replaced staging buffer ' + name);
+		for (const name in GpuSim.S.buf) {
+			assert.equal(GpuSim.S.buf[name].destroyed, false, 'the new arena ' + name + ' is live');
+		}
+	}
 	console.log('PASS gpu-play: ' + FRAMES + ' frames, ' + cyclesPlayed + ' event cycles both paths, event round trip ships '
-		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer');
+		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer, re-init releases the replaced arenas');
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });

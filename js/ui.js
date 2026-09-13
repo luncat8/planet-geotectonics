@@ -6,17 +6,84 @@
 	var seedInput = document.getElementById('seed'), layerInput = document.getElementById('layer');
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
+	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var perfStrip = document.getElementById('perf-rows'), copyPerf = document.getElementById('copy-perf');
+	// ?level= / ?seed= / ?engine= / ?dt= / ?steps= pre-fill the world controls, so a capture
+	// request can name the run it wants (index.html?level=7&engine=gpu) instead of describing
+	// clicks - the affordance bench.html already has, and the reason its runs are repeatable
+	// from a log line. A level the select does not offer is ignored rather than built: Grid
+	// takes 0-7, so a stray ?level=9 would throw before the page drew anything.
+	var query = new URLSearchParams(location.search);
+	function offeredLevel(level) {
+		for (var i = 0; i < levelInput.options.length; i++) {
+			if (+levelInput.options[i].value === level) return true;
+		}
+		return false;
+	}
+	if (offeredLevel(+query.get('level'))) Params.level = +query.get('level');
+	if (query.get('seed')) Params.seed = +query.get('seed') >>> 0;
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
 	var renderer = new Renderer(canvas, state), gpuRenderer = null, playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
 	// Frames the GPU play path has actually submitted since the last rAF: the strip counts
 	// real work, not the frames that were requested while a round trip held the queue.
 	var ran = 0;
-	var gpu = { on: false, ready: false, busy: false };
+	// `pending` is the in-flight play/step promise, `busy` the frame loop's own guard. They are
+	// not the same thing: a rebuild has to wait for the transfer to settle, because it swaps the
+	// grid, the state and the device arenas underneath it (see whenGpuIdle).
+	var gpu = { on: false, ready: false, busy: false, pending: null };
+	levelInput.value = String(Params.level);
+	seedInput.value = String(Params.seed);
+	if (query.get('dt')) dtInput.value = query.get('dt');
+	if (query.get('steps')) speedInput.value = query.get('steps');
+	if (query.get('engine')) engineInput.value = query.get('engine');
 	Sim.raster(state);
 	Perf.reset();
+	function paintBadge() {
+		badge.textContent = (gpu.on && gpu.ready ? 'GPU · L' : 'CPU · L') + grid.level;
+	}
+	// The map-top line carries the resolution the design quotes (0.1.5 §1): the cell count and
+	// the edge of an equal-area cell, 223 / 112 / 56 km at L5 / L6 / L7.
+	function paintGrid() {
+		var km = Math.sqrt(4 * Math.PI * Params.radius * Params.radius / grid.V) / 1000;
+		gridInfo.textContent = 'EQUIRECTANGULAR / ' + grid.V.toLocaleString() + ' CELLS / '
+			+ Math.round(km) + ' KM';
+	}
+	// Every path that rebuilds the world or the engine waits for the in-flight GPU transfer
+	// first. GpuSim.init releases the arenas a transfer is sized against, and a mirror that
+	// lands after the swap would write the new world's buffers from the old world's numbers -
+	// the frame loop is already paused and `busy` refuses a new Step click, so nothing else can
+	// start in between.
+	function whenGpuIdle(done) {
+		var inflight = gpu.pending;
+		gpu.pending = null;
+		if (!inflight) { done(); return; }
+		inflight.then(done, done);
+	}
+	// One world rebuild, shared by the Resolution select, Reset world and Load: the columns are
+	// Lagrangian on one grid, so a different level is a different world and there is nothing to
+	// carry over. `after` runs once the engine is ready on the new world.
+	function rebuildWorld(level, seed, hot, after) {
+		Params.level = level;
+		grid = new Grid(level, seed).build();
+		state = new State(grid, seed, hot);
+		renderer = new Renderer(canvas, state);
+		extractScratch = null;   // sized to the old grid.V
+		levelInput.value = String(level);
+		seedInput.value = String(seed);
+		paintGrid();
+		probe.textContent = 'Click the map to inspect a column.';
+		Perf.reset();
+		bootEngine(function () {
+			dirty = true;
+			if (after) after();
+		});
+	}
+	function rebuildWhenIdle(level, seed, hot, after) {
+		setPlaying(false); runTarget = Infinity;
+		whenGpuIdle(function () { rebuildWorld(level, seed, hot, after); });
+	}
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
@@ -30,17 +97,19 @@
 				return;
 			}
 			gpu.on = true; gpu.ready = false;
-			GpuSim.init(state, { fallback: false }).then(function () {
+			// The device outlives the world: a level switch re-inits the arenas on it rather
+			// than asking for a second adapter (the bench's one-planet-per-level does the same).
+			GpuSim.init(state, { device: GpuSim.device, fallback: false }).then(function () {
 				GpuSim.raster(state);
 				gpuRenderer = new GpuRenderer(gpuCanvas).init(state);
 				gpuCanvas.hidden = false; canvas.hidden = true;
 				gpu.ready = true; dirty = true;
-				badge.textContent = 'GPU · L' + Params.level;
+				paintBadge();
 				done();
 			})['catch'](function (error) {
 				gpu.on = false; engineInput.value = 'cpu';
 				gpuCanvas.hidden = true; canvas.hidden = false;
-				badge.textContent = 'CPU · L' + Params.level;
+				paintBadge();
 				probe.textContent = 'GPU engine failed (' + error.message + '); back on CPU.';
 				done();
 			});
@@ -48,14 +117,14 @@
 			gpu.on = false; gpu.ready = false;
 			gpuCanvas.hidden = true; canvas.hidden = false;
 			Sim.raster(state);
-			badge.textContent = 'CPU · L' + Params.level;
+			paintBadge();
 			done();
 		}
 	}
 	engineInput.addEventListener('change', function () {
 		setPlaying(false); runTarget = Infinity;
 		Perf.reset();
-		bootEngine(function () { dirty = true; });
+		whenGpuIdle(function () { bootEngine(function () { dirty = true; }); });
 	});
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
@@ -67,7 +136,7 @@
 		if (gpu.on && gpu.ready) {
 			if (gpu.busy) return;
 			gpu.busy = true;
-			GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params).then(function () {
+			gpu.pending = GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params).then(function () {
 				gpu.busy = false; dirty = true;
 			})['catch'](function (error) {
 				gpu.busy = false; console.error('GPU engine error', error);
@@ -86,13 +155,19 @@
 	layerInput.addEventListener('change', function () { dirty = true; });
 	document.getElementById('reset').addEventListener('click', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
-		setPlaying(false); runTarget = Infinity;
-		grid = new Grid(Params.level, +seedInput.value).build();
-		state = new State(grid, +seedInput.value, startInput.value === 'hot');
-		renderer.state = state;
-		probe.textContent = 'Click the map to inspect a column.';
-		Perf.reset();
-		bootEngine(function () { dirty = true; });
+		rebuildWhenIdle(grid.level, +seedInput.value, startInput.value === 'hot');
+	});
+	// A new resolution is a new world: same seed and start, rebuilt from scratch, because the
+	// crust lives on columns of one particular grid and nothing carries across grids.
+	levelInput.addEventListener('change', function () {
+		if (!seedInput.checkValidity()) { seedInput.reportValidity(); levelInput.value = String(grid.level); return; }
+		var level = +levelInput.value;
+		// The CPU engine is the calibrated L5 path (design 0.1.5 §1); it runs L6-L7 too, at a
+		// few frames per second, and saying so once beats looking like a hang.
+		var slow = level > 5 && engineInput.value === 'cpu';
+		rebuildWhenIdle(level, +seedInput.value, startInput.value === 'hot', slow ? function () {
+			probe.textContent = 'L' + level + ' on the CPU engine runs at a few frames/s; L6-L7 are the WebGPU path.';
+		} : null);
 	});
 	document.getElementById('save').addEventListener('click', function () {
 		if (gpu.on && gpu.ready) {
@@ -129,19 +204,32 @@
 		if (!file) return;
 		var reader = new FileReader();
 		reader.onload = function () {
-			try {
-				setPlaying(false); runTarget = Infinity;
-				Checkpoint.load(state, new Uint8Array(reader.result));
-				if (gpu.on && gpu.ready) {
-					GpuSim.uploadState(state).then(function () { dirty = true; });
-				} else {
-					Sim.raster(state);
-					dirty = true;
-				}
-			} catch (error) {
-				probe.textContent = 'Load failed: ' + error.message;
-			}
 			loadInput.value = '';
+			var bytes = new Uint8Array(reader.result), head;
+			try { head = Checkpoint.peek(bytes); }
+			catch (error) { probe.textContent = 'Load failed: ' + error.message; return; }
+			if (!offeredLevel(head.level)) {
+				probe.textContent = 'Load failed: that world is L' + head.level + ', this page offers L5-L7.';
+				return;
+			}
+			// The blob carries the level and seed it was written at, so the world is rebuilt to
+			// match and then restored into it: with a Resolution select a mismatch is the normal
+			// case, not a corrupt file, and "checkpoint level 5" is not an instruction.
+			rebuildWhenIdle(head.level, head.seed, startInput.value === 'hot', function () {
+				try {
+					Checkpoint.load(state, bytes);
+					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
+						+ state.t.toFixed(1) + ' Myr.';
+					if (gpu.on && gpu.ready) {
+						GpuSim.uploadState(state).then(function () { dirty = true; });
+					} else {
+						Sim.raster(state);
+						dirty = true;
+					}
+				} catch (error) {
+					probe.textContent = 'Load failed: ' + error.message;
+				}
+			});
 		};
 		reader.readAsArrayBuffer(file);
 	});
@@ -188,27 +276,29 @@
 	function stripRows() {
 		if (!(gpu.on && gpu.ready)) return Perf.rows;
 		GpuSim.tsCollect();
-		var ts = GpuSim.tsReport();
-		var rows = Perf.rows.slice(0, Perf.rows.length - 1);
-		rows.push(ts ? ts + ' · CPU mirror one event cycle old'
-			: 'no kernel timing (the adapter lacks timestamp-query) · CPU mirror one event cycle old');
+		var ts = GpuSim.tsReport(), rows = Perf.rows.slice();
+		rows[Perf.SLOT.KERNELS] = ts ? ts + ' · CPU mirror one event cycle old'
+			: 'no kernel timing (the adapter lacks timestamp-query) · CPU mirror one event cycle old';
 		return rows;
 	}
+	// One span per slot, created once: appending and removing row elements at 2 Hz is what made
+	// the strip flicker and everything under it reflow, since the parts come and go (an event
+	// window, a checkpoint) and the row count moved the strip's height. style.css reserves one
+	// line track per slot, so rewriting text in place cannot move the page at all.
+	function mountStrip() {
+		while (perfStrip.children.length < Perf.SLOTS) perfStrip.appendChild(document.createElement('span'));
+		while (perfStrip.children.length > Perf.SLOTS) perfStrip.removeChild(perfStrip.lastChild);
+	}
 	function showStrip(rows) {
-		for (var i = 0; i < rows.length; i++) {
-			var row = perfStrip.children[i];
-			if (!row) { row = document.createElement('span'); perfStrip.appendChild(row); }
-			row.textContent = rows[i];
-		}
-		while (perfStrip.children.length > rows.length) perfStrip.removeChild(perfStrip.lastChild);
+		for (var i = 0; i < perfStrip.children.length; i++) perfStrip.children[i].textContent = rows[i] || '';
 	}
 	// The capture an agent session needs, in one paste: which engine and world the numbers
 	// came from, then the strip exactly as it reads on screen.
 	function perfReport() {
-		return 'engine ' + (gpu.on && gpu.ready ? 'gpu' : 'cpu') + ' · L' + Params.level
+		return 'engine ' + (gpu.on && gpu.ready ? 'gpu' : 'cpu') + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerInput.value
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
-			+ '\n' + stripRows().join('\n')
+			+ '\n' + Perf.report(stripRows())
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
 	}
 	Clipboard.bind(copyPerf, perfReport);
@@ -224,7 +314,7 @@
 					// cadence inside GpuSim.play pulls the mirror back to the CPU.
 					if (!gpu.busy) {
 						gpu.busy = true;
-						GpuSim.play(state, dt, steps).then(function (done) {
+						gpu.pending = GpuSim.play(state, dt, steps).then(function (done) {
 							gpu.busy = false; ran += done; dirty = true;
 						})['catch'](function (error) {
 							gpu.busy = false; setPlaying(false);
@@ -260,6 +350,12 @@
 		}
 		requestAnimationFrame(frame);
 	}
+	paintGrid();
+	paintBadge();
+	mountStrip();
+	// The page's own default is the CPU engine, whose world is already rastered; a prefilled
+	// ?engine=gpu has to boot the device before a frame tries to draw from it.
+	if (engineInput.value === 'gpu') bootEngine(function () { dirty = true; });
 	if (/[?&]bench=1/.test(location.search)) {
 		// The benchmark lives in its own page (bench.html — the climate-repo GUI
 		// pattern): redirect, preserving the level/dt/steps query overrides.

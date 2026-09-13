@@ -116,9 +116,31 @@ var GpuSim = {
 		return { f: f, i: i };
 	},
 
+	// Drop a session's device resources. Re-init is a normal GUI action now - the level
+	// select, Reset world, the bench's one planet per level - and at L7 a single set of
+	// arenas is ~120 MB, so waiting on a GC that is free to hold them lets a few level
+	// switches pile up. Destroying is legal while submitted commands are still in flight
+	// (the device keeps the allocation until it is done with it); what it is not legal
+	// against is a *mapped* buffer, which is why js/ui.js waits for the in-flight transfer
+	// to settle before it rebuilds a world.
+	release: function (S) {
+		S = S || GpuSim.S;
+		if (!S) return;
+		if (GpuSim.S === S) GpuSim.S = null;
+		var name, i;
+		for (name in S.buf) S.buf[name].destroy();
+		if (S.stage) for (name in S.stage) S.stage[name].destroy();
+		for (name in S.K) if (S.K[name].pipe.destroy) S.K[name].pipe.destroy();
+		for (i = 0; S.tsResolve && i < S.tsResolve.length; i++) S.tsResolve[i].destroy();
+		for (i = 0; S.tsMap && i < S.tsMap.length; i++) S.tsMap[i].destroy();
+		if (S.ts && S.ts.destroy) S.ts.destroy();
+	},
+
 	init: async function (state, opts) {
 		var t0 = Date.now();
 		opts = opts || {};
+		// The world being replaced, if any: its arenas go before the new ones are created.
+		GpuSim.release();
 		var device = opts.device;
 		if (!device) {
 			// The parity rig wants SwiftShader (opts.fallback); the app wants real hardware
@@ -144,26 +166,26 @@ var GpuSim = {
 		device = await adapter.requestDevice(req);
 		}
 		var l = GpuSim.layout(state);
-	var S = { state: state, device: device, l: l, K: {}, warnings: [] };
-	GpuSim.device = device;
-	GpuSim.S = S;
-	// Timestamp ring (Phase I1): four resolve+map buffer pairs, so a collect reads
-	// the frame two submits back while the next two slots are still free - the map
-	// of a completed buffer returns in ms, well before the slot is reused.
-	// Usage bits are the WebGPU spec GPUBufferUsage values throughout this file:
-	// 0x1 MAP_READ, 0x2 MAP_WRITE, 0x4 COPY_SRC, 0x8 COPY_DST, 0x10 INDEX, 0x20 VERTEX,
-	// 0x40 UNIFORM, 0x80 STORAGE, 0x100 INDIRECT, 0x200 QUERY_RESOLVE. Bits above
-	// 0x200 are reserved: in Dawn 0x400 is the texel-buffer usage and fails
-	// CreateBuffer with "WGSLLanguageFeatureName::TexelBuffers is not enabled".
-	S.tsOn = false; S.ts = null; S.tsResolve = null; S.tsMap = null;
-	S.tsPassDesc = null; S.tsWrites = null;
-	S.tsSlotNames = new Int32Array(GpuSim.TS_MAX * 4);
-	S.tsSlotUsed = new Int32Array(4);
-	S.tsSlot = 0; S.tsRingI = 0; S.tsActive = false;
-	S.tsCollecting = false; S.tsValid = false;
-	S.tsNameTab = []; S.tsNameIdx = {};
-	S.tsMs = new Float64Array(GpuSim.TS_MAX);
-	try {
+		var S = { state: state, device: device, l: l, K: {}, warnings: [] };
+		GpuSim.device = device;
+		GpuSim.S = S;
+		// Timestamp ring (Phase I1): four resolve+map buffer pairs, so a collect reads
+		// the frame two submits back while the next two slots are still free - the map
+		// of a completed buffer returns in ms, well before the slot is reused.
+		// Usage bits are the WebGPU spec GPUBufferUsage values throughout this file:
+		// 0x1 MAP_READ, 0x2 MAP_WRITE, 0x4 COPY_SRC, 0x8 COPY_DST, 0x10 INDEX, 0x20 VERTEX,
+		// 0x40 UNIFORM, 0x80 STORAGE, 0x100 INDIRECT, 0x200 QUERY_RESOLVE. Bits above
+		// 0x200 are reserved: in Dawn 0x400 is the texel-buffer usage and fails
+		// CreateBuffer with "WGSLLanguageFeatureName::TexelBuffers is not enabled".
+		S.tsOn = false; S.ts = null; S.tsResolve = null; S.tsMap = null;
+		S.tsPassDesc = null; S.tsWrites = null;
+		S.tsSlotNames = new Int32Array(GpuSim.TS_MAX * 4);
+		S.tsSlotUsed = new Int32Array(4);
+		S.tsSlot = 0; S.tsRingI = 0; S.tsActive = false;
+		S.tsCollecting = false; S.tsValid = false;
+		S.tsNameTab = []; S.tsNameIdx = {};
+		S.tsMs = new Float64Array(GpuSim.TS_MAX);
+		try {
 		S.ts = device.createQuerySet({ type: 'timestamp', count: GpuSim.TS_MAX * 2 });
 		S.tsOn = true;
 		// Per slot: resolve lands in a QUERY_RESOLVE | COPY_SRC buffer, then a copy
@@ -179,9 +201,9 @@ var GpuSim = {
 		// descriptor (spec GPUComputePassTimestampWrites), never a per-frame literal.
 		S.tsWrites = { querySet: S.ts };
 		S.tsPassDesc = { timestampWrites: null };
-	} catch (e) {
+		} catch (e) {
 		S.tsOn = false;   // adapter without timestamp-query: wall-clock only
-	}
+		}
 		S.buf = {};
 		var sizes = { gridF: l.gridF * 4, gridI: l.gridI * 4, colF: l.colF * 4, colI: l.colI * 4,
 			plateF: l.plateF * 4, plateI: l.plateI * 4, cellF: l.cellF * 4, cellI: l.cellI * 4,
