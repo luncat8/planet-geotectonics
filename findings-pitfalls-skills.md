@@ -1047,3 +1047,99 @@ pipelines and staging buffers before building and keeps the device, so a level s
 costs one world's memory, not two. tests/gpu-play.js section 6 pins both halves - the
 first session's arenas and staging buffers destroyed, the new session live on the same
 device.
+
+## The pan never waits for the mouse: gate the step on the view version, not the pointer (2026-09-14)
+
+The owner's requirement after comparing the apply-pan-copy and old branches: the sim keeps
+running whenever the pointer is not moving, and resumption must never be tied to mouse-up.
+The old main behaviour (setPlaying(false) on pointerdown, setPlaying(true) on pointerup)
+paused the sim the instant the button went down - even for a still press - and held it until
+release, which is the bug the owner named. The fix is to make the frame loop own the pause:
+applyView() bumps a viewVersion (never `dirty` - a view move is a re-sample and repaint, not
+a recolour, and on the GPU engine it is the ordinary one-triangle draw), and the frame
+defers its step exactly when `viewVersion !== shownVersion` and the CPU engine must
+re-sample. The gate is a view move, so a held-still button pauses nothing, a resting pointer
+resumes on the next frame whether or not the mouse is still down, and the GPU engine -
+which projects per fragment and costs nothing for a view move - steps under the drag at all.
+One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop the
+`viewMoved` term from the gate and accept ~20 fps re-sample frames.
+	(The GPU half of that decision is superseded the same day, by the next entry: the GPU's
+	*draw* is free under a drag, but its *batch* carries the event round trip, and that is what
+	the owner felt. Both engines now defer while the view moves, and the gate has a hold.)
+	The re-sample itself is the cost being managed: 45 ms at L5 with Math.atan2/asin and
+	per-pixel cos/sin. The apply-pan-copy branch's minimax degree-11 atan2 (1.7e-6 rad off,
+	three orders under the ~3e-3 rad half-pixel margin) plus precomputed per-column/row
+	screen-angle tables and atan2 for the latitude (y over the horizontal length, replacing
+	asin) takes it to ~18 ms. The identity view must stay bit-for-bit the lookup (the parity
+	rig depends on it - it is, and tests/gui.js pins it pixel by pixel); a 56-degree rotated
+	view flips only a few dozen of 524,288 pixels against an exact-trig reference, and the
+	test bounds that at 4096 while asserting the bound is real (a pure-lon rotation flips
+	zero, so the pinned axis is oblique on purpose).
+	draw() now recolours the V-cell colour buffer and then calls paint(); paint() re-samples
+	the screen table (viewDirty) and paints the last colours. A view-only frame calls paint()
+	alone, so a drag while paused costs re-sample + ~3 ms of paint and never touches the
+	colour loop. Pinning that paint does not recolor needs a state change under the paint
+	(owner[cell] = -1 around it): recolouring from unchanged state is output-identical and
+	cannot be seen any other way, and a smooth layer (sediment) cannot pin the re-map either,
+	because a rotated cell's neighbour reads the same colour - plate identity is the layer
+	the rotation shuffles.
+	Click/drag split: DRAG_PX = 4 dead zone, and inside it pan.lastX/lastY stay at the press,
+	so the first real move composes from the press position - coalesced moves cannot drift
+	the view and the dead-zone wobble is replayed into the drag. The drag's own release-click
+	is suppressed (pan.suppressClick); a probe needs a fresh press-release, which is also
+	what a user does.
+	Test harness trap that silently ate a mutation check: the fake GpuRenderer in tests/gui.js
+	originally never sized its canvas, so mapRect got a zero width, beginPan bailed, and "the
+	GPU steps under an active drag" tested a drag that never happened - a gate regression on
+	the GPU path passed the test. The fake now mirrors the real GpuRenderer's canvas sizing
+	and setView, and the test additionally asserts the fake renderer was handed the moved
+	view (not just the boot view, which applyView at engine boot already sends).
+	Mutations caught: no resample gate (step runs on a moved frame), the old pause-on-down /
+	resume-on-up, no dead zone, rebuild resetting the view, paint recoloring from state, the
+	GPU gated by view moves, paint not re-sampling, and the view never reaching the GPU
+	renderer. All eight are caught by tests/gui.js as written.
+
+## The GPU drag stutter was the event round trip, and the view gate needs a hold (2026-09-14)
+
+	The owner's report: panning is smooth on the CPU engine and stutters on the GPU one "every N
+	times" during the drag, and disabling the sim until drag-end removes it. "Every N" is the
+	tell - N is `eventCadence / dt`, ten frames at the defaults, i.e. the event round trip. The
+	GPU engine deliberately stepped under a drag (its draw is one triangle, so a view move costs
+	it nothing), but a batch that contains the round trip does three things a drag cannot absorb:
+	the readback waits for the queue to drain (25.5 ms of the 28.5 ms measured on device), the
+	unpack and `Events.cycle` then run on the main thread with the pointer events queued behind
+	them, and the batch's compute is submitted ahead of the drag's draws, so the presented frame
+	waits for it too. Nothing in the pointer path is slow; the collision is the whole cost.
+	Fix: one gate for both engines, keyed to the view and never to the button - a frame defers
+	its step while the view is moving and for `VIEW_HOLD_FRAMES` (3) frames after it stops. The
+	hold is the part that is easy to miss and easy to drop: a drag whose pointermove stream is
+	thinner than the frame rate (a 60 Hz mouse on a 120 Hz display, coalesced moves under load)
+	leaves frames with no move in them, and a single empty frame is enough to let a batch - and
+	the round trip inside it - start mid-drag, so the stutter comes back at half rate instead of
+	going away. Three frames is ~50 ms at 60 Hz: under the threshold where a resume delay is
+	visible, wide enough to span a move stream at a third of the frame rate. Count frames, not
+	milliseconds: tests/dom-stub.js restarts the rAF `now` on every pump call, so an ms-based
+	hold never expires under the stub and the test silently measures a permanently paused sim;
+	a frame count is exact there and stretches with a slow frame rate in the browser, which is
+	when the protection is wanted most.
+	Second half, for the batch a drag catches mid-flight: `GpuSim.play(state, dt, n, hold)` polls
+	the page's predicate at its frame boundary and returns the frames it submitted. The boundary
+	is the only place a batch can see input at all - the steps between two round trips run in one
+	task, so a move lands during an await and the next iteration is the first code that can read
+	it - which is exactly where the remaining compute and the next round trip would otherwise be
+	queued under the pointer. It matters at 5 and 20 steps/frame, where one batch is many frames;
+	at 1 step/frame the frame gate already covers everything.
+	What was rejected, and why it stays rejected: letting the frames run and deferring only the
+	round trip advances sim time past the due date and collapses every skipped cycle into one
+	oversized span, so the trajectory would depend on whether the owner happened to be dragging
+	(a pause moves no sim time at all, which is why the deferral is the cheap correct move);
+	backgrounding the round trip is the dead end in the 2026-09-12 entry; and pausing on
+	pointerdown is the bug the entry above this one removed. An in-flight round trip cannot be
+	cancelled, so one hitch at the instant a drag starts is the residual - the gate removes the
+	recurrence, which is what was felt.
+	Mutations caught by the updated tests: `VIEW_HOLD_FRAMES = 0` (a one-frame gate), the old
+	CPU-only gate, the page not handing `play` the predicate, and `play` ignoring it. The last
+	one is pinned where the run is - tests/gpu-play.js plays 12 frames with a predicate that
+	closes after four, then plays the remaining 8, and requires the world to match one that ran
+	12 straight through (t, frame, `lastEvent`, plate map, hFel), i.e. the stop skips no cycle
+	and doubles none.

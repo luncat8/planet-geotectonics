@@ -1,7 +1,8 @@
 /* gpu/render-gpu.js - the GPU twin of render.js: same layers, same palettes, computed in a
    fragment shader that samples the lookup raster and reads the sim buffers directly, so a
-   frame needs no readback at all. One fullscreen-triangle draw per frame; the layer id rides
-   in a four-byte uniform. The CPU mirror stays one event cycle old (download runs there).
+   frame needs no readback at all. One fullscreen-triangle draw per frame; the layer id and
+   view quaternion ride a small uniform. The CPU mirror stays one event cycle old (download
+   runs there).
    The one exception is `init(state, { readback: true })`, which the parity rigs use to read
    their own pixels back through an offscreen texture - see initReadback. */
 // Like the kernel modules, this file runs both as a classic script (GpuSim is already a
@@ -13,13 +14,14 @@ var GpuRendererParams = typeof Params !== 'undefined' ? Params : require('../par
 function GpuRenderer(canvas) {
 	this.canvas = canvas;
 	this.layer = 0;
+	this.viewQ = new Float32Array([0, 0, 0, 1]);
 }
 
 GpuRenderer.LAYERS = { plate: 0, type: 1, z: 2, damage: 3, owner: 4, sediment: 5,
 	oVms: 10, oMaf: 11, oArc: 12, oOro: 13, oBas: 14, oPla: 15,
 	speed: 20, age: 21, force: 22, dir: 23, forceDir: 24 };
 
-GpuRenderer.SHADER = `struct U { layer: u32 };
+GpuRenderer.SHADER = `struct U { layer: u32, viewQ: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var<storage, read> LOOK: array<f32>;
 @group(0) @binding(2) var<storage, read> GRIDI: array<i32>;
@@ -83,6 +85,34 @@ fn speedToHsl(velocity: vec2<f32>, speedContrast: f32) -> vec3<f32> {
 	let normalizedSpeed = min(speed * 0.166666667, 1.0);
 	let lightness = 0.05 + 0.65 * pow(normalizedSpeed, speedContrast);
 	return vec3(dirHue(velocity), 0.90, lightness);
+}
+
+// The view quaternion maps a world direction into the displayed map. The shader applies
+// its conjugate to turn each output pixel back into a world direction before reading LOOK.
+fn worldDirection(screen: vec3<f32>) -> vec3<f32> {
+	let qx = -u.viewQ.x; let qy = -u.viewQ.y; let qz = -u.viewQ.z; let qw = u.viewQ.w;
+	let tx = 2.0 * (qy * screen.z - qz * screen.y);
+	let ty = 2.0 * (qz * screen.x - qx * screen.z);
+	let tz = 2.0 * (qx * screen.y - qy * screen.x);
+	return vec3(
+		screen.x + qw * tx + qy * tz - qz * ty,
+		screen.y + qw * ty + qz * tx - qx * tz,
+		screen.z + qw * tz + qx * ty - qy * tx);
+}
+
+fn sourceCell(px: u32, py: u32) -> u32 {
+	let lon = (f32(px) + 0.5) / f32(W) * 6.28318530718 - 3.14159265359;
+	let lat = 1.57079632679 - (f32(py) + 0.5) / f32(H) * 3.14159265359;
+	let cl = cos(lat);
+	let screen = vec3(cl * cos(lon), sin(lat), cl * sin(lon));
+	let world = worldDirection(screen);
+	let sourceLat = asin(clamp(world.y, -1.0, 1.0));
+	let sourceLon = atan2(world.z, world.x);
+	var sx = i32(floor((sourceLon / 6.28318530718 + 0.5) * f32(W)));
+	if (sx < 0) { sx = sx + i32(W); }
+	if (sx >= i32(W)) { sx = sx - i32(W); }
+	let sy = u32(clamp(floor((sourceLat / 3.14159265359 + 0.5) * f32(H)), 0.0, f32(H - 1u)));
+	return u32(LOOK[sy * W + u32(sx)]);
 }
 
 // Same branches and hues as Renderer.draw, evaluated per fragment.
@@ -172,7 +202,12 @@ struct Out { @location(0) color: vec4<f32> };
 @fragment fn fs(@builtin(position) pos: vec4<f32>) -> Out {
 	let x = u32(clamp(pos.x, 0.0, f32(W - 1u)));
 	let y = u32(clamp(pos.y, 0.0, f32(H - 1u)));
-	let c = u32(LOOK[(H - 1u - y) * W + x]);
+	var c: u32;
+	if (abs(u.viewQ.x) < 1e-7 && abs(u.viewQ.y) < 1e-7 && abs(u.viewQ.z) < 1e-7 && u.viewQ.w > 0.999999) {
+		c = u32(LOOK[(H - 1u - y) * W + x]);
+	} else {
+		c = sourceCell(x, y);
+	}
 	var o: Out;
 	o.color = vec4(cellColor(c, x, y) / 255.0, 1.0);
 	return o;
@@ -227,7 +262,11 @@ GpuRenderer.prototype.init = function (state, opts) {
 		S.buf.lookup = device.createBuffer({ size: g.lookup.length * 4, usage: 0x80 | 0x4 | 0x8 });
 		device.queue.writeBuffer(S.buf.lookup, 0, g.lookup);
 	}
-	this.uniform = device.createBuffer({ size: 16, usage: 0x40 | 0x8 });
+	this.uniform = device.createBuffer({ size: 32, usage: 0x40 | 0x8 });
+	this.uniformBytes = new ArrayBuffer(32);
+	this.layerWord = new Uint32Array(this.uniformBytes);
+	this.viewWord = new Float32Array(this.uniformBytes, 16, 4);
+	this.viewWord.set(this.viewQ);
 	var shaderModule = device.createShaderModule({ code: code });
 	var layout = device.createBindGroupLayout({ entries: [
 		{ binding: 0, visibility: 0x2, buffer: { type: 'uniform' } },
@@ -254,7 +293,6 @@ GpuRenderer.prototype.init = function (state, opts) {
 		vertex: { module: shaderModule, entryPoint: 'vs' },
 		fragment: { module: shaderModule, entryPoint: 'fs', targets: [{ format: this.format }] }
 	});
-	this.layerWord = new Uint32Array(4);
 	if (opts && opts.readback) this.initReadback(device);
 	return this;
 };
@@ -308,6 +346,16 @@ GpuRenderer.prototype.readPixels = async function () {
 	return bytes;
 };
 
+GpuRenderer.prototype.setView = function (qx, qy, qz, qw) {
+	var q = arguments.length === 1 ? qx : null;
+	if (q) { qy = q[1]; qz = q[2]; qw = q[3]; qx = q[0]; }
+	this.viewQ[0] = qx; this.viewQ[1] = qy; this.viewQ[2] = qz; this.viewQ[3] = qw;
+	if (this.viewWord) this.viewWord.set(this.viewQ);
+};
+GpuRenderer.prototype.resetView = function () {
+	this.setView(0, 0, 0, 1);
+};
+
 // One render pass into `view` with the layer uniform already written.
 GpuRenderer.prototype.passInto = function (enc, view) {
 	var pass = enc.beginRenderPass({ colorAttachments: [{
@@ -324,7 +372,7 @@ GpuRenderer.prototype.draw = function (layer) {
 	if (id === undefined) id = 0;
 	this.layerWord[0] = id;
 	var device = GpuSimRef.S.device;
-	device.queue.writeBuffer(this.uniform, 0, this.layerWord);
+	device.queue.writeBuffer(this.uniform, 0, this.uniformBytes);
 	var enc = device.createCommandEncoder();
 	if (!this.offscreen) {
 		this.passInto(enc, this.context.getCurrentTexture().createView());

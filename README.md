@@ -42,7 +42,14 @@ Open `index.html` directly in a browser.
 - Deposit extraction on demand: a one-cell blur of each potential, its ranked local maxima,
   and a context tag per deposit, dumped as JSON.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
-  views, plus a column probe and a plate-lineage/split/merge readout.
+  views, plus a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
+  the surface; the trackball view has no latitude/longitude clamp and slows horizontal motion
+  naturally near a pole. The sim never pauses for the pointer as such: a frame defers its step
+  only while the view is moving, and for `VIEW_HOLD_FRAMES` after it stops, on both engines — the CPU
+  frame that re-samples the view is ~18 ms heavier, and a GPU batch carrying the event round
+  trip holds the device queue and then the main thread long enough to stutter the drag. A
+  held-still pointer keeps the sim running; a resting pointer resumes it without waiting for the
+  release, and a batch the drag catches mid-flight stops at its next frame boundary.
 - Performance counter: smoothed fps, physics step time and per-kernel milliseconds, text
   rebuilt twice a second. Static geometric coefficients and bounded-vector length kernels keep
   the strict L5 Node proxy above 60 steps/s on the calibration host.

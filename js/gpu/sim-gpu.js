@@ -879,8 +879,17 @@ var GpuSim = {
 	// The play path: n frames and their round trips in one call, the same device command
 	// sequence as n step() calls. Returns the frames submitted, so the frame loop counts
 	// real work instead of requested work; Phase III turns the loop into one encoder.
-	play: async function (state, dt, n) {
+	// `hold` is the caller's optional "the view is moving" predicate. It is polled at the
+	// frame boundary, which is also the only place a batch can see input at all: the steps
+	// between two round trips run in one task, so a pointer move lands during an await and is
+	// visible to the next iteration. A drag that starts mid-batch therefore stops the batch
+	// there - the frames already submitted are in the queue, the rest wait for the pointer to
+	// rest, and the round trip the drag would have had to wait for never starts. Nothing is
+	// skipped or doubled: the next batch resumes at the same frame boundary and a due cycle
+	// still sees its span as state.t - state.lastEvent.
+	play: async function (state, dt, n, hold) {
 		for (var i = 0; i < n; i++) {
+			if (i > 0 && hold && hold()) return i;
 			await GpuSim.step(state, dt, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params);
 		}
 		return n;
