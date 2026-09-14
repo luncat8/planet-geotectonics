@@ -1,5 +1,5 @@
-/* clipboard.js - the "Copy" buttons on index.html and bench.html.
-   Both pages are opened over file://, where navigator.clipboard exists but its write can
+/* clipboard.js - the copy controls on index.html, bench.html and webgpu-smoke.html.
+   These pages are opened over file://, where navigator.clipboard exists but its write can
    still be rejected (no transient activation after an await, a locked-down profile), so the
    hidden-textarea path is kept as the fallback rather than as legacy support: it is the only
    one that works there. A capture the owner has to retype by hand is a capture that does not
@@ -27,17 +27,33 @@ var Clipboard = {
 		document.body.removeChild(area);
 		return ok;
 	},
-	// Wire a button to a text source and say whether it worked on the button itself.
-	bind: function (button, getText) {
-		if (!button) return null;
-		var label = button.textContent;
-		button.addEventListener('click', function () {
-			Clipboard.writeText(getText()).then(function (ok) {
-				button.textContent = ok ? 'Copied ✓' : 'Copy failed';
-				setTimeout(function () { button.textContent = label; }, 1200);
-			});
+	ACK_MS: 1200,
+	// Buttons use their label for acknowledgement; content controls can supply another style.
+	bind: function (element, getText, ack) {
+		if (!element) return null;
+		ack = ack || Clipboard.labelAck(element);
+		element.addEventListener('click', function () {
+			Clipboard.writeText(getText()).then(ack);
 		});
-		return button;
+		return element;
+	},
+	labelAck: function (button) {
+		var label = button.textContent;
+		return function (ok) {
+			button.textContent = ok ? 'Copied ✓' : 'Copy failed';
+			setTimeout(function () { button.textContent = label; }, Clipboard.ACK_MS);
+		};
+	},
+	classAck: function (element) {
+		var timer = 0;
+		return function (ok) {
+			var name = ok ? 'copied' : 'copy-failed';
+			clearTimeout(timer);
+			element.classList.remove('copied');
+			element.classList.remove('copy-failed');
+			element.classList.add(name);
+			timer = setTimeout(function () { element.classList.remove(name); }, Clipboard.ACK_MS);
+		};
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Clipboard;

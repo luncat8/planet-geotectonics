@@ -14,9 +14,9 @@
 				<fieldset id="layer" class="view-modes"><legend>View mode</legend>
 					<label><input type="radio" name="layer" value="plate" checked>Plate identity</label><label><input type="radio" name="layer" value="type">Boundary: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</label><label><input type="radio" name="layer" value="z">Elevation</label><label><input type="radio" name="layer" value="damage">Rift damage</label><label><input type="radio" name="layer" value="owner">Column coverage</label><label><input type="radio" name="layer" value="sediment">Sediment</label><label><input type="radio" name="layer" value="speed">Plate speed</label><label><input type="radio" name="layer" value="dir">Motion amount + direction</label><label><input type="radio" name="layer" value="age">Crust age</label><label><input type="radio" name="layer" value="force">Force amount</label><label><input type="radio" name="layer" value="forceDir">Force amount + direction</label><label><input type="radio" name="layer" value="oVms">Ore · VMS</label><label><input type="radio" name="layer" value="oMaf">Ore · mafic</label><label><input type="radio" name="layer" value="oArc">Ore · arc</label><label><input type="radio" name="layer" value="oOro">Ore · orogenic</label><label><input type="radio" name="layer" value="oBas">Ore · basin</label><label><input type="radio" name="layer" value="oPla">Ore · placer</label>
 				</fieldset></div>
-			<canvas id="map" aria-label="Equirectangular map of moving plates">Canvas support is required.</canvas>
-			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU)"></canvas>
-			<div class="perf" id="perf"><div class="rows" id="perf-rows"><span>performance counter idle</span></div><button id="copy-perf" class="copy" type="button" title="Copy the performance strip">Copy</button></div>
+			<canvas id="map" aria-label="Equirectangular map of moving plates; drag to pan">Canvas support is required.</canvas>
+			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU); drag to pan"></canvas>
+			<div class="perf" id="perf"><div class="rows" id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report" title="Click to copy the performance report"><span>performance counter idle</span></div></div>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
 			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button>

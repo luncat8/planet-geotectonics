@@ -1,7 +1,8 @@
 // The GPU play path on the stub device (tests/gpu-stub.js): no kernel runs here, so this
 // covers the JS side the browser rigs cannot see cheaply - the event round trip's partial
 // mirror transfer and the scheduling of frames around it. Level 3 keeps it under a second.
-//   1. play() and N step() calls leave the mirror identical and the cadence intact;
+//   1. play() and N step() calls leave the mirror identical and the cadence intact, and a
+//      batch stopped by the drag gate resumes into the same run;
 //   2. the event round trip ships only what Events.cycle touches: the cell and edge
 //      buffers on the device survive it untouched, so no stale cell state is ever pushed
 //      back over what the kernels computed;
@@ -71,6 +72,30 @@ function bytesOf(name) {
 	assert.equal(c.gpuDt, Math.fround(0.1), 'DIAG[D_DT] mirrors to state.gpuDt (f32 on the device)');
 	assert.equal(c.gpuAlpha, Math.fround(Math.min(1, 0.1 / Params.tauOmega)), 'DIAG[D_ALPHA] mirrors to state.gpuAlpha');
 	assert.equal(c.gpuRelaxErr, Math.fround(1.5e-7), 'DIAG[D_RELAXERR] mirrors to state.gpuRelaxErr');
+
+	// 1c. the drag gate. `play` polls an optional hold predicate at the frame boundary, which
+	// is the only point in a batch where the event loop runs at all (the steps between two
+	// round trips are one task), so a drag that starts mid-batch stops the batch there instead
+	// of queueing the rest of its compute - and the round trip that would have landed under the
+	// pointer. What the stop must not do is change the run: the frames it did not submit are
+	// the next batch's, and the world that stopped and resumed has to match the world that ran
+	// straight through, cadence included.
+	const held = world(23), plain = world(23);
+	await GpuSim.init(held, { device: makeDevice() });
+	let polls = 0;
+	const stopped = await GpuSim.play(held, DT, 12, function () { return ++polls >= 4; });
+	assert.equal(stopped, 4, 'the batch reports the frames it submitted, not the ones it was asked for');
+	assert.equal(held.frame, 4, 'and submitted exactly those');
+	assert.equal(polls, 4, 'the predicate is polled once per frame boundary after the first frame');
+	const resumed = await GpuSim.play(held, DT, 8);
+	await GpuSim.init(plain, { device: makeDevice() });
+	await GpuSim.play(plain, DT, 12);
+	assert.equal(resumed, 8, 'the rest of the batch is the next batch\'s work');
+	assert.equal(held.t, plain.t, 't');
+	assert.equal(held.frame, plain.frame, 'frame');
+	assert.equal(held.lastEvent, plain.lastEvent, 'lastEvent: the stop skipped no cycle and doubled none');
+	assert.deepEqual(Array.from(held.plate), Array.from(plain.plate), 'column to plate map');
+	assert.deepEqual(Array.from(held.hFel.subarray(0, held.n)), Array.from(plain.hFel.subarray(0, plain.n)), 'hFel');
 
 	// 2. the event round trip leaves the cell and edge buffers alone.
 	const s = world(11);
@@ -150,5 +175,6 @@ function bytesOf(name) {
 		}
 	}
 	console.log('PASS gpu-play: ' + FRAMES + ' frames, ' + cyclesPlayed + ' event cycles both paths, event round trip ships '
-		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer, re-init releases the replaced arenas');
+		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer, a batch the drag gate stopped resumes '
+		+ 'into the same run, re-init releases the replaced arenas');
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });

@@ -35,7 +35,17 @@ function El(tag, doc) {
 	this.selected = false;
 	this.clicks = 0;
 	this.puts = 0;
+	this.classes = [];
 	this._value = undefined;
+	var self = this;
+	this.classList = {
+		add: function (name) { if (self.classes.indexOf(name) < 0) self.classes.push(name); },
+		remove: function (name) {
+			var at = self.classes.indexOf(name);
+			if (at >= 0) self.classes.splice(at, 1);
+		},
+		contains: function (name) { return self.classes.indexOf(name) >= 0; }
+	};
 }
 // A select's value is its selected option's, and assigning one no option carries is refused -
 // exactly what a browser does, and the behaviour ui.js's load path relies on.
@@ -96,12 +106,22 @@ El.prototype.checkValidity = function () { return this.valid; };
 El.prototype.reportValidity = function () { this.reported++; return this.valid; };
 El.prototype.select = function () { this.selected = true; this.ownerDocument.activeElement = this; };
 El.prototype.setSelectionRange = function () {};
+// A 1:1 layout at the origin: canvas element pixels are CSS pixels, which is what a pointer
+// test needs to drive drags in map pixels (the page maps clientX through getBoundingClientRect).
+El.prototype.getBoundingClientRect = function () {
+	var w = this.width || 0, h = this.height || 0;
+	return { left: 0, top: 0, right: w, bottom: h, width: w, height: h, x: 0, y: 0 };
+};
+El.prototype.setPointerCapture = function (id) { this.captured = id; };
+El.prototype.releasePointerCapture = function (id) { if (this.captured === id) this.captured = undefined; };
 El.prototype.getContext = function (kind) {
 	if (kind !== '2d') return { configure: function () {}, getCurrentTexture: function () { return {}; } };
 	var self = this;
 	this.context = this.context || {
 		createImageData: function (w, h) { return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; },
-		putImageData: function () { self.puts++; }
+		// lastImage / lastPut let a test read what was actually placed: the pan tests assert
+		// on the painted pixels, not on a counter.
+		putImageData: function (image, dx, dy) { self.puts++; self.lastImage = image; self.lastPut = { dx: dx, dy: dy }; }
 	};
 	return this.context;
 };

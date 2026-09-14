@@ -18,18 +18,20 @@ p { font-size: 14px; line-height: 1.7; color: #aab9bd; margin: 10px 0 0; }
 .map-top, .map-bottom { display: flex; align-items: center; justify-content: space-between; padding: 10px; color: #97aab2; gap: 10px; }
 .map-top label { display: flex; align-items: center; gap: 10px; }
 .map-bottom { font-size: 9px; }
-canvas { display: block; cursor: crosshair; max-height: 60vh;}
+canvas { display: block; cursor: grab; max-height: 60vh; touch-action: none; user-select: none; }
 canvas[hidden] { display: none; }
-.perf { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 7px 10px;
-	color: #80d7b9;
+canvas:active { cursor: grabbing; }
+.perf { position: relative; color: #80d7b9;
 	font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 
 /* Reserve stable rows while allowing long diagnostics to scroll. */
-.perf .rows { display: grid; grid-auto-rows: 1.5em; gap: 2px; align-content: start; min-width: 0; }
+.perf .rows { display: grid; grid-auto-rows: 1.5em; gap: 2px; align-content: start; min-width: 0; padding: 7px 10px;
+	cursor: copy; outline-offset: -2px; transition: background-color .15s; }
+.perf .rows:hover { background: #16212c; }
+.perf .rows.copied { background: #1b3a30; }
+.perf .rows.copy-failed { background: #3a1f1f; }
 .perf .rows span { white-space: pre; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; min-width: 0; }
 .perf .rows span:last-child { color: #788c99; }
-.perf .copy { position: sticky; top: 0; flex: none; align-self: flex-start; min-height: 0; padding: 2px 9px;
-	font: inherit; font-size: 10px; letter-spacing: 0.6px; color: #80d7b9; background: #16212c; border-color: #2b3540; }
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 10px 0; border-bottom: 1px solid #2b3540; }
 .controls label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #aab9bd; }
 button, select, input { font: inherit; border: 1px solid #3c4b57; border-radius: 5px; background: #1a2632; color: #e1e8eb; padding: 10px 12px; min-height: 39px; }

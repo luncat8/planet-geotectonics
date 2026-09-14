@@ -17,7 +17,7 @@ var Perf = {
 	windowSteps: 0, lastFrame: 0, lastText: 0, text: '', detail: '',
 	// The strip's rows, rebuilt with `text` at 2 Hz: throughput, frame-gap distribution,
 	// event round trips, checkpoint, kernel table. One line of all of them is unreadable and
-	// unpasteable, so the HUD renders one row per entry and the copy button joins them.
+	// unpasteable, so the HUD renders one row per entry and the strip joins them when copied.
 	// Each part owns a fixed slot and `rows` is always SLOTS long ('' where the window has
 	// nothing to report), so the HUD can rewrite text in place: a part that appears or
 	// disappears - an event window, a checkpoint, the CPU engine's two empty transfer slots -
@@ -129,7 +129,7 @@ var Perf = {
 		Perf.rows[S.CKPT] = ckpt;
 		Perf.rows[S.KERNELS] = line;
 	},
-	// The block the strip's copy button puts on the clipboard: one line per part that has
+	// The block the strip puts on the clipboard: one line per part that has
 	// something to say, so a paste into a log or a chat keeps the parts separable instead of
 	// running them together - and carries no blank line for a reserved slot with nothing in it.
 	// `rows` defaults to the strip's own; the HUD passes its rows when it has substituted the

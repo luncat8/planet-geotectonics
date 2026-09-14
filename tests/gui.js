@@ -6,15 +6,22 @@
 //      against the old world's numbers;
 //   3. a checkpoint carries its own level and seed, and Load follows it instead of failing;
 //   4. the perf strip keeps one reserved slot per part and rewrites text in place, so the parts
-//      coming and going at 2 Hz cannot move the strip's height or the page under it;
+//      coming and going at 2 Hz cannot move the strip's height or the page under it; the whole
+//      strip is the copy control and acknowledgement never replaces those row nodes;
 //   5. every setting the page offers is one bench.html can measure - three owner-rig captures
-//      came back without the 20-step rows because the bench silently filtered its own default.
+//      came back without the 20-step rows because the bench silently filtered its own default;
+//   6. a pan turns the view under a running sim: the probe names the cell actually painted,
+//      a sub-4 px wobble is still a click, the sim runs under a held-still pointer and resumes
+//      once the pointer rests (the old bug paused on pointerdown and waited for mouse-up), the
+//      view outlives a rebuild, both engines defer a step while the view is moving - the GPU's
+//      batch carries the event round trip, which is the stutter a drag used to have - and a
+//      view-only frame repaints without recolouring.
 //
 // js/ui.js runs as a classic script against tests/dom-stub.js, which is built by parsing the
 // real index.html, and a recorded fake GpuSim: the device side of the engine is
 // tests/gpu-play.js's job, here the question is what the page does and in what order.
 // runInThisContext rather than a vm context on purpose - a context runs the same code ~6x
-// slower, and this test builds four worlds.
+// slower, and this test builds eight worlds.
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -75,6 +82,13 @@ assert.ok(/display: grid/.test(rowsCss) && /grid-auto-rows: 1\.5em/.test(rowsCss
 assert.ok(/white-space: pre;/.test(spanCss), 'a row does not wrap, so its height cannot depend on the width');
 assert.ok(/overflow-x: auto/.test(spanCss) && /scrollbar-width: none/.test(spanCss),
 	'a row that is too long scrolls instead of growing, and its scrollbar cannot eat the track');
+assert.ok(/cursor: copy/.test(rowsCss), 'the whole strip reads as a copy control');
+rule('.perf .rows.copied');
+rule('.perf .rows.copy-failed');
+assert.ok(!/id="copy-perf"/.test(indexHtml) && !/\.perf \.copy\b/.test(css),
+	'the separate Copy button is gone from the page and stylesheet');
+assert.ok(/id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report"/.test(indexHtml),
+	'the strip is focusable and announced as a copy button');
 assert.ok(/min-width: \d+px/.test(rule('.clock')), 'the header clock reserves its width');
 assert.ok(/min-height: [\d.]+em/.test(rule('#probe')), 'the column inspector reserves its lines');
 
@@ -106,8 +120,8 @@ function fakeGpu() {
 		},
 		release: function () { api.releases = (api.releases || 0) + 1; },
 		raster: function () { api.rasters++; },
-		play: function (state, dt, n) {
-			const rec = { state: state, dt: dt, n: n, settle: null };
+		play: function (state, dt, n, hold) {
+			const rec = { state: state, dt: dt, n: n, hold: hold, settle: null };
 			rec.promise = new Promise(function (resolve) { rec.settle = resolve; });
 			api.plays.push(rec);
 			return rec.promise;
@@ -120,8 +134,17 @@ function fakeGpu() {
 	};
 	return api;
 }
-function FakeRenderer(canvas) { this.canvas = canvas; this.draws = 0; }
-FakeRenderer.prototype.init = function (state) { this.state = state; return this; };
+// Mirrors the real GpuRenderer's canvas sizing and setView: a fake that leaves the canvas at
+// width 0 makes the page's mapRect bail out of every drag on the GPU canvas, which would turn
+// the GPU drag gate into a test of a drag that never happened.
+const fakeRenderers = [];
+function FakeRenderer(canvas) { this.canvas = canvas; this.draws = 0; this.views = []; fakeRenderers.push(this); }
+FakeRenderer.prototype.init = function (state) {
+	this.state = state;
+	this.canvas.width = state.grid.lookupW; this.canvas.height = state.grid.lookupH;
+	return this;
+};
+FakeRenderer.prototype.setView = function (q) { this.views.push(q.slice(0)); };
 FakeRenderer.prototype.draw = function () { this.draws++; };
 // FileReader is only ever asked for an ArrayBuffer the test already has.
 function FakeReader() { this.result = null; this.onload = null; }
@@ -147,7 +170,7 @@ function loadPage(search) {
 	const page = {
 		api: api, gpu: gpu, el: el, Perf: globalThis.Perf, Params: globalThis.Params,
 		strip: el('perf-rows'),
-		copy: () => { el('copy-perf').click(); return api.document.copied[api.document.copied.length - 1]; },
+		copy: () => { el('perf-rows').click(); return api.document.copied[api.document.copied.length - 1]; },
 		// The strip rewrites its text at 2 Hz (Perf.TEXT_MS) and the gap distribution reports
 		// only once it has 8 gaps inside a 1 s window, so a pump has to span both: 16.7 ms
 		// frames over ~1.5 s give three text updates and a full gap window.
@@ -190,14 +213,23 @@ function loadPage(search) {
 	assert.ok(/^(events|integrate|move|bin|raster|mantle|edges|contact|apply|column|surface|forces|reduce|diag) /
 		.test(strip.children[4].textContent), 'slot 4 kernel laps: ' + strip.children[4].textContent);
 
-	// --- the copy button: the capture header names the world it came from -----------------
+	// --- the strip is the copy control: the capture header names its world ----------------
 	const text = page.copy();
 	await page.tick();
 	assert.ok(text.startsWith('engine cpu · L5 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7'),
 		'copy header: ' + text.split('\n')[0]);
 	assert.ok(!/\n\n/.test(text) && !/\n$/.test(text), 'no blank line for a reserved-but-empty slot');
 	assert.ok(/\nt 0\.1 Myr · CPU · L5$/.test(text), 'the world line closes the report: ' + text.split('\n').pop());
-	assert.equal(el('copy-perf').textContent, 'Copied ✓', 'the button says whether the write landed');
+	assert.ok(strip.classList.contains('copied'), 'the strip acknowledges that the write landed');
+	assert.equal(strip.children.length, page.Perf.SLOTS, 'acknowledgement does not replace the report rows');
+	assert.equal(page.api.document.getElementById('copy-perf'), null, 'there is no separate Copy button');
+	let prevented = false, copies = page.api.document.copied.length;
+	strip.dispatch('keydown', { key: 'Enter', preventDefault: () => { prevented = true; } });
+	assert.ok(prevented, 'Enter suppresses its default action');
+	assert.equal(page.api.document.copied.length, copies + 1, 'Enter copies the strip');
+	copies = page.api.document.copied.length;
+	strip.dispatch('keydown', { key: ' ', preventDefault: () => {} });
+	assert.equal(page.api.document.copied.length, copies + 1, 'Space copies the strip');
 
 	// --- the Resolution select rebuilds the world, it does not relabel it -----------------
 	el('level').value = '6';
@@ -294,7 +326,241 @@ function loadPage(search) {
 	const stray = loadPage('?level=9');
 	assert.equal(stray.el('badge').textContent, 'CPU · L5', 'an unoffered ?level= is ignored');
 
+	// --- pan: the view turns under a running sim, and never waits for the mouse ------------
+	// A fresh page with an untouched world; the mirror worlds built here match the page's
+	// cell for cell (same grid, same seed, nothing stepped yet), so a painted pixel can be
+	// checked against the plate colour of the cell the probe names.
+	const panPage = loadPage('');
+	const pEl = panPage.el;
+	const map = pEl('map');
+	const TOTAL = 1024 * 512;
+	const world = (level, seed) => {
+		const s = new State(new Grid(level, seed).build(), seed);
+		Sim.raster(s);
+		return s;
+	};
+	const plateOf = (s) => {
+		const r = new Renderer({ getContext: () => ({
+			createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+			putImageData: () => {}
+		}) }, s);
+		r.draw('plate');
+		return r;
+	};
+	const countChanged = (a, b) => {
+		let n = 0;
+		for (let i = 0; i < a.length; i += 4)
+			if (a[i] !== b[i] || a[i + 1] !== b[i + 1] || a[i + 2] !== b[i + 2]) n++;
+		return n;
+	};
+	const mirror = plateOf(world(5, 7));
+
+	// A drag rotates the view, and the probe must name the cell actually painted under it.
+	panPage.pump(1);
+	const identity = map.lastImage.data.slice();
+	map.dispatch('pointerdown', { button: 0, pointerId: 1, clientX: 300, clientY: 250, currentTarget: map });
+	map.dispatch('pointermove', { pointerId: 1, clientX: 460, clientY: 250, currentTarget: map });
+	map.dispatch('pointerup', { pointerId: 1, currentTarget: map });
+	panPage.pump(1);
+	const dragged = map.lastImage.data.slice();
+	assert.ok(countChanged(identity, dragged) > 20000,
+		'the drag re-mapped the paint: ' + countChanged(identity, dragged) + ' of ' + TOTAL + ' pixels');
+	// The drag's own release-click is suppressed; a fresh press-release inspects the column.
+	map.dispatch('pointerdown', { button: 0, pointerId: 1, clientX: 460, clientY: 250, currentTarget: map });
+	map.dispatch('pointerup', { pointerId: 1, currentTarget: map });
+	map.dispatch('click', { clientX: 460, clientY: 250, currentTarget: map });
+	const probed = /^Cell (\d+)/.exec(pEl('probe').textContent);
+	assert.ok(probed, 'a click after the drag inspected a column: ' + pEl('probe').textContent);
+	const cell = +probed[1], p4 = (250 * 1024 + 460) * 4;
+	assert.deepEqual([map.lastImage.data[p4], map.lastImage.data[p4 + 1], map.lastImage.data[p4 + 2]],
+		[mirror.colors[cell * 3], mirror.colors[cell * 3 + 1], mirror.colors[cell * 3 + 2]],
+		'the painted pixel under the probe is that cell\'s plate colour');
+
+	// A press that never travels 4 px is the probe click, and the view does not move.
+	map.dispatch('pointerdown', { button: 0, pointerId: 2, clientX: 100, clientY: 100, currentTarget: map });
+	map.dispatch('pointermove', { pointerId: 2, clientX: 102, clientY: 101, currentTarget: map });
+	map.dispatch('pointerup', { pointerId: 2, currentTarget: map });
+	map.dispatch('click', { clientX: 102, clientY: 101, currentTarget: map });
+	assert.ok(/^Cell \d+/.test(pEl('probe').textContent), 'a 2 px wobble is still a probe click');
+	panPage.pump(1);
+	assert.equal(countChanged(dragged, map.lastImage.data), 0, 'the wobble did not move the view');
+
+	// The sim runs under a held-still pointer and resumes once the pointer rests: the gate is
+	// the view version, never the mouse button, and it stays closed for VIEW_HOLD_FRAMES after
+	// the last move. The hold is what makes the gate work on the GPU engine too: a drag whose
+	// moves arrive slower than its frames leaves empty frames, and an empty frame is where a
+	// batch - and the event round trip inside it - would slip in mid-drag.
+	panPage.pump(4);   // the drag above left the hold running; let it expire before counting
+	const tOf = () => +/^t (\d+\.\d) Myr/.exec(panPage.copy().split('\n').pop())[1];
+	pEl('play').click();
+	panPage.pump(3);
+	assert.equal(tOf(), 0.3, 'one step per frame, t at ' + tOf());
+	map.dispatch('pointerdown', { button: 0, pointerId: 3, clientX: 500, clientY: 300, currentTarget: map });
+	panPage.pump(1);
+	assert.equal(tOf(), 0.4, 'holding the pointer down without moving does not pause the sim');
+	map.dispatch('pointermove', { pointerId: 3, clientX: 560, clientY: 300, currentTarget: map });
+	panPage.pump(1);
+	assert.equal(tOf(), 0.4, 'the frame the view moves defers its step');
+	panPage.pump(2);
+	assert.equal(tOf(), 0.4, 'and so do its hold frames, so a move every other frame is still a drag');
+	map.dispatch('pointermove', { pointerId: 3, clientX: 560, clientY: 300, currentTarget: map });
+	panPage.pump(1);
+	assert.equal(tOf(), 0.5, 'a move event that does not turn the view is not a move: the sim resumes, button still down');
+	map.dispatch('pointermove', { pointerId: 3, clientX: 620, clientY: 300, currentTarget: map });
+	panPage.pump(3);
+	assert.equal(tOf(), 0.5, 'moving again closes the gate for the same hold');
+	panPage.pump(1);
+	assert.equal(tOf(), 0.6, 'and it opens again once the pointer rests');
+	map.dispatch('pointerup', { pointerId: 3, currentTarget: map });
+	panPage.pump(1);
+	assert.equal(tOf(), 0.7, 'and it keeps stepping after the release');
+	pEl('play').click();
+
+	// The view outlives the world: a rebuild must not reset the camera.
+	pEl('level').value = '6';
+	pEl('level').dispatch('change');
+	panPage.pump(1);
+	assert.equal(pEl('badge').textContent, 'CPU · L6');
+	const l6mirror = plateOf(world(6, 7));
+	const l6img = map.lastImage.data;
+	let stillIdentity = 0;
+	for (let i = 0; i < l6img.length; i += 4)
+		if (l6img[i] === l6mirror.image.data[i] && l6img[i + 1] === l6mirror.image.data[i + 1]
+			&& l6img[i + 2] === l6mirror.image.data[i + 2]) stillIdentity++;
+	assert.ok(stillIdentity < TOTAL * 0.5, 'the view survived the rebuild: ' + stillIdentity
+		+ ' of ' + TOTAL + ' pixels still read as the plain map');
+
+	// The GPU engine defers on the same gate and needs it more: its draw is one triangle, but a
+	// batch that contains the event round trip holds the device queue for the readback and then
+	// the main thread for the unpack and the cycle - one stutter per cadence under a drag. The
+	// gate is still the view, so a held-still pointer keeps stepping and a resting pointer
+	// resumes without waiting for the release; and a batch the drag catches mid-flight is
+	// handed the same predicate, so it stops at its next frame boundary (tests/gpu-play.js pins
+	// what stopping does to the run).
+	globalThis.navigator.gpu = { getPreferredCanvasFormat: () => 'bgra8unorm' };
+	pEl('engine').value = 'gpu';
+	pEl('engine').dispatch('change');
+	await panPage.tick();
+	assert.equal(pEl('badge').textContent, 'GPU · L6');
+	const gpuMap = pEl('mapgpu');
+	pEl('play').click();
+	panPage.pump(3);
+	const inFlight = panPage.gpu.plays[panPage.gpu.plays.length - 1];
+	inFlight.settle(inFlight.n);
+	await panPage.tick();
+	const playsBefore = panPage.gpu.plays.length;
+	gpuMap.dispatch('pointerdown', { button: 0, pointerId: 4, clientX: 200, clientY: 150, currentTarget: gpuMap });
+	panPage.pump(1);
+	assert.equal(panPage.gpu.plays.length, playsBefore + 1, 'a held-still pointer keeps the GPU engine stepping');
+	const heldStill = panPage.gpu.plays[playsBefore];
+	heldStill.settle(heldStill.n);
+	await panPage.tick();
+	gpuMap.dispatch('pointermove', { pointerId: 4, clientX: 280, clientY: 150, currentTarget: gpuMap });
+	panPage.pump(3);
+	assert.equal(panPage.gpu.plays.length, playsBefore + 1, 'no batch starts while the view moves or during its hold');
+	panPage.pump(1);
+	assert.equal(panPage.gpu.plays.length, playsBefore + 2, 'and one starts once the pointer rests, button still down');
+	const resumed = panPage.gpu.plays[playsBefore + 1];
+	resumed.settle(resumed.n);
+	await panPage.tick();
+	assert.equal(typeof resumed.hold, 'function', 'the batch was handed the view gate');
+	assert.equal(resumed.hold(), false, 'which reads open while the view rests');
+	gpuMap.dispatch('pointermove', { pointerId: 4, clientX: 340, clientY: 150, currentTarget: gpuMap });
+	assert.equal(resumed.hold(), true, 'and closed the moment the view moves, before any frame has counted it');
+	gpuMap.dispatch('pointerup', { pointerId: 4, currentTarget: gpuMap });
+	const fakeGpuRenderer = fakeRenderers[fakeRenderers.length - 1];
+	assert.ok(fakeGpuRenderer.views.length > 1, 'the dragged view was applied to the GPU renderer');
+	const viewBoot = fakeGpuRenderer.views[0], viewLast = fakeGpuRenderer.views[fakeGpuRenderer.views.length - 1];
+	assert.ok(viewBoot[0] !== viewLast[0] || viewBoot[1] !== viewLast[1] || viewBoot[2] !== viewLast[2],
+		'the GPU renderer sees the moved view, not the boot view');
+	pEl('play').click();
+
+	// --- the CPU renderer's view path, straight: fast re-sample, repaint without recolour ---
+	const g5 = new Grid(5, 7).build();
+	const s5 = new State(g5, 7);
+	Sim.raster(s5);
+	const ru = new Renderer({ getContext: () => ({
+		createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
+		putImageData: () => {}
+	}) }, s5);
+	ru.draw('plate');
+	ru.viewDirty = true;
+	ru.updateViewLookup();
+	let identBad = 0;
+	for (let i = 0; i < g5.lookup.length; i++) if (ru.viewLookup[i] !== g5.lookup[i]) identBad++;
+	assert.equal(identBad, 0, 'the identity re-sample is the lookup itself: ' + identBad + ' pixels off');
+
+	// A 56 degree rotation about an oblique axis: large enough that the plate colours
+	// genuinely shuffle, oblique enough that some pixels land within 1.7e-6 rad of a cell
+	// boundary (the flip count below must be nonzero, so the bound is real).
+	const avx = 0.087, avy = 0.021, avz = -0.053;
+	const an = Math.hypot(avx, avy, avz), a2 = 28 * Math.PI / 180;
+	const vx = avx / an * Math.sin(a2), vy = avy / an * Math.sin(a2), vz = avz / an * Math.sin(a2);
+	const vn = Math.cos(a2);
+	ru.setView(vx, vy, vz, vn);
+	assert.ok(ru.viewDirty, 'setView marks the re-sample');
+	const colorsBefore = ru.colors.slice();
+	const pixelsBefore = ru.image.data.slice();
+	// A state change under a view-only redraw must not leak in: paint() paints the last
+	// draw's colours, and the next draw() is what sees the new state. (A smooth layer like
+	// sediment cannot pin the re-map, because a rotated cell's neighbour reads the same colour;
+	// plate identity is what shuffles under the rotation.)
+	const c0 = s5.owner.findIndex((o) => o >= 0);
+	const owner0 = s5.owner[c0];
+	s5.owner[c0] = -1;
+	ru.paint();
+	s5.owner[c0] = owner0;
+	assert.ok(!ru.viewDirty, 'paint() consumes the re-sample');
+	assert.deepEqual(ru.colors, colorsBefore, 'a view move repaints, it does not recolor');
+	assert.ok(countChanged(pixelsBefore, ru.image.data) > TOTAL * 0.5, 'the rotated view re-mapped the paint');
+
+	// The fast atan must agree with exact trigonometry everywhere except within 1.7e-6 rad of
+	// a cell boundary: count the exceptions against an independent exact-trig reference.
+	const W = g5.lookupW, H = g5.lookupH, TAU = Math.PI * 2;
+	const rqx = -vx, rqy = -vy, rqz = -vz, rqw = vn;
+	let flips = 0;
+	for (let y = 0; y < H; y++) {
+		const lat = (0.5 - (y + 0.5) / H) * Math.PI, cl = Math.cos(lat), sy = Math.sin(lat);
+		for (let x = 0; x < W; x++) {
+			const lon = ((x + 0.5) / W - 0.5) * TAU;
+			const sx = cl * Math.cos(lon), sz = cl * Math.sin(lon);
+			const tx = 2 * (rqy * sz - rqz * sy), ty = 2 * (rqz * sx - rqx * sz), tz = 2 * (rqx * sy - rqy * sx);
+			const wx = sx + rqw * tx + rqy * tz - rqz * ty;
+			const wy = sy + rqw * ty + rqz * tx - rqx * tz;
+			const wz = sz + rqw * tz + rqx * ty - rqy * tx;
+			const sLat = Math.asin(Math.max(-1, Math.min(1, wy)));
+			const sLon = Math.atan2(wz, wx);
+			let sX = Math.floor((sLon / TAU + 0.5) * W);
+			if (sX < 0) sX += W;
+			if (sX >= W) sX -= W;
+			let sY = Math.floor((sLat / Math.PI + 0.5) * H);
+			if (sY < 0) sY = 0;
+			if (sY >= H) sY = H - 1;
+			if (ru.viewLookup[(H - 1 - y) * W + x] !== g5.lookup[sY * W + sX]) flips++;
+		}
+	}
+	assert.ok(flips <= 4096, 'fast-atan boundary exceptions: ' + flips + ' of ' + (W * H));
+	assert.ok(flips > 0, 'the bound is real, not a degenerate match');
+
+	ru.resetView();
+	ru.updateViewLookup();
+	let backBad = 0;
+	for (let i = 0; i < g5.lookup.length; i++) if (ru.viewLookup[i] !== g5.lookup[i]) backBad++;
+	assert.equal(backBad, 0, 'resetView returns the plain map, bit for bit: ' + backBad + ' pixels off');
+
+	// The minimax atan2 stays three orders under the half-pixel margin (~3e-3 rad).
+	let maxErr = 0;
+	for (let i = 0; i < 100000; i++) {
+		const x = Math.random() * 2 - 1, y = Math.random() * 2 - 1;
+		const e = Math.abs(Renderer.atan2Fast(y, x) - Math.atan2(y, x));
+		if (e > maxErr) maxErr = e;
+	}
+	assert.ok(maxErr < 3e-6, 'atan2Fast max error ' + maxErr + ' rad');
+
 	console.log('PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
-		+ page.Perf.SLOTS + ' slots in place, and the bench can measure every setting the page offers');
+		+ page.Perf.SLOTS + ' slots in place and is the copy control, the bench can measure every setting the page offers,'
+		+ ' and a pan turns the view under a running sim (probe agrees with the paint, the dead zone keeps the click,'
+		+ ' the sim never waits for the mouse, the view outlives a rebuild, both engines defer a step'
+		+ ' while the view moves and a GPU batch handed the gate stops at its frame boundary, paint never recolors)');
 })().catch((error) => { console.error(error); process.exit(1); });

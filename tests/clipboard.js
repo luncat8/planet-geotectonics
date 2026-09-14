@@ -1,8 +1,8 @@
-// Copy buttons (the strip in index.html, the table in bench.html) go through js/clipboard.js,
-// and every page in this repo has to work from file:// - where navigator.clipboard exists but
-// its write is routinely rejected. Both paths are therefore load bearing, and the one nobody
-// exercises (the textarea fallback) is the one that breaks silently in the rig the captures
-// actually come from.
+// The copy controls (the strip in index.html and buttons in bench.html/webgpu-smoke.html) go
+// through js/clipboard.js, and every page in this repo has to work from file:// - where
+// navigator.clipboard exists but its write is routinely rejected. Both paths are therefore
+// load bearing, and the one nobody exercises (the textarea fallback) is the one that breaks
+// silently in the rig the captures actually come from.
 const { assert } = require('./helpers.js');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +17,16 @@ function fakeButton(label) {
 		addEventListener: function (type, fn) { listeners[type] = fn; },
 		click: function () { listeners.click(); }
 	};
+}
+function fakeStrip() {
+	const strip = fakeButton('rows...');
+	strip.classes = [];
+	strip.classList = {
+		add: function (name) { if (!strip.classes.includes(name)) strip.classes.push(name); },
+		remove: function (name) { strip.classes = strip.classes.filter(function (entry) { return entry !== name; }); },
+		contains: function (name) { return strip.classes.includes(name); }
+	};
+	return strip;
 }
 
 // A body that tracks its children plus an activeElement - enough DOM for the fallback path.
@@ -60,8 +70,8 @@ function useNavigator(doc, clipboardApi) {
 	};
 }
 
-// Every page with a copy button loads the module before the file that binds the button -
-// index.html binds it in js/ui.js, bench.html and webgpu-smoke.html in an inline script.
+// Every page with a copy control loads the module before the file that binds it - index.html
+// binds the strip in js/ui.js; bench.html and webgpu-smoke.html bind buttons inline.
 for (const [page, consumer] of [['index.html', 'js/ui.js'], ['bench.html', '<script>'],
 	['webgpu-smoke.html', '<script>']]) {
 	const html = fs.readFileSync(path.join(__dirname, '..', page), 'utf8');
@@ -113,18 +123,37 @@ restore();
 // gap, which is also what makes the ordering visible: the fallback is a best effort, and the
 // transient activation it needs may already be gone by the time the refusal arrives.
 const doc2 = fakeDom();
-restore = useNavigator(doc2, { writeText: function () { return Promise.reject(new Error('denied')); } });
+const restoreRefused = useNavigator(doc2, { writeText: function () { return Promise.reject(new Error('denied')); } });
 const refusedBtn = fakeButton('Copy');
 Clipboard.bind(refusedBtn, function () { return 'x'; });
 refusedBtn.click();
 
+// The perf strip's text is content, so acknowledgement must not replace its row nodes.
+const stripDoc = fakeDom();
+const restoreStrip = useNavigator(stripDoc, null);
+const okStrip = fakeStrip(), deadStrip = fakeStrip();
+Clipboard.bind(okStrip, function () { return 'rows'; }, Clipboard.classAck(okStrip));
+okStrip.click();
+stripDoc.execCommand = function () { return false; };
+Clipboard.bind(deadStrip, function () { return 'rows'; }, Clipboard.classAck(deadStrip));
+deadStrip.click();
+restoreStrip();
+
 setTimeout(function () {
-	restore();
+	restoreRefused();
 	assert.equal(okBtn.textContent, 'Copied ✓', 'an accepted write reports success on the button');
 	assert.equal(legacyBtn.textContent, 'Copied ✓', 'so does the textarea path');
 	assert.equal(doc2.execCalls, 1, 'a refused async write falls back to the textarea');
 	assert.equal(refusedBtn.textContent, 'Copied ✓', 'and reports the fallback, not the refusal');
 	assert.equal(deadBtn.textContent, 'Copy failed', 'a write that fails both ways is reported');
-	console.log('PASS clipboard: async write, file:// textarea fallback (created, readonly, selected, '
-		+ 'removed), refusal falls back, both-ways failure reported, all three pages load the module');
+	assert.equal(okStrip.textContent, 'rows...', 'class acknowledgement leaves strip content alone');
+	assert.deepEqual(okStrip.classes, ['copied'], 'the strip reports a successful write');
+	assert.deepEqual(deadStrip.classes, ['copy-failed'], 'the strip also reports a failed write');
+	setTimeout(function () {
+		assert.deepEqual(okStrip.classes, [], 'the success acknowledgement expires');
+		assert.deepEqual(deadStrip.classes, [], 'the failure acknowledgement expires');
+		console.log('PASS clipboard: async write, file:// textarea fallback (created, readonly, selected, '
+			+ 'removed), refusal falls back, both-ways failure reported, content-safe class acknowledgement, '
+			+ 'all three pages load the module');
+	}, Clipboard.ACK_MS + 20);
 }, 0);
