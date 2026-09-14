@@ -1,4 +1,4 @@
-:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #101720; color: #e1e8eb; }
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #363636; color: #e1e8eb; }
 * { box-sizing: border-box; }
 body { margin: 0; }
 header { display: flex; justify-content: space-between; align-items: center; padding: 10px 5%; border-bottom: 1px solid #2b3540; }
@@ -9,29 +9,22 @@ main { padding: 8px; }
 .heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 10px; }
 h1 { margin: 0; font-size: clamp(26px, 4vw, 44px); font-weight: 500; letter-spacing: -1.5px; }
 p { font-size: 14px; line-height: 1.7; color: #aab9bd; margin: 10px 0 0; }
-/* The header's other variable-size readout: the status line's numbers grow (9.98 -> 10.02
-   cm/yr, 9 -> 40 plates) and space-between then shoves the badge sideways every 150 ms.
-   Tabular digits plus a width reserved for the longest line the sim writes hold it still. */
+
+/* Reserve space for variable-width status values. */
 .clock { text-align: right; min-width: 300px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .clock strong { display: block; font-size: 18px; font-weight: 400; }
 .clock span { display: block; color: #8ba0aa; font-size: 12px; margin-top: 5px; }
-.map-panel { border: 1px solid #35424b; border-radius: 8px; overflow: hidden; background: #141d27; }
+.map-panel { border-radius: 8px; overflow: hidden; }
 .map-top, .map-bottom { display: flex; align-items: center; justify-content: space-between; padding: 10px; color: #97aab2; gap: 10px; }
 .map-top label { display: flex; align-items: center; gap: 10px; }
 .map-bottom { font-size: 9px; }
 canvas { display: block; cursor: crosshair; max-height: 60vh;}
 canvas[hidden] { display: none; }
 .perf { position: relative; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 7px 10px;
-	border-top: 1px solid #2b3540; background: #101922; color: #80d7b9;
+	color: #80d7b9;
 	font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
-/* One row per part of the report (throughput, frame-gap distribution, event round trips,
-   checkpoint, kernel table): a single wrapped line is unreadable and pastes as one run-on
-   string. The box is a reserved size - Perf.SLOTS line tracks of one line each, rewritten in
-   place at 2 Hz - because the parts come and go (an event window, a checkpoint, the CPU
-   engine's two empty transfer slots) and a strip that grew moved the controls and the notes
-   under it twice a second. Rows scroll rather than wrap, so the height cannot depend on the
-   window width either; the scrollbar stays hidden because one would eat the line track it sits
-   in, and the Copy button carries every row's full text. */
+
+/* Reserve stable rows while allowing long diagnostics to scroll. */
 .perf .rows { display: grid; grid-auto-rows: 1.5em; gap: 2px; align-content: start; min-width: 0; }
 .perf .rows span { white-space: pre; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; min-width: 0; }
 .perf .rows span:last-child { color: #788c99; }
@@ -49,13 +42,12 @@ input { width: 100px; }
 .notes { display: grid; grid-template-columns: 1.25fr 1fr; gap: 50px; margin-top: 8px; }
 h2 { color: #d4dfdf; text-transform: uppercase; font-weight: 500; }
 .muted { color: #788c99; font-size: 12px; }
-/* The inspector goes from one line to five the first time the map is clicked; reserving the
-   five lines keeps a click from lengthening the page and summoning a scrollbar. */
+
+/* Reserve inspector space to prevent page layout shifts. */
 #probe { white-space: pre-line; min-height: 8.5em; }
 @media (max-width: 640px) { main { padding: 24px 14px; } .notes { grid-template-columns: 1fr; gap: 16px; } .map-top { flex-wrap: wrap; } .map-bottom span:nth-child(2) { display: none; } .clock { min-width: 0; white-space: normal; } .clock strong { font-size: 20px; } }
-/* The map modes stay visible: switching layers is one click and the boundary key lives with
-   the mode it explains instead of masquerading as map coordinates. */
-header { padding: 5px 10px; }
+
+/* Keep layer controls and the boundary key visible together. */
 .clock { display: flex; align-items: baseline; justify-content: flex-end; gap: 14px; min-width: 0; }
 .clock strong, .clock span { display: inline; margin: 0;  }
 .map-top { display: grid; grid-template-columns: auto 1fr; align-items: start; padding: 6px 10px; }

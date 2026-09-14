@@ -1,0 +1,69 @@
+level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+L5	1	10,242	8.025	5.6	27.8	44.4	73/633	12.6
+L5	5	10,242	7.184	12.1	72.3	77.8	66/141	13.9
+L5	20	10,242	7.204	155.6	161.1	161.1	0/36	14.1
+L6	1	40,962	21.480	16.6	94.4	144.4	24/243	4.8
+L6	5	40,962	19.537	188.1	200.0	205.5	0/50	5.0
+L6	20	40,962	19.924	416.6	444.5	450.0	0/13	4.9
+kernels: winners 1.82 loserRank 1.02 diagC 0.59 diagA 0.31 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15
+
+BENCH engine=gpu ts=on levels=5,6 steps=1,5,20 dt=0.1
+BENCH L5 steps=1 iso ms/step=8.025 smooth med=5.6 p95=27.8 max=44.4 hitches=73 frames=633 myr/s=12.6
+BENCH L5 steps=5 iso ms/step=7.184 smooth med=12.1 p95=72.3 max=77.8 hitches=66 frames=141 myr/s=13.9
+BENCH L5 steps=20 iso ms/step=7.204 smooth med=155.6 p95=161.1 max=161.1 hitches=0 frames=36 myr/s=14.1
+BENCH L6 steps=1 iso ms/step=21.480 smooth med=16.6 p95=94.4 max=144.4 hitches=24 frames=243 myr/s=4.8
+BENCH L6 steps=5 iso ms/step=19.537 smooth med=188.1 p95=200.0 max=205.5 hitches=0 frames=50 myr/s=5.0
+BENCH L6 steps=20 iso ms/step=19.924 smooth med=416.6 p95=444.5 max=450.0 hitches=0 frames=13 myr/s=4.9
+BENCH kernels: winners 1.82 loserRank 1.02 diagC 0.59 diagA 0.31 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15
+BENCH done
+
+Chrome 151
+[boot] adapter (hardware) nvidia/ampere,features: depth32float-stencil8,rg11b10ufloat-renderable,texture-formats-tier1,bgra8unorm-storage,texture-compression-bc,dual-source-blending,core-features-and-limits,float32-filterable,indirect-first-instance,float32-blendable,depth-clip-control,texture-compression-bc-sliced-3d,timestamp-query,texture-formats-tier2,shader-f16,clip-distances,primitive-index,texture-component-swizzle,subgroups | ts-query: yes
+[init] GpuSim.init ok in 126 ms, tsOn=true, queries=140
+[parity] frame 5 dt 0.1 · n cpu=10242 gpu=10242 · plates cpu=16 gpu=16 · owner mismatch 0/10242 · |dz| max 139.0 m
+[parity] meanSpeed cpu=4.022 gpu=4.947 cm/yr · maxSpeed cpu=11.449 gpu=13.026 cm/yr
+[parity] omega relaxation: mean |omega|/|omegaTarget| cpu 0.837 gpu 0.973 over 16 plates · p1 cpu 0.943 gpu 0.991 · p2 cpu 0.691 gpu 0.966 · p3 cpu 0.871 gpu 0.828 · p4 cpu 0.863 gpu 1.167
+[parity] omega: worst |dR*w| plate 14 = 2.053 cm/yr · cpu from relaxed omega 4.022/11.449 · cpu from target omega 5.040/13.052 · gpu 4.947/13.026
+[parity] device K10: dt 0.100000 (uploaded 0.1) · alpha 0.200000 (expected 0.200000) · worst |stored - relaxed| omega 0.00e+0 rad/Myr
+[FAIL] meanSpeed drift > 20% (cpu 4.022 vs gpu 4.947 cm/yr)
+[FAIL] D1: the device carries the unrelaxed fit (its |omega|/|omegaTarget| is 0.973, the CPU's 0.837) while dt, alpha and the stored omega all say the relaxation ran
+[events] frame 20 t=2.0 Myr · plates 16 · columns 10210 · finite=true
+[ts] tsCollect 1 ms · winners 0.49 diagC 0.46 loserRank 0.34 diagA 0.21 ledgerReduceA 0.15
+[render] canvas 1024x512 · format bgra8unorm · row 4096 · readback 2097152 B · cpu ref 2097152 B
+[FAIL] readback short on layer plate: 0 of 2097152 bytes
+[FAIL] readback short on layer type: 0 of 2097152 bytes
+[FAIL] readback short on layer z: 0 of 2097152 bytes
+[FAIL] readback short on layer damage: 0 of 2097152 bytes
+[FAIL] readback short on layer owner: 0 of 2097152 bytes
+[FAIL] readback short on layer sediment: 0 of 2097152 bytes
+[FAIL] readback short on layer speed: 0 of 2097152 bytes
+[FAIL] readback short on layer age: 0 of 2097152 bytes
+[FAIL] readback short on layer force: 0 of 2097152 bytes
+[FAIL] readback short on layer dir: 0 of 2097152 bytes
+[FAIL] readback short on layer oVms: 0 of 2097152 bytes
+[FAIL] readback short on layer oMaf: 0 of 2097152 bytes
+[FAIL] readback short on layer oArc: 0 of 2097152 bytes
+[FAIL] readback short on layer oOro: 0 of 2097152 bytes
+[FAIL] readback short on layer oBas: 0 of 2097152 bytes
+[FAIL] readback short on layer oPla: 0 of 2097152 bytes
+[render] GPU renderer drew all 16 layers, pixel-parity checked (map below: dir)
+[errors] captured console/webgpu errors: 32
+  webgpu uncaptured: [Texture (unlabeled 1024x512 px, TextureFormat::BGRA8Unorm)] usage (TextureUsage::(TextureBinding|RenderAttachment)) doesn't include TextureUsage::CopySrc.
+   - While validating source [Texture (unlabeled 1024x512 px, TextureFormat::BGRA8Unorm)] usage.
+   - While [Failed to format error message: "encoding %s.CopyTextureToBuffer(%s, %s, %s)."].
+   - While finishing [CommandEncoder (unlabeled)].
+  
+  webgpu uncaptured: [Invalid CommandBuffer] is invalid due to a previous error.
+   - While calling [Queue].Submit([[Invalid CommandBuffer]])
+  
+  webgpu uncaptured: [Texture (unlabeled 1024x512 px, TextureFormat::BGRA8Unorm)] usage (TextureUsage::(TextureBinding|RenderAttachment)) doesn't include TextureUsage::CopySrc.
+   - While validating source [Texture (unlabeled 1024x512 px, TextureFormat::BGRA8Unorm)] usage.
+   - While [Failed to format error message: "encoding %s.CopyTextureToBuffer(%s, %s, %s)."].
+   - While finishing [CommandEncoder (unlabeled)].
+
+....
+  
+[FAIL] webgpu/page errors captured (see above)
+[result] FAIL (19)
+[result] total wall 1404 ms
+[log] copied 67 lines to the clipboard
