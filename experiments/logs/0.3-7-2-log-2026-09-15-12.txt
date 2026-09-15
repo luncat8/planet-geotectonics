@@ -1,0 +1,102 @@
+[boot] 2026-09-15 12:47 · chrome 151 · win x86_64
+[boot] gpu hardware nvidia · ts-query yes
+[init] GpuSim.init ok in 87 ms, tsOn=true, queries=140
+[parity] D1 boot M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 boot rhs/A0[0] rel p1 8.2e-8 p2 3.6e-7 p3 3.9e-8 p4 2.0e-7 p5 7.1e-7 p6 3.3e-7 p7 4.4e-8 p8 2.1e-7 p9 1.5e-6 p10 1.0e-7 p11 9.9e-7 p12 5.1e-7 p13 1.1e-7 p14 4.5e-7 p15 3.9e-7 p16 3.9e-7 · worst p9 1.5e-6
+[parity] D1 boot fit (omegaTarget) rel p1 2.2e-7 p2 4.3e-7 p3 9.1e-8 p4 1.9e-7 p5 3.2e-7 p6 1.3e-7 p7 1.8e-7 p8 2.5e-7 p9 1.4e-6 p10 1.1e-7 p11 4.8e-7 p12 6.8e-7 p13 1.2e-7 p14 5.4e-7 p15 3.4e-7 p16 3.9e-7 · worst p9 1.4e-6
+[parity] D1 boot omega rel p1 2.2e-7 p2 4.3e-7 p3 9.1e-8 p4 1.9e-7 p5 3.2e-7 p6 1.3e-7 p7 1.8e-7 p8 2.5e-7 p9 1.4e-6 p10 1.1e-7 p11 4.8e-7 p12 6.8e-7 p13 1.2e-7 p14 5.4e-7 p15 3.4e-7 p16 3.9e-7 · worst p9 1.4e-6
+[parity] D1 boot uMantle: worst rel 2.6e-5 (|d| 1.84e-2 m/Myr @c6214) · worst |d| 2.24e-1 m/Myr @c2056 (rel 3.8e-6)
+[parity] D1 boot wEq: worst rel 6.1e-4 (|d| 4.78e-1 m/Myr @c9542) · worst |d| 4.84e-1 m/Myr @c1684 (rel 7.9e-6)
+[parity] frame 5 dt 0.1 · n cpu=10242 gpu=10242 · plates cpu=16 gpu=16 · owner mismatch 0/10242 · |dz| max 307.4 m
+[parity] meanSpeed cpu=4.022 gpu=2.940 cm/yr · maxSpeed cpu=11.449 gpu=8.628 cm/yr
+[parity] omega relaxation: mean |omega|/|omegaTarget| cpu 0.837 gpu 1.000 over 16 plates · p1 cpu 0.943 gpu 1.000 · p2 cpu 0.691 gpu 1.000 · p3 cpu 0.871 gpu 1.000 · p4 cpu 0.863 gpu 1.000
+[parity] omega: worst |dR*w| plate 16 = 5.258 cm/yr · cpu from relaxed omega 4.022/11.449 · cpu from target omega 5.040/13.052 · gpu 2.940/8.628
+[parity] device K10: dt 0.100000 (uploaded 0.1) · alpha 0.200000 (expected 0.200000) · worst |stored - relaxed| omega 0.00e+0 rad/Myr
+[parity] D1 frame 5 M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 frame 5 rhs/A0[0] rel p1 1.9e-1 p2 1.3e+0 p3 3.3e-1 p4 5.0e-1 p5 1.4e+0 p6 4.6e-1 p7 4.0e-1 p8 5.6e-1 p9 1.2e+0 p10 4.9e-1 p11 5.2e-1 p12 3.0e-1 p13 1.9e-1 p14 6.2e-1 p15 4.7e-1 p16 4.7e-1 · worst p5 1.4e+0
+[parity] D1 frame 5 fit (omegaTarget) rel p1 3.8e-1 p2 9.1e-1 p3 5.8e-1 p4 4.9e-1 p5 8.9e-1 p6 3.9e-1 p7 4.3e-1 p8 3.8e-1 p9 1.2e+0 p10 4.8e-1 p11 3.0e-1 p12 1.5e+0 p13 5.4e-1 p14 7.7e-1 p15 3.0e-1 p16 4.7e-1 · worst p12 1.5e+0
+[parity] D1 frame 5 omega rel p1 2.8e-1 p2 8.3e-1 p3 4.4e-1 p4 3.9e-1 p5 6.5e-1 p6 2.9e-1 p7 3.0e-1 p8 2.9e-1 p9 1.3e+0 p10 3.7e-1 p11 2.2e-1 p12 9.1e-1 p13 4.5e-1 p14 7.1e-1 p15 2.4e-1 p16 3.9e-1 · worst p9 1.3e+0
+[parity] D1 frame 5 uMantle: worst rel 1.2e+0 (|d| 2.04e+3 m/Myr @c1571) · worst |d| 3.57e+3 m/Myr @c872 (rel 4.8e-2)
+[parity] D1 frame 5 wEq: worst rel 1.8e+0 (|d| 9.86e+2 m/Myr @c9027) · worst |d| 2.17e+6 m/Myr @c1644 (rel 9.9e-1)
+[FAIL] D1 (frame 5) layer = INPUTS: uMantle/wEq diverge before the plate solve (worst rel uMantle 1.2e+0, wEq 1.8e+0 > 0.001) - the mantle/forces field kernels disagree
+[FAIL] meanSpeed drift > 20% (cpu 4.022 vs gpu 2.940 cm/yr)
+[FAIL] D1: 20% gate tripped - the layer diff names INPUTS (see the D1 frame 5 table above); that is the next decision point
+[events] frame 20 t=2.0 Myr · plates 16 · columns 10242 · finite=true
+[ts] tsCollect 4 ms · no kernel timing
+[render] canvas 1024x512 · format bgra8unorm · row 4096 · readback 2097152 B · cpu ref 2097152 B
+[FAIL] readback short on layer plate: 0 of 2097152 bytes
+[FAIL] readback short on layer type: 0 of 2097152 bytes
+[FAIL] readback short on layer z: 0 of 2097152 bytes
+[FAIL] readback short on layer damage: 0 of 2097152 bytes
+[FAIL] readback short on layer owner: 0 of 2097152 bytes
+[FAIL] readback short on layer sediment: 0 of 2097152 bytes
+[FAIL] readback short on layer speed: 0 of 2097152 bytes
+[FAIL] readback short on layer age: 0 of 2097152 bytes
+[FAIL] readback short on layer force: 0 of 2097152 bytes
+[FAIL] readback short on layer dir: 0 of 2097152 bytes
+[FAIL] readback short on layer oVms: 0 of 2097152 bytes
+[FAIL] readback short on layer oMaf: 0 of 2097152 bytes
+[FAIL] readback short on layer oArc: 0 of 2097152 bytes
+[FAIL] readback short on layer oOro: 0 of 2097152 bytes
+[FAIL] readback short on layer oBas: 0 of 2097152 bytes
+[FAIL] readback short on layer oPla: 0 of 2097152 bytes
+[render] GPU renderer drew 16 layers; pixel-parity actually compared 0/16 - 16 compared nothing (readback failures above)
+[errors] captured console/webgpu errors: 6
+  webgpu uncaptured: Source and destination are the same buffer ([Buffer (unlabeled)]).
+   - While encoding [CommandEncoder (unlabeled)].CopyBufferToBuffer([Buffer (unlabeled)], 2048, [Buffer (unlabeled)], 0, 296).
+   - While finishing [CommandEncoder (unlabeled)].
+  
+  webgpu uncaptured: [Invalid CommandBuffer] is invalid due to a previous error.
+   - While calling [Queue].Submit([[Invalid CommandBuffer]])
+  
+  webgpu uncaptured: Source and destination are the same buffer ([Buffer (unlabeled)]).
+   - While encoding [CommandEncoder (unlabeled)].CopyBufferToBuffer([Buffer (unlabeled)], 2560, [Buffer (unlabeled)], 0, 296).
+   - While finishing [CommandEncoder (unlabeled)].
+  
+  webgpu uncaptured: [Invalid CommandBuffer] is invalid due to a previous error.
+   - While calling [Queue].Submit([[Invalid CommandBuffer]])
+  
+  webgpu uncaptured: Source and destination are the same buffer ([Buffer (unlabeled)]).
+   - While encoding [CommandEncoder (unlabeled)].CopyBufferToBuffer([Buffer (unlabeled)], 4096, [Buffer (unlabeled)], 0, 296).
+   - While finishing [CommandEncoder (unlabeled)].
+  
+  webgpu uncaptured: [Invalid CommandBuffer] is invalid due to a previous error.
+   - While calling [Queue].Submit([[Invalid CommandBuffer]])
+  
+[FAIL] webgpu/page errors captured (see above)
+[result] FAIL (20)
+[result] total wall 1124 ms
+[log] copied 53 lines to the clipboard
+
+
+
+2026-09-15 12:48 · chrome 151 · win x86_64 · gpu hardware nvidia
+level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+L5	1	10,242	6.825	5.6	16.6	27.8	44/806	16.1
+L5	5	10,242	0.172	5.6	11.1	59.9	40/802	80.1
+L5	20	10,242	0.144	16.7	33.3	100.0	9/258	103.1
+L6	1	40,962	21.115	16.6	105.5	138.9	24/250	5.0
+L6	5	40,962	0.172	11.7	32.4	66.1	38/392	39.0
+L6	20	40,962	0.142	33.3	66.7	116.7	6/130	51.5
+L5 steps=1: winners 0.80 loserRank 0.21 ledgerReduceA 0.15
+L5 steps=5: winners 1.03 loserRank 0.28 ledgerReduceA 0.21 subRateA 0.08
+L5 steps=20: winners 1.02 loserRank 0.26 ledgerReduceA 0.21 subRateA 0.07
+L6 steps=1: winners 3.19 loserRank 0.54 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15 gaps 0.10
+L6 steps=5: winners 3.03 loserRank 0.61 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15
+L6 steps=20: winners 7.52 loserRank 1.08 subRateA 0.84 ledgerReduceA 0.69 reduceA 0.67 polarity 0.18 extension 0.11 resolve 0.11 relatives 0.07 overlaps 0.07
+
+BENCH engine=gpu ts=on levels=5,6 steps=1,5,20 dt=0.1 diag=on-demand
+BENCH rig 2026-09-15 12:47 · chrome 151 · win x86_64 · gpu hardware nvidia
+BENCH L5 steps=1 kernels: winners 0.80 loserRank 0.21 ledgerReduceA 0.15
+BENCH L5 steps=1 iso ms/step=6.825 smooth med=5.6 p95=16.6 max=27.8 hitches=44 frames=806 myr/s=16.1
+BENCH L5 steps=5 kernels: winners 1.03 loserRank 0.28 ledgerReduceA 0.21 subRateA 0.08
+BENCH L5 steps=5 iso ms/step=0.172 smooth med=5.6 p95=11.1 max=59.9 hitches=40 frames=802 myr/s=80.1
+BENCH L5 steps=20 kernels: winners 1.02 loserRank 0.26 ledgerReduceA 0.21 subRateA 0.07
+BENCH L5 steps=20 iso ms/step=0.144 smooth med=16.7 p95=33.3 max=100.0 hitches=9 frames=258 myr/s=103.1
+BENCH L6 steps=1 kernels: winners 3.19 loserRank 0.54 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15 gaps 0.10
+BENCH L6 steps=1 iso ms/step=21.115 smooth med=16.6 p95=105.5 max=138.9 hitches=24 frames=250 myr/s=5.0
+BENCH L6 steps=5 kernels: winners 3.03 loserRank 0.61 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15
+BENCH L6 steps=5 iso ms/step=0.172 smooth med=11.7 p95=32.4 max=66.1 hitches=38 frames=392 myr/s=39.0
+BENCH L6 steps=20 kernels: winners 7.52 loserRank 1.08 subRateA 0.84 ledgerReduceA 0.69 reduceA 0.67 polarity 0.18 extension 0.11 resolve 0.11 relatives 0.07 overlaps 0.07
+BENCH L6 steps=20 iso ms/step=0.142 smooth med=33.3 p95=66.7 max=116.7 hitches=6 frames=130 myr/s=51.5
+BENCH done
