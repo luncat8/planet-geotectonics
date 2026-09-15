@@ -27,6 +27,11 @@ var GpuSim = {
 	// Workgroup sizes are fixed per kernel family; SwiftShader caps at 256 invocations.
 	WG: 128,
 	ELEMS: 1024,
+	// Phase V batches up to this many frames in one command buffer. frameIn becomes
+	// FIN_MAX per-frame blocks; each block is padded to the device's dynamic-storage
+	// offset alignment (a bind group is bound with i * blockBytes).
+	FIN_MAX: 20,
+	FIN_FIELDS: 74,
 	// The adapter init() got, kept for the one-line capture header (Env.gpu). Null until a
 	// device has been built, and kept across inits that reuse one.
 	adapter: null,
@@ -40,13 +45,19 @@ var GpuSim = {
 	DIAG: { MEANV: 0, MASSFEL: 1, MASSMAF: 2, MASSSED: 3, ORE0: 4, GAPS: 10, COLS: 11,
 		QUATERR: 12, RIGID2: 13, DT: 14, ALPHA: 15, RELAXERR: 16 },
 
-	layout: function (state) {
+	layout: function (state, alignBytes) {
 		var g = state.grid, p = GpuParams;
 		var V = g.V, colCap = state.colCap, plateCap = state.plateCap;
+		// Dynamic storage offsets have a device-dependent alignment (spec default
+		// 32 B, some Metal backends ask for 256); round the block up once.
+		var blockBytes = GpuSim.FIN_FIELDS * 4;
+		var strideBytes = Math.ceil(blockBytes / (alignBytes || 32)) * (alignBytes || 32);
+		var finStride = strideBytes / 4;
 		var l = {
 			V: V, colCap: colCap, plateCap: plateCap,
 			A0ref: 4 * Math.PI * p.radius * p.radius / V,
 			foLedger0: 14, foPlate0: 28,
+			finStride: finStride,
 			nwg10: 64, nwgD: 0, chunkD: 0
 		};
 		l.chunk10 = Math.ceil(V / l.nwg10);
@@ -70,7 +81,7 @@ var GpuSim = {
 		l.reduceF = l.nwg10 * plateCap * 12 + l.nwg10 * plateCap + l.nwgD * 12 + l.nwgD * 4
 			+ 7 * colCap + 7 * l.nwgL + plateCap;
 		l.scan = 2 * colCap + 1 + l.nBlocksMax;
-		l.frameIn = 74;
+		l.frameIn = finStride * GpuSim.FIN_MAX;
 		l.frameOut = l.foPlate0 + plateCap * 5;
 		// 0..13 world diagnostics, 14..16 the K10 relaxation witnesses (defect D1).
 		l.diagOut = 1 + Object.keys(GpuSim.DIAG).reduce(function (m, k) {
@@ -171,7 +182,7 @@ var GpuSim = {
 		}
 		device = await adapter.requestDevice(req);
 		}
-		var l = GpuSim.layout(state);
+		var l = GpuSim.layout(state, device.limits && device.limits.minStorageBufferOffsetAlignment);
 		var S = { state: state, device: device, l: l, K: {}, warnings: [] };
 		GpuSim.device = device;
 		GpuSim.S = S;
@@ -189,6 +200,9 @@ var GpuSim = {
 		S.tsSlotUsed = new Int32Array(4);
 		S.tsSlot = 0; S.tsRingI = 0; S.tsActive = false;
 		S.tsCollecting = false; S.tsValid = false;
+		// Phase IV: the K11 diag passes run only on demand (the HUD's ~6 Hz tick) or
+		// before a full download; a play frame leaves the flag false and skips them.
+		S.diagWanted = false;
 		S.tsNameTab = []; S.tsNameIdx = {};
 		S.tsMs = new Float64Array(GpuSim.TS_MAX);
 		try {
@@ -261,14 +275,19 @@ var GpuSim = {
 				throw new Error(name + ' binds ' + entries.length + ' storage buffers (limit '
 					+ device.limits.maxStorageBuffersPerShaderStage + ')');
 			}
+			var dynamic = groups.indexOf('frameIn') >= 0;
 			var layout = device.createBindGroupLayout({ entries: entries.map(function (e) {
 				var ro = e.binding === B.gridF || e.binding === B.gridI || e.binding === B.frameIn;
-				return { binding: e.binding, visibility: 4, buffer: { type: ro ? 'read-only-storage' : 'storage' } };
+				// frameIn carries one 74-float block per batched frame; the bind group is
+				// reused with a dynamic offset, so the same WGSL FIN[...] indexes block i.
+				var buffer = { type: ro ? 'read-only-storage' : 'storage' };
+				if (e.binding === B.frameIn) buffer.hasDynamicOffset = true;
+				return { binding: e.binding, visibility: 4, buffer: buffer };
 			}) });
 			var group = device.createBindGroup({ layout: layout, entries: entries });
 			var pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
 				compute: { module: mod, entryPoint: 'main' } });
-			S.K[name] = { pipe: pipe, group: group, layout: layout };
+			S.K[name] = { pipe: pipe, group: group, layout: layout, dynamic: dynamic };
 		}
 		var files = GpuKernels || { columns: ColumnsWGSL, mantle: MantleWGSL, plates: PlatesWGSL,
 			edges: EdgesWGSL, contact: ContactWGSL, column: ColumnWGSL, surface: SurfaceWGSL, diag: DiagWGSL };
@@ -447,34 +466,69 @@ var GpuSim = {
 		await GpuSim.uploadFrame(state, GpuParams.dt);
 	},
 
-	// The per-frame scalar block: mantle bookkeeping stays on the CPU (cheap, sequential
-	// RNG), the per-cell flow is the GPU kernel.
-	uploadFrame: function (state, dt) {
-		var S = GpuSim.S, l = S.l, p = GpuParams;
-		var fin = new Float32Array(l.frameIn);
-		state.Tm = GpuMantle.Tm(state.t, state.Tm0);
+	// Fill one 74-float block at float offset `off`. Mantle bookkeeping stays on
+	// the CPU (cheap, sequential RNG), the per-cell flow is the GPU kernel.
+	// precess and the plume respawn loop read state.t, and a batched encoder
+	// precomputes n blocks before the JS clock advances, so the simulated time
+	// and frame are explicit arguments; state.t is restored by the caller.
+	fillFrame: function (state, fin, off, dt, t, frame) {
+		var p = GpuParams;
+		state.t = t;
+		state.Tm = GpuMantle.Tm(t, state.Tm0);
 		GpuMantle.precess(state);
 		for (var i = 0; i < state.plumeCount; i++) {
-			while (state.t >= state.plumeBirth[i] + state.plumeLife[i]) {
+			while (t >= state.plumeBirth[i] + state.plumeLife[i]) {
 				GpuMantle.spawnPlume(state, i, state.plumeBirth[i] + state.plumeLife[i]);
 			}
 		}
 		var speed = p.U0 * Math.pow(state.Tm, 2.5);
 		var sig = p.plumeRad / p.radius;
-		fin[0] = state.t; fin[1] = dt; fin[2] = state.Tm;
-		fin[3] = state.mantleScale * speed; fin[4] = speed; fin[5] = 1 / (sig * sig);
-		fin[6] = state.plateCount; fin[7] = state.frame;
+		fin[off] = t; fin[off + 1] = dt; fin[off + 2] = state.Tm;
+		fin[off + 3] = state.mantleScale * speed; fin[off + 4] = speed; fin[off + 5] = 1 / (sig * sig);
+		fin[off + 6] = state.plateCount; fin[off + 7] = frame;
 		for (var w = 0; w < p.nWave; w++) {
-			fin[8 + w * 3] = state.waveDir[w * 3]; fin[8 + w * 3 + 1] = state.waveDir[w * 3 + 1]; fin[8 + w * 3 + 2] = state.waveDir[w * 3 + 2];
-			fin[32 + w] = state.waveFreq[w]; fin[40 + w] = state.wavePhase[w]; fin[48 + w] = state.waveAmp[w];
+			fin[off + 8 + w * 3] = state.waveDir[w * 3]; fin[off + 8 + w * 3 + 1] = state.waveDir[w * 3 + 1]; fin[off + 8 + w * 3 + 2] = state.waveDir[w * 3 + 2];
+			fin[off + 32 + w] = state.waveFreq[w]; fin[off + 40 + w] = state.wavePhase[w]; fin[off + 48 + w] = state.waveAmp[w];
 		}
 		for (var q = 0; q < state.plumeCount; q++) {
-			fin[56 + q * 4] = state.plumePos[q * 3]; fin[56 + q * 4 + 1] = state.plumePos[q * 3 + 1];
-			fin[56 + q * 4 + 2] = state.plumePos[q * 3 + 2]; fin[56 + q * 4 + 3] = state.plumeStr[q];
+			fin[off + 56 + q * 4] = state.plumePos[q * 3]; fin[off + 56 + q * 4 + 1] = state.plumePos[q * 3 + 1];
+			fin[off + 56 + q * 4 + 2] = state.plumePos[q * 3 + 2]; fin[off + 56 + q * 4 + 3] = state.plumeStr[q];
 		}
-		fin[72] = state.plumeCount;
-		fin[73] = state.grid.A0[0];
-		S.device.queue.writeBuffer(S.buf.frameIn, 0, fin);
+		fin[off + 72] = state.plateCount;
+		fin[off + 73] = state.grid.A0[0];
+	},
+
+	// The single-frame upload (step, the parity harness, the boot raster): the
+	// first 74 floats of the same block layout a batch uses.
+	uploadFrame: function (state, dt) {
+		var S = GpuSim.S;
+		if (!S.finSingle) S.finSingle = new Float32Array(GpuSim.FIN_FIELDS);
+		var realT = state.t, realFrame = state.frame;
+		GpuSim.fillFrame(state, S.finSingle, 0, dt, realT, realFrame);
+		state.t = realT; state.frame = realFrame;
+		S.device.queue.writeBuffer(S.buf.frameIn, 0, S.finSingle);
+	},
+
+	// n blocks in one upload for a batched encoder: the CPU mantle bookkeeping
+	// for all n frames, exactly as n uploadFrame calls would have run it.
+	frameBlocks: function (state, dt, n) {
+		var S = GpuSim.S, l = S.l;
+		if (n > GpuSim.FIN_MAX) throw new Error('batch of ' + n + ' exceeds FIN_MAX ' + GpuSim.FIN_MAX);
+		if (!S.finBlocks || S.finBlocks.length < l.finStride * n) {
+			S.finBlocks = new Float32Array(l.finStride * GpuSim.FIN_MAX);
+		}
+		S.finBlocks.fill(0, 0, l.finStride * n);
+		var realT = state.t, realFrame = state.frame;
+		// t advances by the same per-frame adds step() uses - never run*dt - so
+		// every block sees the bit-identical t and frame of its single-step frame.
+		var tt = realT;
+		for (var i = 0; i < n; i++) {
+			GpuSim.fillFrame(state, S.finBlocks, i * l.finStride, dt, tt, realFrame + i);
+			tt += dt;
+		}
+		state.t = realT; state.frame = realFrame;
+		S.device.queue.writeBuffer(S.buf.frameIn, 0, S.finBlocks, 0, l.finStride * n * 4);
+		return n;
 	},
 
 	groups: Math.ceil,
@@ -509,18 +563,25 @@ var GpuSim = {
 		}
 		var pass = enc.beginComputePass(desc);
 		pass.setPipeline(k.pipe);
-		pass.setBindGroup(0, k.group);
+		// Kernels binding frameIn take one dynamic offset, the batched frame's block.
+		if (k.dynamic) pass.setBindGroup(0, k.group, [S.finOffset || 0]);
+		else pass.setBindGroup(0, k.group);
 		pass.dispatchWorkgroups(groups);
 		pass.end();
 	},
 
-	// The whole frame, in Sim.step order. resolve is dispatched enough times for the
-	// longest loser chain (each dispatch is one barrier-separated pointer jump).
-	frame: function (state, dt) {
-		var S = GpuSim.S, l = S.l, V = l.V, colCap = l.colCap, WG = GpuSim.WG;
-		GpuSim.uploadFrame(state, dt);
-		var enc = S.device.createCommandEncoder();
-		if (S.tsOn) { S.tsActive = true; S.tsSlot = 0; }
+	// The full per-frame dispatch list in Sim.step order, appended to any
+	// encoder. resolve runs six times for the longest loser chain (each dispatch
+	// is one barrier-separated pointer jump). frame() owns the single-frame
+	// encoder and the timestamp resolve; batch() appends n copies with per-frame
+	// frameIn offsets, one encoder and one submit per rAF. `diag` gates K11:
+	// step() and the parity harnesses pay for it every frame, play() only on a
+	// frame the HUD asked for (GpuSim.wantDiag); the diagA/diagC traversals are
+	// ~0.9 ms/step on a clean queue, up to ~2.5 ms under live play, and nothing
+	// on the device reads their output. A full download (GpuSim.download ->
+	// diagFrame) folds the current frame's numbers on demand.
+	dispatchGraph: function (S, enc, state, diag, l) {
+		var V = l.V, colCap = l.colCap, WG = GpuSim.WG;
 		GpuSim.run(S, enc, 'zeroFrame', GpuSim.zeroThreads(l), WG);
 		GpuSim.run(S, enc, 'integrate', l.plateCap, WG);
 		GpuSim.run(S, enc, 'move', colCap, WG);
@@ -546,7 +607,9 @@ var GpuSim = {
 		GpuSim.runGroups(S, enc, 'scanCA', Math.ceil(colCap / 1024), 256);
 		GpuSim.runGroups(S, enc, 'scanCB', 1, 256);
 		GpuSim.run(S, enc, 'scanCC', colCap, WG);
-		GpuSim.run(S, enc, 'loserRank', colCap, 64);
+		GpuSim.run(S, enc, 'loserScatter', colCap, WG);
+		// one workgroup per winner column (lanes split the bin's comparisons)
+		GpuSim.runGroups(S, enc, 'loserRank', colCap, 64);
 		GpuSim.run(S, enc, 'gather', colCap, 64);
 		GpuSim.run(S, enc, 'ownerClear', V, WG);
 		GpuSim.run(S, enc, 'winners', l.plateCap, WG);
@@ -580,20 +643,76 @@ var GpuSim = {
 			GpuSim.runGroups(S, enc, 'reduceA', l.nwg10, WG);
 			GpuSim.run(S, enc, 'reduceB', l.plateCap, WG);
 		}
-		GpuSim.run(S, enc, 'diagA', l.nwgD, 1);
-		GpuSim.run(S, enc, 'diagC', Math.ceil(V / l.chunkD), 1);
-		GpuSim.run(S, enc, 'diagB', 1, 1);
+		if (diag) {
+			GpuSim.run(S, enc, 'diagA', l.nwgD, 1);
+			GpuSim.run(S, enc, 'diagC', Math.ceil(V / l.chunkD), 1);
+			GpuSim.run(S, enc, 'diagB', 1, 1);
+		}
 		GpuSim.runGroups(S, enc, 'ledgerReduceA', l.nwgL, WG);
 		GpuSim.run(S, enc, 'ledgerReduceB', 7, WG);
-		if (S.tsOn) {
-			S.tsActive = false;
-			// Resolve, then copy to the map buffer (MAP_READ cannot carry QUERY_RESOLVE).
-			var pair = S.tsRingI, size = GpuSim.TS_MAX * 2 * 8;
-			enc.resolveQuerySet(S.ts, 0, S.tsSlot * 2, S.tsResolve[pair], 0);
-			enc.copyBufferToBuffer(S.tsResolve[pair], 0, S.tsMap[pair], 0, size);
-			S.tsSlotUsed[pair] = S.tsSlot;
-			S.tsRingI = (pair + 1) % 4;
+	},
+
+	frame: function (state, dt, diag) {
+		var S = GpuSim.S, l = S.l;
+		if (diag === undefined) diag = true;
+		GpuSim.uploadFrame(state, dt);
+		var enc = S.device.createCommandEncoder();
+		if (S.tsOn) { S.tsActive = true; S.tsSlot = 0; }
+		GpuSim.dispatchGraph(S, enc, state, diag, l);
+		GpuSim.tsResolve(S, enc);
+		S.device.queue.submit([enc.finish()]);
+	},
+
+	// Resolve this encoder's timestamp slot into the ring's map buffer. Called
+	// once per encoder; only the dispatches made while tsActive was set wrote
+	// queries (a batched encoder times its first frame - the per-kernel costs are
+	// the same on every frame, and one frame fits TS_MAX).
+	tsResolve: function (S, enc) {
+		if (!S.tsOn) return;
+		S.tsActive = false;
+		// Resolve, then copy to the map buffer (MAP_READ cannot carry QUERY_RESOLVE).
+		var pair = S.tsRingI, size = GpuSim.TS_MAX * 2 * 8;
+		enc.resolveQuerySet(S.ts, 0, S.tsSlot * 2, S.tsResolve[pair], 0);
+		enc.copyBufferToBuffer(S.tsResolve[pair], 0, S.tsMap[pair], 0, size);
+		S.tsSlotUsed[pair] = S.tsSlot;
+		S.tsRingI = (pair + 1) % 4;
+	},
+
+	// Phase V: n frames in one command buffer. n frameIn blocks are precomputed
+	// on the CPU (the same sequential mantle bookkeeping, once per frame) and
+	// uploaded once; the dispatch graph repeats with a per-frame dynamic offset.
+	// Same dispatch order and inputs as n frame() calls, so same-device results
+	// are bit-identical. Only frame 0 writes timestamp queries (one frame fits
+	// TS_MAX and every repeat has the same per-kernel costs). `diagAt` is the
+	// frame index running K11 (-1 = none); play puts a wanted diagnostic frame
+	// last in its segment.
+	batch: function (state, dt, n, diagAt, tail) {
+		var S = GpuSim.S, l = S.l;
+		GpuSim.frameBlocks(state, dt, n);
+		var strideBytes = l.finStride * 4;
+		var enc = S.device.createCommandEncoder();
+		for (var i = 0; i < n; i++) {
+			// Timestamp frame 0 only: per-kernel costs are identical on every
+			// repeat, and a full n-frame graph would exhaust the query set.
+			if (S.tsOn && i === 0) { S.tsActive = true; S.tsSlot = 0; }
+			S.finOffset = i * strideBytes;
+			GpuSim.dispatchGraph(S, enc, state, diagAt === i, l);
+			if (S.tsOn && i === 0) S.tsActive = false;
 		}
+		S.finOffset = 0;
+		// The single-frame invariant is "block 0 holds the most recent frame's
+		// scalars": a later on-demand diagFrame reads fPlates() from offset 0
+		// (plate count can have changed mid-batch at a spawn). Copy the last
+		// block over block 0 in the same encoder, after the dispatches; the two
+		// ranges never overlap (stride is at least one padded block).
+		if (n > 1) {
+			enc.copyBufferToBuffer(S.buf.frameIn, (n - 1) * strideBytes,
+				S.buf.frameIn, 0, GpuSim.FIN_FIELDS * 4);
+		}
+		GpuSim.tsResolve(S, enc);
+		// The frame loop's render tail (GpuRenderer.appendTo) goes last, so one submit
+		// carries both sim and the visible frame for this rAF's segment encoder.
+		if (tail) tail(enc);
 		S.device.queue.submit([enc.finish()]);
 	},
 
@@ -631,6 +750,16 @@ var GpuSim = {
 			S.tsOn = false;   // buffer raced or device lost: fall back, stay quiet
 		}
 		S.tsCollecting = false;
+	},
+
+	// Drop the per-kernel EMA (the name table stays; the kernel set is fixed for
+	// the device). A mixed-level bench resets between configs so the labelled
+	// kernel line describes that config instead of whichever ran last.
+	tsReset: function () {
+		var S = GpuSim.S;
+		if (!S) return;
+		S.tsMs.fill(0);
+		S.tsValid = false;
 	},
 
 	// 2 Hz HUD line: per-kernel GPU ms (EMA over collected frames), biggest first.
@@ -694,10 +823,31 @@ var GpuSim = {
 		S.device.queue.submit([enc.finish()]);
 	},
 
+	// A diagnostic-only submit: diagA/diagC/diagB over the buffers as they stand,
+	// evolving nothing. A full download mirrors diagOut (meanSpeed, masses, the D1
+	// witnesses), so it precedes one of these on demand - the play path skips K11
+	// most frames and a probe/save/checkpoint must still pull THIS frame's numbers.
+	// No zeroFrame: its counters/plate atomics are read by the same pull and would
+	// be wiped; diagA/diagC overwrite their own reduce rows completely, and the
+	// relaxation witnesses keep the latest K10 frame's values until reduceB runs.
+	diagFrame: function (state) {
+		var S = GpuSim.S;
+		if (!S) return;
+		var l = S.l, enc = S.device.createCommandEncoder();
+		GpuSim.run(S, enc, 'diagA', l.nwgD, 1);
+		GpuSim.run(S, enc, 'diagC', Math.ceil(l.V / l.chunkD), 1);
+		GpuSim.run(S, enc, 'diagB', 1, 1);
+		S.device.queue.submit([enc.finish()]);
+	},
+
 	// Mirror sync back. One staging buffer per source, one submit, then unpack. `names`
 	// picks the set (GpuSim.FULL for an on-demand sync, GpuSim.EVENT_READS for the event
 	// cadence); staging buffers are reused, and only the alive column rows are unpacked.
 	download: async function (state) {
+		// The full mirror includes diagOut; fold the current frame's diagnostics
+		// before the copy encoder so a probe, save, deposits extract, checkpoint or
+		// smoke download never reads a stale diagnostic block.
+		GpuSim.diagFrame(state);
 		return GpuSim.pull(state, GpuSim.FULL);
 	},
 	downloadEvents: async function (state) {
@@ -870,11 +1020,15 @@ var GpuSim = {
 	},
 
 	// One full step with events on the CPU mirror, mirroring Sim.step's contract.
-	step: async function (state, dt, Events, Checkpoint, Params) {
+	// `diag` passes through to frame(): direct callers (the parity harness, the
+	// single-Step button, the smoke) get diagnostics every frame; play() asks for
+	// them only on the frames the HUD wants.
+	step: async function (state, dt, Events, Checkpoint, Params, diag) {
+		if (diag === undefined) diag = true;
 		if (state.t - state.lastEvent >= Params.eventCadence) {
 			await GpuSim.roundTrip(state, true, false, Events, Checkpoint);
 		}
-		GpuSim.frame(state, dt);
+		GpuSim.frame(state, dt, diag);
 		state.frame++;
 		state.t += dt;
 		if (state.ckptCap > 0 && state.t >= state.ckptDue) {
@@ -882,21 +1036,55 @@ var GpuSim = {
 		}
 	},
 
-	// The play path: n frames and their round trips in one call, the same device command
-	// sequence as n step() calls. Returns the frames submitted, so the frame loop counts
-	// real work instead of requested work; Phase III turns the loop into one encoder.
-	// `hold` is the caller's optional "the view is moving" predicate. It is polled at the
-	// frame boundary, which is also the only place a batch can see input at all: the steps
-	// between two round trips run in one task, so a pointer move lands during an await and is
-	// visible to the next iteration. A drag that starts mid-batch therefore stops the batch
-	// there - the frames already submitted are in the queue, the rest wait for the pointer to
-	// rest, and the round trip the drag would have had to wait for never starts. Nothing is
-	// skipped or doubled: the next batch resumes at the same frame boundary and a due cycle
-	// still sees its span as state.t - state.lastEvent.
-	play: async function (state, dt, n, hold) {
-		for (var i = 0; i < n; i++) {
-			if (i > 0 && hold && hold()) return i;
-			await GpuSim.step(state, dt, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params);
+	// The HUD asks for fresh diagnostics with GpuSim.wantDiag() (~6 Hz); the flag
+	// is consumed by the next play() segment, and a full download always folds its
+	// own diagFrame regardless.
+	wantDiag: function () {
+		if (GpuSim.S) GpuSim.S.diagWanted = true;
+	},
+	// The play path: n frames, batched one encoder per run between round-trip
+	// boundaries. An event cycle needs the CPU mirror and an upload, so the
+	// segment ends on the frame before one is due; a checkpoint's full round trip
+	// ends the segment after its frame, exactly as n step() calls ordered them.
+	// `hold` is polled at the segment boundary - the only point an encoder can
+	// stop (an encoder already submitted cannot be un-submitted); the page's view
+	// gate stops a batch starting at all, so a drag catches at most one segment.
+	// Returns the number of frames submitted so the frame loop counts real work.
+	// opts.render(enc), if given, is appended to every segment encoder: the frame
+	// loop passes GpuRenderer.appendTo so one submit carries sim plus the visible
+	// frame; standalone draw() stays for paused and view-only frames.
+	play: async function (state, dt, n, hold, opts) {
+		var P = GpuSim.Params, S = GpuSim.S;
+		var done = 0, want = !!S.diagWanted;
+		S.diagWanted = false;
+		while (done < n) {
+			if (done > 0 && hold && hold()) return done;
+			if (state.t - state.lastEvent >= P.eventCadence) {
+				await GpuSim.roundTrip(state, true, false, GpuSim.Events, GpuSim.Checkpoint);
+				if (S.diagWanted) { want = true; S.diagWanted = false; }
+			}
+			// Count the segment frame by frame against the same per-frame-accumulated
+			// t step() would produce: an event cycle is due before a frame, a
+			// checkpoint after one; either ends the encoder here.
+			var run = 0, tj = state.t;
+			while (done + run < n && run < GpuSim.FIN_MAX) {
+				if (tj - state.lastEvent >= P.eventCadence) break;
+				tj += dt; run++;
+				if (state.ckptCap > 0 && tj >= state.ckptDue) break;
+			}
+			if (run < 1) run = 1;
+			// A wanted diagnostic runs on the segment's last frame; opts.diagLast asks
+			// for one on the final segment overall, so a full download afterwards reads
+			// current counters (used by the batch-identity rig).
+			var diagHere = want || (opts && opts.diagLast && done + run === n);
+			GpuSim.batch(state, dt, run, diagHere ? run - 1 : -1, opts && opts.render);
+			want = false;
+			for (var j = 0; j < run; j++) { state.t += dt; state.frame++; }
+			done += run;
+			if (state.ckptCap > 0 && state.t >= state.ckptDue) {
+				await GpuSim.roundTrip(state, false, true, GpuSim.Events, GpuSim.Checkpoint);
+				if (S.diagWanted) { want = true; S.diagWanted = false; }
+			}
 		}
 		return n;
 	}

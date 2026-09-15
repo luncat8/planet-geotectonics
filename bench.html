@@ -39,7 +39,8 @@
   <div class="panel">
     <h1>Planet Geotectonics — GPU (WebGPU) benchmark</h1>
     <p class="sub">Two time-boxed measurements per config, on your GPU. <b>iso</b> = the kernel
-      graph only: submit <i>steps</i> frames and await
+      graph only: submit <i>steps</i> frames as one batched encoder (the Phase V play path,
+      each frame rebound at its own frameIn block offset) and await
       <code>onSubmittedWorkDone</code> — no event round trips, no drawing.
       <b>smooth</b> = the full play path (<code>GpuSim.play</code>, including the event and
       checkpoint round trips) under <code>requestAnimationFrame</code>, reporting the frame-gap
@@ -66,9 +67,10 @@
       <label class="f">Table as tab-separated text, then the kernel line and the raw
         <code>BENCH</code> lines — paste it straight into a log or a chat.</label></div>
     <div class="note">
-      <b>iso ms/step</b> is the GPU kernel graph for <i>steps</i> consecutive frames divided by
-      <i>steps</i> (one <code>onSubmittedWorkDone</code> per sample); the 1-vs-5 gap exposes the
-      per-step fixed cost. <b>smooth med/p95/max</b> are rAF frame gaps in ms; a <b>hitch</b> is a
+      <b>iso ms/step</b> is one batched encoder of <i>steps</i> frames divided by
+      <i>steps</i> (one submit and one <code>onSubmittedWorkDone</code> per sample); the 1-vs-5
+      gap is the per-submit cost batching removes, and steps=1 is the one-frame-encoder
+      baseline. <b>smooth med/p95/max</b> are rAF frame gaps in ms; a <b>hitch</b> is a
       gap over 2× the median, shown as <i>hitches/frames sampled</i>. Compare the fraction, not
       the count: a faster median lowers the 2× threshold, so a smoother run can show a higher
       count than the slower run it replaced. <b>Myr/s</b> = simulated time per wall second.
@@ -188,15 +190,29 @@
 		});
 	}
 
-	// iso sample: submit n frames, await the queue, report wall ms for the batch.
+	// iso sample: submit n frames as ONE batched encoder (the Phase V play path),
+	// await the queue, report wall ms for the batch; the reported per-step number is
+	// packed throughput, not n submits. K11 stays off, as in production; frame 0 of
+	// the batch still carries the timestamp queries, so the kernel line is fed.
 	function isoBatch(state, dt, n) {
 		return new Promise(function (resolve) {
 			var t0 = performance.now();
-			for (var i = 0; i < n; i++) GpuSim.frame(state, dt);
+			GpuSim.batch(state, dt, n, -1);
 			GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
 				resolve(performance.now() - t0);
 			});
 		});
+	}
+	// Drain the timestamp ring and read THIS config's kernel table: the ring is an
+	// EMA, so the old end-of-run line labelled whichever config ran last.
+	async function kernelLine(level, n) {
+		await GpuSim.S.device.queue.onSubmittedWorkDone();
+		for (var i = 0; i < 4; i++) await GpuSim.tsCollect();
+		var rep = GpuSim.tsReport();
+		if (!rep) return '';
+		var line = 'BENCH L' + level + ' steps=' + n + ' kernels: ' + rep;
+		log(line);
+		return 'L' + level + ' steps=' + n + ': ' + rep;
 	}
 	function measureIso(state, dt, n) {
 		return new Promise(function (resolve) {
@@ -239,9 +255,14 @@
 				if (now - t0 >= box) { finish(); return; }
 				if (busy) return;
 				busy = true;
-				GpuSim.play(state, dt, n).then(function () {
+				// The production path: the draw rides inside the play segment encoders
+				// (one submit per rAF for sim plus the visible frame), not a second
+				// submit after the batch settles.
+				var renderTail = function (enc) {
+					try { planet.renderer.appendTo(enc, 'z'); } catch (e) {}
+				};
+				GpuSim.play(state, dt, n, null, { render: renderTail }).then(function () {
 					busy = false; done += n;
-					try { planet.renderer.draw('z'); } catch (e) {}
 					requestAnimationFrame(tick);
 				})['catch'](function () { busy = false; finish(); });
 			}
@@ -277,8 +298,10 @@
 			await buildPlanet(levels.kept[0]);
 			if (!GpuSim.S || !GpuSim.S.device) throw new Error('no WebGPU adapter');
 			log('BENCH engine=gpu ts=' + (GpuSim.S.tsOn ? 'on' : 'off')
-				+ ' levels=' + levels.kept.join(',') + ' steps=' + steps.kept.join(',') + ' dt=' + dt);
+				+ ' levels=' + levels.kept.join(',') + ' steps=' + steps.kept.join(',') + ' dt=' + dt
+				+ ' diag=on-demand');
 			log('BENCH rig ' + rigLine());
+			var kernLines = [];
 			for (var li = 0; li < levels.kept.length; li++) {
 				var level = levels.kept[li];
 				if (planet.level !== level) {
@@ -291,10 +314,16 @@
 					var n = steps.kept[bi];
 					setStatus('L' + level + ' ×' + n + ': iso…');
 					await nextFrame();
+					// Each config starts the kernel EMA fresh, so its labelled line
+					// cannot describe a previous level's timestamps.
+					await GpuSim.S.device.queue.onSubmittedWorkDone();
+					GpuSim.tsReset();
 					var iso = await measureIso(planet.state, dt, n);
 					setStatus('L' + level + ' ×' + n + ': smooth…');
 					await nextFrame();
 					var sm = await measureSmooth(planet.state, dt, n);
+					var kern = await kernelLine(level, n);
+					if (kern) kernLines.push(kern);
 					var tr = document.createElement('tr');
 					if (sm.medMs > 0 && sm.medMs <= 16.7) tr.className = 'hd60';
 					var fps = sm.medMs > 0 ? 1000 / sm.medMs : 0;
@@ -314,13 +343,11 @@
 						+ ' frames=' + sm.frames + ' myr/s=' + sm.myrPerSec.toFixed(1));
 				}
 			}
-			// Top-kernel GPU ms from the timestamp ring (needs timestamp-query).
-			try {
-				await GpuSim.tsCollect();
-				var rep = GpuSim.tsReport();
-				if (rep) { kernEl.textContent = 'kernels: ' + rep; log('BENCH kernels: ' + rep); }
-				else kernEl.textContent = 'kernel timing: adapter lacks timestamp-query';
-			} catch (e) {}
+			// Per-config kernel lines were logged as the matrix ran (the ring is an
+			// EMA and otherwise labels whichever config ran last); show all of them.
+			if (kernLines.length) kernEl.textContent = kernLines.join('\n');
+			else kernEl.textContent = GpuSim.S && GpuSim.S.tsOn
+				? 'kernel timing: no samples' : 'kernel timing: adapter lacks timestamp-query';
 			setStatus('Done. Lower ms is better; green hitches rows sustain 60 fps.');
 			log('BENCH done');
 		} catch (e) {

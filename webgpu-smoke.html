@@ -56,6 +56,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <script src="js/gpu/wgsl-diag.js"></script>
 <script src="js/gpu/sim-gpu.js"></script>
 <script src="js/gpu/render-gpu.js"></script>
+<script src="js/gpu/d1diff.js"></script>
 <script src="js/clipboard.js"></script>
 <script>
 'use strict';
@@ -115,6 +116,15 @@ function captureLine(adapter, fallback) {
 	if (!GpuSim.S.tsOn) note('init', 'timestamp-query not available - per-kernel timing off (not a failure)');
 	GpuSim.raster(gpu);
 	await GpuSim.download(gpu);
+
+	// Defect D1, checkpoint 1: the cross-engine layer diff at boot. Both engines
+	// have reduced once with dt = tau_omega, so a divergence already here is
+	// inputs/accumulation/solve, not dynamics. The K10 witness line below only
+	// proves the device is self-consistent; this compares its intermediates
+	// against the CPU's. M/rhs ship divided by A0[0]; D1Diff rescales them.
+	var d1boot = D1Diff.compare(cpu, gpu);
+	D1Diff.lines(d1boot, 'boot').forEach(function (l) { say(l); });
+	D1Diff.failures(d1boot, 'boot').forEach(fail);
 
 	// Phase 1: five frames without an event boundary - the parity stretch.
 	Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt); Sim.step(cpu, dt);
@@ -193,17 +203,26 @@ function captureLine(adapter, fallback) {
 		+ ' != min(1, dt/tauOmega) ' + wantAlpha);
 	if (!(gpu.gpuRelaxErr < 1e-5)) fail('stored omega is not the relaxed omega (worst residual '
 		+ gpu.gpuRelaxErr + ' rad/Myr)');
+	// Checkpoint 2: the same layer diff after five relaxed frames. If M/rhs/fit
+	// agree here but omega diverges, it is the relaxation history, and the boot
+	// table above decides whether the history was wrong from the start.
+	var d1f5 = D1Diff.compare(cpu, gpu);
+	D1Diff.lines(d1f5, 'frame 5').forEach(function (l) { say(l); });
+	D1Diff.failures(d1f5, 'frame 5').forEach(fail);
 	if (Math.abs(cpu.meanSpeed - gpu.meanSpeed) > 0.2 * Math.max(1, Math.abs(cpu.meanSpeed))) {
 		fail('meanSpeed drift > 20% (cpu ' + (cpu.meanSpeed / 10000).toFixed(3) + ' vs gpu '
 			+ (gpu.meanSpeed / 10000).toFixed(3) + ' cm/yr)');
-		// The aggregate tripped, so name which of the two remaining explanations it is.
-		if (lag > 0.95 && cpuR / Math.max(1, nRatio) < 0.9) {
-			fail('D1: the device carries the unrelaxed fit (its |omega|/|omegaTarget| is ' + lag.toFixed(3)
-				+ ', the CPU\'s ' + (cpuR / Math.max(1, nRatio)).toFixed(3)
-				+ ') while dt, alpha and the stored omega all say the relaxation ran');
+		// The cross-engine diff names the layer the divergence lives in. A witness
+		// that recomputes the device's own formula cannot do this (it is
+		// self-consistent with a wrong fit), which is what the ratio line used to be.
+		if (d1f5.layer) {
+			fail('D1: 20% gate tripped - the layer diff names ' + d1f5.layer.toUpperCase()
+				+ ' (see the D1 frame 5 table above); that is the next decision point');
 		} else {
-			fail('D1: omega lags the fit on both engines (device ratio ' + lag.toFixed(3) + ', cpu '
-				+ (cpuR / Math.max(1, nRatio)).toFixed(3) + ') - the aggregate differs for another reason');
+			fail('D1: 20% gate tripped but every cross-engine layer agrees within '
+				+ D1Diff.THRESH + ' relative (device ratio ' + lag.toFixed(3) + ', cpu '
+				+ (cpuR / Math.max(1, nRatio)).toFixed(3) + '); the drift is sub-threshold '
+				+ 'accumulation across frames, not a named layer - the gate is not widened');
 		}
 	}
 
@@ -257,6 +276,10 @@ function captureLine(adapter, fallback) {
 	}
 	note('render', 'canvas ' + gw + 'x' + gh + ' · format ' + (renderer ? renderer.format : 'none')
 		+ ' · row ' + row + ' · readback ' + wantBytes + ' B · cpu ref ' + (cpx ? cpx.length : 0) + ' B');
+	// The closing line counts layers that actually compared pixels, not layers
+	// the rig was created for: 0.3-6 printed "pixel-parity checked" beside 16 x
+	// "readback short" because it keyed off the rig existing.
+	var comparedLayers = 0;
 	for (var l = 0; readbackOk && l < layers.length; l++) {
 		renderer.draw(layers[l]);
 		ref.draw(layers[l]);
@@ -293,6 +316,7 @@ function captureLine(adapter, fallback) {
 			}
 		}
 		var mean = samples ? sum / samples : NaN;
+		if (samples) comparedLayers++;
 		note('render', layers[l] + ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst
 			+ ' ch>16: ' + loud + ' · ' + samples + ' samples');
 		if (!samples) fail('pixel parity compared nothing on layer ' + layers[l]);
@@ -304,8 +328,10 @@ function captureLine(adapter, fallback) {
 		renderer.draw('dir');
 		await new Promise(function (r) { setTimeout(r, 300); });
 	}
-	note('render', 'GPU renderer drew ' + (readbackOk ? 'all ' + layers.length + ' layers, pixel-parity checked'
-		: 'nothing - the readback path is broken, see the failures above') + ' (map below: dir)');
+	note('render', 'GPU renderer drew ' + (renderer ? layers.length : 0) + ' layers; pixel-parity actually compared '
+		+ comparedLayers + '/' + layers.length
+		+ (comparedLayers === layers.length ? ' (map below: dir)'
+			: ' - ' + (layers.length - comparedLayers) + ' compared nothing (readback failures above)'));
 
 	finish();
 	function finish() {

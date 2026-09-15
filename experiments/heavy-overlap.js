@@ -1,0 +1,81 @@
+// heavy-overlap.js (node driver, Phase VI): boots experiments/heavy-overlap.html in
+// headless Chromium (hardware GPU where present, SwiftShader relative-only
+// otherwise) and prints the HEAVY capture: the overlap load from the frame
+// counters plus the contact-block kernel ms, with one line for loserRank.
+//
+// The Phase VI acceptance is >=5x lower loserRank ms than the pre-Phase-VI
+// build at a real overlap load, so capture both builds on the same rig:
+//   node experiments/heavy-overlap.js                 # current build
+//   git stash / git checkout <pre-Phase-VI> && node experiments/heavy-overlap.js
+// Usage:
+//   node experiments/heavy-overlap.js [--out=experiments/logs/phase6-heavy.txt]
+//   PGT_QUERY='level=6&iso=120' node experiments/heavy-overlap.js
+// Tool locations follow the PGT_CHROME / PGT_PUPPETEER / PGT_LIBS overrides of
+// tests/gpu-parity.js. An adapter-less machine records HEAVY skip and exits 0
+// (the log still says why).
+const fs = require('fs');
+const path = require('path');
+const http = require('http');
+
+const ROOT = path.resolve(__dirname, '..');
+const PORT = 8125;
+
+function arg(name, dflt) {
+	for (let i = 2; i < process.argv.length; i++) {
+		const a = process.argv[i];
+		if (a === name) return process.argv[i + 1];
+		if (a.startsWith(name + '=')) return a.slice(name.length + 1);
+	}
+	return dflt;
+}
+
+function serve(dir) {
+	const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
+	const server = http.createServer((req, res) => {
+		const file = path.join(dir, decodeURIComponent(req.url.split('?')[0]));
+		fs.readFile(file, (err, data) => {
+			if (err) { res.writeHead(404); res.end(); return; }
+			res.writeHead(200, { 'content-type': types[path.extname(file)] || 'text/plain' });
+			res.end(data);
+		});
+	});
+	return new Promise(r => server.listen(PORT, '127.0.0.1', () => r(server)));
+}
+
+(async () => {
+	const out = arg('--out', null);
+	const server = await serve(ROOT);
+	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/rig/node_modules/puppeteer-core';
+	const chromeBin = process.env.PGT_CHROME || '/tmp/chromium';
+	const libDir = process.env.PGT_LIBS || '/tmp/al2023/lib';
+	const puppeteer = require(puppeteerDir);
+	if (libDir) process.env.LD_LIBRARY_PATH = libDir;
+	const browser = await puppeteer.launch({
+		executablePath: chromeBin,
+		args: ['--headless=new', '--no-sandbox', '--no-zygote', '--disable-gpu-sandbox',
+			'--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--in-process-gpu', '--disable-dev-shm-usage'],
+		headless: false, protocolTimeout: 1500000
+	});
+	const lines = [];
+	try {
+		const page = await browser.newPage();
+		page.on('console', m => {
+			const t = m.text();
+			if (t.startsWith('HEAVY ')) { lines.push(t); console.log(t); }
+		});
+		page.on('pageerror', e => console.log('[pageerror]', e.message));
+		const query = process.env.PGT_QUERY ? '?' + process.env.PGT_QUERY : '';
+		await page.goto(`http://127.0.0.1:${PORT}/experiments/heavy-overlap.html${query}`,
+			{ waitUntil: 'networkidle0' });
+		await page.waitForFunction('window.__heavyDone === true', { timeout: 600000 });
+		if (out) {
+			fs.mkdirSync(path.dirname(out), { recursive: true });
+			fs.writeFileSync(out, lines.join('\n') + '\n');
+			console.log('wrote ' + out);
+		}
+		if (lines.some(l => l.startsWith('HEAVY error'))) process.exitCode = 1;
+	} finally {
+		await browser.close();
+		server.close();
+	}
+})().catch(e => { console.error('HEAVY-DRIVER-FAIL', e.message); process.exit(1); });

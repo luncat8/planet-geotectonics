@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<!-- heavy-overlap.html - Phase VI rig: time the contact block under a deliberately
+     collision-dense world (hot start, four big plates, a low vSuture) so loserRank's
+     per-frame load is high. Two passes: a load pass with a frameOut read every frame,
+     logging the overlap count straight from the frame counters, then a timestamped
+     iso pass of K frame encoders with no readbacks, reporting the contact-block
+     kernel ms. Compare the loserRank line across the pre-/post-Phase-VI builds: the
+     acceptance is a >=5x reduction in a rig whose overlap log shows the load was real.
+     Driven headless by experiments/heavy-overlap.js; open in a browser too.
+     Query: ?level=5&seed=11&plates=4&vSuture=300&load=60&iso=200 -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Heavy overlap rig</title>
+<style>body{font:13px monospace;margin:1em;white-space:pre-wrap}</style>
+</head>
+<body><div id="out">booting…</div>
+<script src="../js/env.js"></script>
+<script src="../js/geodesics.js"></script>
+<script src="../js/params.js"></script>
+<script src="../js/quat.js"></script>
+<script src="../js/mantle.js"></script>
+<script src="../js/diag.js"></script>
+<script src="../js/state.js"></script>
+<script src="../js/columns.js"></script>
+<script src="../js/edges.js"></script>
+<script src="../js/plates.js"></script>
+<script src="../js/contact.js"></script>
+<script src="../js/column-update.js"></script>
+<script src="../js/surface.js"></script>
+<script src="../js/events.js"></script>
+<script src="../js/checkpoint.js"></script>
+<script src="../js/sim.js"></script>
+<script src="../js/gpu/wgsl-common.js"></script>
+<script src="../js/gpu/wgsl-plates.js"></script>
+<script src="../js/gpu/wgsl-mantle.js"></script>
+<script src="../js/gpu/wgsl-columns.js"></script>
+<script src="../js/gpu/wgsl-scan.js"></script>
+<script src="../js/gpu/wgsl-edges.js"></script>
+<script src="../js/gpu/wgsl-contact.js"></script>
+<script src="../js/gpu/wgsl-column.js"></script>
+<script src="../js/gpu/wgsl-surface.js"></script>
+<script src="../js/gpu/wgsl-diag.js"></script>
+<script src="../js/gpu/sim-gpu.js"></script>
+<script>
+'use strict';
+var out = document.getElementById('out');
+function say(l) { console.log(l); out.textContent += '\n' + l; }
+
+// Kernels of the contact block as the frame graph orders them; resolve is six
+// dispatches but one timestamp row (the ring stores it by name, last write wins
+// per frame, so the EMA describes a chain step, not the whole six).
+var CONTACT_BLOCK = ['overlaps', 'gaps', 'resolve', 'loserZero', 'loserCount',
+	'scanCA', 'scanCB', 'scanCC', 'loserScatter', 'loserRank', 'gather'];
+
+function q(name, dflt) {
+	var v = new URLSearchParams(location.search).get(name);
+	return v === null ? dflt : v;
+}
+
+(async function () {
+	try {
+		var level = +q('level', '5'), seed = +q('seed', '11');
+		var plates = +q('plates', '4'), vSuture = +q('vSuture', '300');
+		var loadFrames = +q('load', '60'), isoFrames = +q('iso', '200');
+		Params.plateCount = plates;
+		Params.vSuture = vSuture;
+		var grid = new Grid(level, seed).build();
+		var state = new State(grid, seed);
+		state.hotStart = true;
+		state.reset(seed);
+		state.ckptCap = 0;
+		await GpuSim.init(state, { fallback: false });
+		say('HEAVY rig ' + Env.line() + (GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : ''));
+		GpuSim.raster(state);
+		await GpuSim.download(state);
+		var S = GpuSim.S;
+		say('HEAVY config level=' + level + ' seed=' + seed + ' plates=' + plates
+			+ ' vSuture=' + vSuture + ' hot=1 load=' + loadFrames + ' iso=' + isoFrames
+			+ ' ts=' + (S.tsOn ? 'on' : 'off'));
+		if (!S.tsOn) {
+			say('HEAVY skip: adapter lacks timestamp-query, no contact-block timing possible');
+			window.__heavyDone = true;
+			return;
+		}
+
+		// Load pass: one light pull per frame reads frameOut (fo[1] = overlaps this
+		// frame, the loser-bin total the contact block had to sort). No Events.cycle:
+		// the iso methodology measures the kernels, not the cadence, and gather zeroes
+		// consumed columns itself.
+		var over = [], maxOver = 0, sumOver = 0;
+		for (var f = 0; f < loadFrames; f++) {
+			GpuSim.frame(state, Params.dt, false);
+			await GpuSim.downloadEvents(state);
+			over.push(state.overlaps);
+			if (state.overlaps > maxOver) maxOver = state.overlaps;
+			sumOver += state.overlaps;
+			state.t += Params.dt; state.frame++;
+		}
+		var meanOver = sumOver / Math.max(1, loadFrames);
+		say('HEAVY load: overlaps/frame mean=' + meanOver.toFixed(2) + ' max=' + maxOver
+			+ ' (frame counters, ' + loadFrames + ' frames) series=[' + over.join(',') + ']');
+
+		// Timed pass: iso frame encoders with no readbacks, then drain the timestamp
+		// ring and fold the EMA per named kernel.
+		GpuSim.tsReset();
+		var t0 = performance.now();
+		for (var f2 = 0; f2 < isoFrames; f2++) GpuSim.frame(state, Params.dt, false);
+		await S.device.queue.onSubmittedWorkDone();
+		var wall = performance.now() - t0;
+		for (var c = 0; c < 6; c++) await GpuSim.tsCollect();
+		var parts = [], block = 0;
+		for (var k = 0; k < CONTACT_BLOCK.length; k++) {
+			var idx = S.tsNameIdx[CONTACT_BLOCK[k]];
+			var ms = idx === undefined ? 0 : S.tsMs[idx];
+			if (CONTACT_BLOCK[k] === 'loserScatter' && idx === undefined) ms = 0;
+			block += ms;
+			parts.push(CONTACT_BLOCK[k] + ' ' + ms.toFixed(3));
+		}
+		say('HEAVY iso: ' + isoFrames + ' frames wall=' + wall.toFixed(0) + 'ms ('
+			+ (wall / isoFrames).toFixed(2) + ' ms/frame) contactBlock=' + block.toFixed(3) + 'ms');
+		say('HEAVY kernels (ms/frame): ' + parts.join('  '));
+		// The acceptance line: pre-Phase-VI builds print no loserScatter row and a
+		// loserRank that scans all alive columns per loser; post builds print both.
+		var lr = S.tsNameIdx.loserRank === undefined ? 0 : S.tsMs[S.tsNameIdx.loserRank];
+		var ls = S.tsNameIdx.loserScatter === undefined ? 0 : S.tsMs[S.tsNameIdx.loserScatter];
+		say('HEAVY loserRank=' + lr.toFixed(4) + 'ms loserScatter=' + ls.toFixed(4)
+			+ 'ms meanOverlaps=' + meanOver.toFixed(2));
+		window.__heavyDone = true;
+	} catch (e) {
+		say('HEAVY error: ' + ((e && e.message) || e) + '\n' + (e && e.stack ? e.stack : ''));
+		window.__heavyDone = true;
+	}
+})();
+</script>
+</body>
+</html>
