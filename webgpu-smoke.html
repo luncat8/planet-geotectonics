@@ -252,9 +252,11 @@ function captureLine(adapter, fallback) {
 	// Phase 4: the GPU renderer over every layer, pixel-compared against the CPU renderer.
 	// A layer id routed into the wrong WGSL branch shows up here as a pixel delta, which
 	// drawing-and-eyeballing (the old phase 4) never caught. The pixels come out of the
-	// renderer's own offscreen texture, never out of the canvas: a real swapchain texture
-	// does not carry COPY_SRC (Chrome/D3D picks its usage itself), so a copy from
+	// renderer's own world texture, never out of the canvas: a real swapchain texture does
+	// not carry COPY_SRC (Chrome/D3D picks its usage itself), so a copy from
 	// getCurrentTexture() fails validation on hardware and leaves the comparison empty.
+	// The loop draws the world texture only - no canvas blit in it - so the parity itself
+	// never touches the presentation path; the map below gets one blit at the end.
 	var layers = ['plate', 'type', 'z', 'damage', 'owner', 'sediment', 'speed', 'age', 'force', 'dir',
 		'oVms', 'oMaf', 'oArc', 'oOro', 'oBas', 'oPla'];
 	// The rig builds its own readback path, and a throw in it must not take phases 1-3 down
@@ -267,13 +269,13 @@ function captureLine(adapter, fallback) {
 	var gw = renderer ? renderer.canvas.width : 0, gh = renderer ? renderer.canvas.height : 0;
 	var row = renderer ? renderer.readRow : 0, bgra = renderer && renderer.format === 'bgra8unorm';
 	var wantBytes = row * gh, cpx = ref.image.data, wantCpu = gw * gh * 4;
-	var readbackOk = !rendererErr && renderer && renderer.offscreen && wantBytes > 0
+	var readbackOk = !rendererErr && renderer && renderer.world && wantBytes > 0
 		&& cpx && cpx.length === wantCpu;
 	if (rendererErr) {
 		fail('renderer readback init threw: ' + ((rendererErr && rendererErr.stack) || rendererErr));
 	} else if (!readbackOk) {
 		fail('pixel parity cannot run: canvas ' + gw + 'x' + gh + ' · readback '
-			+ (renderer && renderer.offscreen ? wantBytes + ' bytes' : 'texture missing')
+			+ (renderer && renderer.world ? wantBytes + ' bytes' : 'texture missing')
 			+ ' · cpu reference ' + (cpx ? cpx.length : 'none') + ' of ' + wantCpu + ' bytes');
 	}
 	note('render', 'canvas ' + gw + 'x' + gh + ' · format ' + (renderer ? renderer.format : 'none')
@@ -283,7 +285,7 @@ function captureLine(adapter, fallback) {
 	// "readback short" because it keyed off the rig existing.
 	var comparedLayers = 0;
 	for (var l = 0; readbackOk && l < layers.length; l++) {
-		renderer.draw(layers[l]);
+		renderer.redraw(layers[l]);
 		ref.draw(layers[l]);
 		var gpx = null;
 		try {
@@ -327,7 +329,11 @@ function captureLine(adapter, fallback) {
 			+ ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst);
 	}
 	if (renderer) {
-		renderer.draw('dir');
+		renderer.redraw('dir');
+		// One canvas blit, on a drained queue: the parity loop drew the world texture
+		// only, so this is the first (and last) presentation of the run.
+		await device.queue.onSubmittedWorkDone();
+		renderer.present();
 		await new Promise(function (r) { setTimeout(r, 300); });
 	}
 	note('render', 'GPU renderer drew ' + (renderer ? layers.length : 0) + ' layers; pixel-parity actually compared '

@@ -44,7 +44,10 @@
       <code>onSubmittedWorkDone</code> — no event round trips, no drawing.
       <b>smooth</b> = the full play path (<code>GpuSim.play</code>, including the event and
       checkpoint round trips) under <code>requestAnimationFrame</code>, reporting the frame-gap
-      distribution. Rows whose smooth median clears ~16.7 ms sustain 60 fps and are highlighted.
+      distribution. The sim pipeline is one segment deep, so the gaps and Myr/s are the rate
+      your GPU actually achieves, and the map shows the last completed frame at all times
+      (a setting heavier than the refresh cannot present undrawn, black frames). Rows whose
+      smooth median clears ~16.7 ms sustain 60 fps and are highlighted.
       The top-kernel GPU ms table (timestamp queries) prints under the table when the adapter
       supports it. Open this file in a real browser — a sandbox with no WebGPU adapter skips.</p>
     <div class="ctl">
@@ -183,7 +186,12 @@
 				.then(function () {
 					GpuSim.raster(state);
 					var renderer = new GpuRenderer(canvas).init(state);
-					renderer.draw('z');
+					renderer.redraw('z');
+					// Boot the map once the raster has drained: the blit is a sub-millisecond
+					// pass on an empty queue, so it cannot present an undrawn frame.
+					GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+						try { renderer.present(); } catch (e) {}
+					});
 					planet = { level: level, grid: grid, state: state, renderer: renderer };
 					resolve(planet);
 				}, reject);
@@ -253,18 +261,27 @@
 				last = now;
 				if (!t0) t0 = now;
 				if (now - t0 >= box) { finish(); return; }
-				if (busy) return;
-				busy = true;
-				// The production path: the draw rides inside the play segment encoders
-				// (one submit per rAF for sim plus the visible frame), not a second
-				// submit after the batch settles.
-				var renderTail = function (enc) {
-					try { planet.renderer.appendTo(enc, 'z'); } catch (e) {}
-				};
-				GpuSim.play(state, dt, n, null, { render: renderTail }).then(function () {
-					busy = false; done += n;
-					requestAnimationFrame(tick);
-				})['catch'](function () { busy = false; finish(); });
+			if (busy) return;
+			busy = true;
+			// The production path: the world draw rides inside the play segment
+			// encoders (one sim submit per rAF); the canvas receives only a blit of
+			// the world texture, on a drained queue.
+			var renderTail = function (enc) {
+				try { planet.renderer.appendTo(enc, 'z'); } catch (e) {}
+			};
+			GpuSim.play(state, dt, n, null, { render: renderTail }).then(function () {
+				busy = false; done += n;
+				// The play pipeline is one segment deep, so the segment just submitted is
+				// the whole backlog; the sub-millisecond blit after it completes before
+				// the next refresh. Heavy settings no longer present undrawn (black)
+				// frames, and the canvas always shows the last completed state.
+				GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+					if (planet && planet.renderer) {
+						try { planet.renderer.present(); } catch (e) {}
+					}
+				});
+				requestAnimationFrame(tick);
+			})['catch'](function () { busy = false; finish(); });
 			}
 			requestAnimationFrame(tick);
 		});

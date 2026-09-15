@@ -312,12 +312,26 @@ function bytesOf(name) {
 		// the encoder ends with the bind offset back at 0, so a following frame() reads block 0
 		GpuSim.batch(s, DT, 3, 2);
 		assert.equal(GpuSim.S.finOffset || 0, 0, 'batch resets its dynamic offset');
-		// the tail copy leaves block 0 holding the LAST frame's scalars, the single-frame
-		// invariant an on-demand diagFrame relies on for fPlates() after a mid-batch spawn
+		// commitBatch leaves block 0 holding the LAST frame's scalars, the single-frame
+		// invariant an on-demand diagFrame relies on for fPlates() after a mid-batch
+		// spawn. (It is a queue writeBuffer queued after the submit, not an in-encoder
+		// copy - a buffer cannot be copied onto itself, and the encoder would be
+		// invalidated: see the pin below.)
 		const devView = new Float32Array(GpuSim.S.buf.frameIn.bytes);
 		for (let i = 0; i < 74; i++) {
 			assert.equal(devView[i], GpuSim.S.finBlocks[2 * l.finStride + i],
-				'batch tail copies the final block over block 0, word ' + i);
+				'commit writes the final block back over block 0, word ' + i);
+		}
+		// The stub is strict about the one rule that sank the first Phase V build: Dawn
+		// rejects a buffer copied onto itself and invalidates the WHOLE encoder (the
+		// submit runs nothing, onSubmittedWorkDone returns in a fraction of a
+		// millisecond). If this pin ever goes away, the batch assertions above have no
+		// teeth for a self-copy regression.
+		{
+			const enc = dev.createCommandEncoder();
+			enc.copyBufferToBuffer(GpuSim.S.buf.frameIn, 2 * l.finStride * 4, GpuSim.S.buf.frameIn, 0, 74 * 4);
+			assert.throws(() => enc.finish(), /same buffer/,
+				'a same-buffer copy invalidates the encoder, like Dawn');
 		}
 	}
 

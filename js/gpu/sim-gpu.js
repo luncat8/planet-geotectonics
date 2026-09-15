@@ -700,7 +700,13 @@ var GpuSim = {
 	// TS_MAX and every repeat has the same per-kernel costs). `diagAt` is the
 	// frame index running K11 (-1 = none); play puts a wanted diagnostic frame
 	// last in its segment.
-	batch: function (state, dt, n, diagAt, tail) {
+	// Build one segment's encoder: the n frames' dispatch graph, the timestamp
+	// resolve, then the render tail. The tail (GpuRenderer.appendTo) draws the world
+	// texture, never the canvas, so its position only decides which frame's state the
+	// world shows - last is the freshest. play() submits the encoder after a queue
+	// drain (one segment deep); direct callers use batch(), which encodes and commits
+	// in one call.
+	encodeBatch: function (state, dt, n, diagAt, tail) {
 		var S = GpuSim.S, l = S.l;
 		GpuSim.frameBlocks(state, dt, n);
 		var strideBytes = l.finStride * 4;
@@ -714,20 +720,34 @@ var GpuSim = {
 			if (S.tsOn && i === 0) S.tsActive = false;
 		}
 		S.finOffset = 0;
-		// The single-frame invariant is "block 0 holds the most recent frame's
-		// scalars": a later on-demand diagFrame reads fPlates() from offset 0
-		// (plate count can have changed mid-batch at a spawn). Copy the last
-		// block over block 0 in the same encoder, after the dispatches; the two
-		// ranges never overlap (stride is at least one padded block).
-		if (n > 1) {
-			enc.copyBufferToBuffer(S.buf.frameIn, (n - 1) * strideBytes,
-				S.buf.frameIn, 0, GpuSim.FIN_FIELDS * 4);
-		}
 		GpuSim.tsResolve(S, enc);
-		// The frame loop's render tail (GpuRenderer.appendTo) goes last, so one submit
-		// carries both sim and the visible frame for this rAF's segment encoder.
 		if (tail) tail(enc);
+		return enc;
+	},
+
+	batch: function (state, dt, n, diagAt, tail) {
+		var enc = GpuSim.encodeBatch(state, dt, n, diagAt, tail);
+		GpuSim.commitBatch(enc, n);
+		return enc;
+	},
+
+	// Submit a segment encoder, then restore the single-frame invariant: block 0 of
+	// frameIn holds the most recent frame's scalars, so an on-demand diagFrame (which
+	// reads fPlates() from offset 0 after a mid-batch spawn) sees the current plate
+	// count. The bytes go out as a queue writeBuffer queued AFTER the submit, not an
+	// in-encoder copy: WebGPU rejects a buffer copied onto itself, and the rejection
+	// invalidates the whole encoder - the old tail copy discarded every n>1 batch
+	// (the GPU ran nothing, the bench iso measured a dead submit, and the smoke
+	// compared a GPU world that had never advanced past boot). The driver copies the
+	// bytes at queue time, so the reused finBlocks scratch is safe to rewrite by the
+	// next frameBlocks.
+	commitBatch: function (enc, n) {
+		var S = GpuSim.S, l = S.l;
 		S.device.queue.submit([enc.finish()]);
+		if (n > 1) {
+			S.device.queue.writeBuffer(S.buf.frameIn, 0, S.finBlocks.subarray(
+				(n - 1) * l.finStride, (n - 1) * l.finStride + GpuSim.FIN_FIELDS));
+		}
 	},
 
 	// Read the timestamps of the frame two submits back (its ring slot is free by
@@ -1060,16 +1080,27 @@ var GpuSim = {
 	// boundaries. An event cycle needs the CPU mirror and an upload, so the
 	// segment ends on the frame before one is due; a checkpoint's full round trip
 	// ends the segment after its frame, exactly as n step() calls ordered them.
+	//
+	// The sim pipeline stays ONE SEGMENT DEEP: each encoder is built synchronously
+	// (the render tail runs now, so the page's painted bookkeeping sees it in this
+	// rAF) but its submit waits for the queue to drain. Without that, a setting
+	// whose per-rAF work outruns the GPU (L6 1 step, L5 5 steps) enqueues an
+	// ever-growing backlog - the canvas falls further behind every frame, and the
+	// next event round trip's readback stalls behind everything queued ahead of it.
+	// With it, the device runs at its own pace and the reported Myr/s is the rate
+	// the sim actually achieves.
+	//
 	// `hold` is polled at the segment boundary - the only point an encoder can
 	// stop (an encoder already submitted cannot be un-submitted); the page's view
 	// gate stops a batch starting at all, so a drag catches at most one segment.
 	// Returns the number of frames submitted so the frame loop counts real work.
-	// opts.render(enc), if given, is the visible frame. It is consumed once: appended
-	// to the first segment encoder when that encoder is submitted in this turn, or
-	// submitted on its own encoder BEFORE a round trip that must await (getCurrentTexture
-	// after a yield presents black: L6 flash per cadence, L7 blank until pause). Later
-	// segments of the same call do not acquire the canvas again. Standalone draw() stays
-	// for paused and view-only frames.
+	// opts.render(enc), if given, is the visible frame: it draws the world texture
+	// (GpuRenderer.appendTo) and is consumed once - appended to the first segment
+	// encoder, or, when an event is already due at the start, to its own encoder
+	// before the round trip awaits, so the world state at the boundary is current.
+	// Later segments of the same call do not draw again. The canvas itself is only
+	// ever blitted by the page on a drained queue (GpuRenderer.present), which is
+	// what keeps heavy settings from presenting undrawn, black frames.
 	play: async function (state, dt, n, hold, opts) {
 		var P = GpuSim.Params, S = GpuSim.S;
 		var done = 0, want = !!S.diagWanted;
@@ -1104,8 +1135,13 @@ var GpuSim = {
 			// for one on the final segment overall, so a full download afterwards reads
 			// current counters (used by the batch-identity rig).
 			var diagHere = want || (opts && opts.diagLast && done + run === n);
-			GpuSim.batch(state, dt, run, diagHere ? run - 1 : -1, takeRender());
+			// Build the encoder now (the tail runs synchronously), hold the submit for
+			// the drain: the device is empty and this segment is the only work that
+			// follows it.
+			var enc = GpuSim.encodeBatch(state, dt, run, diagHere ? run - 1 : -1, takeRender());
 			want = false;
+			await S.device.queue.onSubmittedWorkDone();
+			GpuSim.commitBatch(enc, run);
 			for (var j = 0; j < run; j++) { state.t += dt; state.frame++; }
 			done += run;
 			if (state.ckptCap > 0 && state.t >= state.ckptDue) {

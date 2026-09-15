@@ -1,15 +1,19 @@
-/* gpu-readback.js - the renderer's readback path on the stub device (tests/gpu-stub.js).
+/* gpu-readback.js - the renderer's texture paths on the stub device (tests/gpu-stub.js).
    No pixel values survive here - the stub records commands instead of executing them - so
-   what this pins is the part a real device would reject or silently get wrong:
-     1. the parity check never copies from a presented canvas texture. Chrome/D3D gives a
-        swapchain texture the usage it wants, so `configure({ usage: COPY_SRC })` does not
-        make `getCurrentTexture()` a legal copy source (owner's rig: 32 validation errors,
-        16 empty comparisons). The renderer owns an offscreen
-        RENDER_ATTACHMENT|TEXTURE_BINDING|COPY_SRC texture (drawn into, sampled by the
-        blit, copied out) and copies from that.
-     2. the order within one submit is draw -> blit, and the copy is its own submit after
-        it, so the staging buffer holds the layer that was just drawn.
-     3. the canvas keeps the default usage: the app's renderer never reads itself back.
+   what this pins is the part a real device would reject or present black:
+     1. every renderer owns a world texture (RENDER_ATTACHMENT|TEXTURE_BINDING|COPY_SRC),
+        the draw target in the app's mode and the copy source in the parity rigs'. The
+        canvas keeps the default usage: a swapchain texture is not a legal copy source
+        (owner's rig: 32 validation errors, 16 empty comparisons), and the readback
+        never touches it.
+     2. no encoder may hold both the layer draw and the canvas blit. The spec replaces a
+        presented canvas's drawing buffer with a fresh transparent-black one on each
+        getCurrentTexture after the presentation, and the compositor shows whatever is in
+        it at the next refresh - a canvas pass queued behind a sim segment finishes after
+        that refresh and presents black (the black frames every setting heavier than the
+        refresh used to flash). The blit is its own encoder, submitted on a drained queue.
+     3. the order across submits is world draw -> canvas blit -> (readback) copy, so the
+        canvas and the staging buffer both hold the layer that was just drawn.
    Run: node tests/gpu-readback.js */
 'use strict';
 const { assert, Grid, State } = require('./helpers.js');
@@ -35,25 +39,32 @@ function recordingDevice(log) {
 	device.presented = 0;
 	device.createTexture = (d) => {
 		log.push({ op: 'createTexture', usage: d.usage, size: d.size.slice(), format: d.format });
-		return { usage: d.usage, size: d.size.slice(), createView: () => ({ of: 'offscreen' }) };
+		const t = { usage: d.usage, size: d.size.slice(), destroyed: false, createView: () => ({ of: 'offscreen' }) };
+		t.destroy = () => { t.destroyed = true; };
+		return t;
 	};
 	device.createSampler = () => ({ of: 'sampler' });
 	// layout: 'auto' means the pipeline is the layout's source, so it must answer
 	// getBindGroupLayout like the real one does.
 	device.createRenderPipeline = () => ({ of: 'blitPipeline', getBindGroupLayout: () => ({ of: 'blitLayout' }) });
 	device.createBindGroup = () => ({ of: 'blitGroup' });
+	// Encoders are numbered so an assertion can tell which passes share an encoder: the
+	// black-frame fix is "no encoder holds both the world draw and the canvas blit", and
+	// a per-op log without the encoder id cannot express that.
 	const realEncoder = device.createCommandEncoder;
+	let encSeq = 0;
 	device.createCommandEncoder = () => {
 		const enc = realEncoder.call(device);
+		const id = ++encSeq;
 		enc.beginRenderPass = (d) => {
 			const view = d.colorAttachments[0].view;
-			log.push({ op: 'renderPass', target: view.of || 'canvas' });
+			log.push({ op: 'renderPass', target: view.of || 'canvas', enc: id });
 			if ((view.of || 'canvas') === 'canvas') device.presented++;
 			return { setPipeline: () => {}, setBindGroup: () => {}, draw: () => {}, end: () => {} };
 		};
 		enc.copyTextureToBuffer = (src, dst, size) => {
 			log.push({ op: 'copyTextureToBuffer', from: src.texture.size ? 'offscreen' : 'canvas',
-				bytesPerRow: dst.bytesPerRow, size: size.slice(), usage: src.texture.usage });
+				enc: id, bytesPerRow: dst.bytesPerRow, size: size.slice(), usage: src.texture.usage });
 		};
 		return enc;
 	};
@@ -76,13 +87,19 @@ let canvasStub = null;
 function canvasOf() {
 	return { width: 0, height: 0, getContext: () => canvasStub };
 }
+// Every pass a log covers, grouped by encoder id: the assertion 2 shape.
+function passesByEnc(log) {
+	const byEnc = {};
+	for (const e of log) if (e.op === 'renderPass') (byEnc[e.enc] = byEnc[e.enc] || []).push(e.target);
+	return byEnc;
+}
 
 (async () => {
 	const state = new State(new Grid(3, 7).build(), 7);
 	// init builds the arenas; the device is then swapped per case for a recording one.
 	await GpuSim.init(state, { device: makeDevice() });
 
-	// 1. readback mode: offscreen texture, reused staging, draw -> blit -> copy.
+	// 1. readback mode: world texture, reused staging, world draw -> (blit) -> copy.
 	// The recorder closes over this array, so it is emptied in place (log.length = 0) rather
 	// than rebound - a new array would leave every later push in the one nobody reads.
 	const log = [];
@@ -94,9 +111,9 @@ function canvasOf() {
 	const configure = log.find((e) => e.op === 'configure');
 	assert.equal(configure.usage, 'default', 'the canvas keeps the default usage - COPY_SRC there is a lie on a real swapchain');
 	const tex = log.find((e) => e.op === 'createTexture');
-	assert.ok(tex, 'readback mode creates its own texture');
+	assert.ok(tex, 'the renderer owns its world texture');
 	assert.equal(tex.usage, RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC,
-		'that texture is a legal draw target, blit source and copy source');
+		'the world texture is a legal draw target, blit source and copy source');
 	assert.deepEqual(tex.size, [state.grid.lookupW, state.grid.lookupH], 'sized to the lookup raster');
 	assert.equal(renderer.readRow % 256, 0, 'bytesPerRow is 256-aligned');
 	assert.equal(renderer.readSize, renderer.readRow * state.grid.lookupH, 'the staging buffer covers every row');
@@ -104,39 +121,68 @@ function canvasOf() {
 	assert.equal(renderer.staging.size, renderer.readSize, 'and exactly the image size');
 
 	log.length = 0;
-	renderer.draw('plate');
-	const passes = log.filter((e) => e.op === 'renderPass').map((e) => e.target);
-	assert.deepEqual(passes, ['offscreen', 'canvas'], 'the layer is drawn offscreen, then blitted to the canvas');
-	assert.equal(log.filter((e) => e.op === 'copyTextureToBuffer').length, 0, 'draw() copies nothing');
+	renderer.redraw('plate');
+	assert.deepEqual(log.filter((e) => e.op === 'renderPass').map((e) => e.target), ['offscreen'],
+		'redraw paints the world texture alone: the canvas never shares an encoder with a layer draw');
+	assert.equal(log.filter((e) => e.op === 'copyTextureToBuffer').length, 0, 'redraw copies nothing');
 
 	log.length = 0;
-	const bytes = await renderer.readPixels();
-	const copies = log.filter((e) => e.op === 'copyTextureToBuffer');
-	assert.equal(copies.length, 1, 'readPixels is one copy');
-	assert.equal(copies[0].from, 'offscreen', 'the copy source is the offscreen texture, never the canvas');
-	assert.equal(copies[0].usage & COPY_SRC, COPY_SRC, 'and that texture carries COPY_SRC');
-	assert.equal(copies[0].bytesPerRow, renderer.readRow, 'bytesPerRow matches the staging buffer');
-	assert.equal(bytes.length, renderer.readSize, 'readPixels hands back the whole image');
-	const staging = renderer.staging;
-	await renderer.readPixels();
-	assert.equal(renderer.staging, staging, 'the staging buffer is reused, not reallocated');
-	assert.equal(log.filter((e) => e.op === 'createTexture').length, 0, 'a second read allocates nothing');
+	renderer.present();
+	assert.deepEqual(log.filter((e) => e.op === 'renderPass').map((e) => e.target), ['canvas'],
+		'present is its own encoder: one canvas blit, the world is only sampled');
 
-	// 2. the app's mode: one pass straight to the canvas, no offscreen texture at all.
+	// 2. the app's mode: the same world texture, no staging buffer, and the same split -
+	// the canvas blit is never a pass inside a layer draw's encoder.
 	log.length = 0;
 	const rig2 = recordingDevice(log);
 	GpuSim.S.device = rig2.device;
 	canvasStub = rig2.canvasContext;
 	const plain = new GpuRenderer(canvasOf()).init(state);
-	assert.equal(plain.offscreen, undefined, 'the app renderer has no readback rig');
+	const plainTex = log.find((e) => e.op === 'createTexture');
+	assert.ok(plainTex, 'the app renderer keeps the world texture (the canvas blit samples it)');
+	assert.equal(plainTex.usage, RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC,
+		'with the full usage, so a readback rig can be added without re-creating it');
 	assert.equal(plain.staging, undefined, 'and no staging buffer');
 	log.length = 0;
-	plain.draw('z');
+	plain.redraw('z');
+	assert.deepEqual(log.filter((e) => e.op === 'renderPass').map((e) => e.target), ['offscreen'],
+		'one world pass, the canvas is not touched');
+	assert.equal(rig2.device.presented, 0, 'no canvas acquisition by a world draw');
+	log.length = 0;
+	plain.present();
 	assert.deepEqual(log.filter((e) => e.op === 'renderPass').map((e) => e.target), ['canvas'],
-		'one pass, straight to the canvas');
-	assert.equal(rig2.device.presented, 1, 'the canvas texture is acquired exactly once per draw');
-	assert.equal(log.filter((e) => e.op === 'copyTextureToBuffer').length, 0, 'nothing is ever copied out of it');
+		'the blit acquires the canvas, on its own encoder');
+	assert.equal(rig2.device.presented, 1, 'one present, one acquisition');
 
-	console.log('PASS gpu-readback: parity reads an offscreen COPY_SRC texture (draw -> blit -> copy), '
-		+ 'the canvas keeps the default usage, and the app path is still one pass');
+	// 3. back to the readback rig: a full frame (world draw, blit, copy) keeps the order
+	// draw -> blit -> copy, and no encoder mixes the two pass kinds.
+	log.length = 0;
+	renderer.redraw('z');
+	renderer.present();
+	const bytes = await renderer.readPixels();
+	const copies = log.filter((e) => e.op === 'copyTextureToBuffer');
+	assert.equal(copies.length, 1, 'readPixels is one copy');
+	assert.equal(copies[0].from, 'offscreen', 'the copy source is the world texture, never the canvas');
+	assert.equal(copies[0].usage & COPY_SRC, COPY_SRC, 'and that texture carries COPY_SRC');
+	assert.equal(copies[0].bytesPerRow, renderer.readRow, 'bytesPerRow matches the staging buffer');
+	assert.equal(bytes.length, renderer.readSize, 'readPixels hands back the whole image');
+	for (const id in passesByEnc(log)) {
+		const targets = passesByEnc(log)[id];
+		assert.ok(targets.every((t) => t === targets[0]),
+			'encoder ' + id + ' holds one pass kind only (' + targets.join(',') + ')');
+	}
+	const staging = renderer.staging;
+	await renderer.readPixels();
+	assert.equal(renderer.staging, staging, 'the staging buffer is reused, not reallocated');
+	assert.equal(log.filter((e) => e.op === 'createTexture').length, 0, 'a second read allocates nothing');
+
+	// 4. release: a level switch re-inits the sim arenas through GpuSim.release; the
+	// renderer's own allocations go through its release, not a GC.
+	renderer.release();
+	assert.equal(renderer.world, null, 'release destroys the world texture');
+	assert.equal(plain.world.destroyed, false, 'and leaves the other renderer alone');
+
+	console.log('PASS gpu-readback: the world texture carries every draw and every copy, '
+		+ 'no encoder mixes a layer draw with the canvas blit (the black-frame fix), '
+		+ 'the canvas keeps the default usage, and release frees the renderer\u2019s allocations');
 })().catch((e) => { console.error((e && e.stack) || e); process.exit(1); });

@@ -121,7 +121,10 @@ function fakeGpu() {
 		tsLine: 'winners 1.92 diagC 1.74 diagA 0.99',
 		init: function (state, opts) {
 			api.inits.push({ state: state, device: opts && opts.device, fallback: opts && opts.fallback });
-			if (!api.device) api.device = { name: 'fake-device' };
+			if (!api.device) api.device = { name: 'fake-device',
+				// The page's drain gate: the canvas blit waits for the queue before it
+				// presents, so the fake device answers the drain like an idle one does.
+				queue: { onSubmittedWorkDone: function () { return Promise.resolve(); } } };
 			api.S = { device: api.device, tsOn: true };
 			return Promise.resolve(api.S);
 		},
@@ -153,16 +156,21 @@ function fakeGpu() {
 // width 0 makes the page's mapRect bail out of every drag on the GPU canvas, which would turn
 // the GPU drag gate into a test of a drag that never happened.
 const fakeRenderers = [];
-function FakeRenderer(canvas) { this.canvas = canvas; this.draws = 0; this.appends = 0; this.appendLayers = []; this.views = []; fakeRenderers.push(this); }
+function FakeRenderer(canvas) { this.canvas = canvas; this.draws = 0; this.presents = 0; this.appends = 0; this.appendLayers = []; this.views = []; fakeRenderers.push(this); }
 FakeRenderer.prototype.init = function (state) {
 	this.state = state;
 	this.canvas.width = state.grid.lookupW; this.canvas.height = state.grid.lookupH;
 	return this;
 };
 FakeRenderer.prototype.setView = function (q) { this.views.push(q.slice(0)); };
-FakeRenderer.prototype.draw = function () { this.draws++; };
-// The single-submit merge: play's encoder carries the draw via appendTo, so a playing
-// GPU page paints without a second submit (draw() stays the paused/view-only path).
+// The world/canvas split: appendTo paints the world inside the play segment encoder
+// (one sim submit per rAF), redraw is the paused/view-only world draw, and present is
+// the drain-gated canvas blit - its own submit, never a pass inside the heavy encoder.
+FakeRenderer.prototype.redraw = function () { this.draws++; };
+FakeRenderer.prototype.present = function () { this.presents++; };
+// A level switch releases the replaced renderer's own allocations before building the
+// new one; the fake has none to free.
+FakeRenderer.prototype.release = function () {};
 FakeRenderer.prototype.appendTo = function (enc, layer) {
 	this.appends++;
 	this.lastEncoder = enc;
@@ -346,17 +354,23 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	// Playing hands the loop to GpuSim.play; while that promise is open, a resolution change
 	// must not swap the grid, the state and the arenas underneath it.
 	const gpuRendererNow = fakeRenderers[fakeRenderers.length - 1];
-	const appendsAtPlay = gpuRendererNow.appends, drawsAtPlay = gpuRendererNow.draws;
+	const appendsAtPlay = gpuRendererNow.appends, drawsAtPlay = gpuRendererNow.draws,
+		presentsAtPlay = gpuRendererNow.presents;
 	el('play').click();
 	page.pump(3, 20000);
+	// The blits are drain-gated: each one lands in a microtask after the fake drain
+	// resolves, and the pump above is synchronous - flush before counting.
+	await page.tick();
 	assert.equal(gpu.plays.length, 1, 'one play in flight');
 	assert.equal(gpu.plays[0].state.grid.V, 10242);
-	assert.ok(gpu.plays[0].renders === 1, 'the play call carries the render tail (single submit per rAF)');
+	assert.ok(gpu.plays[0].renders === 1, 'the play call carries the render tail (the world draw rides the segment encoder)');
 	assert.equal(gpuRendererNow.lastEncoder, gpu.plays[0].encoder,
-		'the draw is appended to the play encoder, not submitted on its own');
+		'the world draw is appended to the play encoder, not submitted on its own');
 	assert.equal(gpuRendererNow.appendLayers[gpuRendererNow.appendLayers.length - 1], 'plate');
 	assert.ok(gpuRendererNow.appends > appendsAtPlay && gpuRendererNow.draws === drawsAtPlay,
-		'playing GPU frames paint through appendTo, with zero standalone draw submits while a batch is in flight');
+		'playing GPU frames paint the world through appendTo, with zero standalone world draws while a batch is in flight');
+	assert.ok(gpuRendererNow.presents > presentsAtPlay,
+		'the canvas blit is its own drain-gated submit, never a pass inside the heavy encoder');
 	page.pump(2, 21000);
 	assert.equal(gpu.plays.length, 1, 'a busy device is not handed a second play');
 	assert.ok((gpu.diagWants || 0) >= 1,
