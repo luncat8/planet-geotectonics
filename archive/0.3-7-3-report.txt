@@ -1,0 +1,91 @@
+0.3-7-3 report — 2026-09-15
+
+Context
+- Base tree already contained the earlier 0.3-7 fixes: the batch self-copy removal, real readback copy-before-unmap, the world-texture renderer split, the smoke D1 diff, and the updated GPU tests.
+- New owner log: experiments/logs/0.3-7-3-log.txt.
+- New full test log: experiments/logs/full-test-2026-09-15-16-44.log.
+- New owner symptom: GUI GPU path still misbehaved at heavy settings, especially L7 (“all black until stop and move map by drag”).
+
+What the new log said
+- The smoke is now clean and meaningful:
+  - D1 boot + frame-5 tables are green.
+  - Pixel parity compares 16/16 layers with real samples.
+  - No uncaptured WebGPU/page errors.
+- The bench is also sane again:
+  - L5/L6 iso numbers for 1/5/20 are real, not the broken near-zero invalid-submit numbers.
+- The remaining issue was specifically the live GUI path at high load:
+  - owner copied a GUI strip for L7 GPU with 0 steps/s and t 0.0 Myr,
+  - and reported “all black until stop AND move map by drag”.
+
+Root cause
+The GUI and bench were still letting canvas presentation race the next heavy segment.
+
+More precisely:
+1. GpuSim.play resolves after it has SUBMITTED a segment, not after that segment has FINISHED on the GPU.
+2. js/ui.js and bench.html were scheduling the canvas present from queue.onSubmittedWorkDone() while the next play call could already be armed.
+3. At heavy settings, that meant the tiny blit was repeatedly queued behind the next heavy segment instead of immediately after the segment whose frame it was meant to show.
+4. Result:
+   - L6: occasional black flicker / missed visible frames.
+   - L7: the canvas could stay black under continuous play until pause/drag forced a standalone redraw path.
+
+This is separate from the earlier fixed bugs:
+- not the old frameIn self-copy invalid encoder bug,
+- not the old readPixels empty-view bug,
+- not the readback texture usage bug.
+
+Fix applied
+1. js/ui.js
+   - GPU play path now keeps gpu.busy through:
+     - GpuSim.play(...)
+     - queue drain
+     - standalone redraw of the latest buffers
+     - second queue drain
+     - canvas present
+   - The steady-play “presentWhenDrained() every rAF” path was removed.
+   - The merged branch now only suppresses duplicate same-frame redraw work.
+   - GPU step button path was aligned to the same redraw-after-finish, then present ordering.
+
+2. bench.html
+   - smooth measurement now also waits for play work to finish,
+   - redraws the final world state,
+   - waits for that redraw to drain,
+   - then presents,
+   - and only then releases its busy flag / schedules the next tick.
+
+3. tests/gui.js
+   - updated to pin the new contract:
+     - while play is in flight there is no standalone redraw and no canvas present yet,
+     - once play settles, the page redraws the latest buffers and then presents them,
+     - rebuild still waits for the in-flight GPU work to settle.
+
+Files changed in this follow-up
+- js/ui.js
+- bench.html
+- tests/gui.js
+
+Why this should fix the owner symptom
+- The visible canvas is no longer refreshed from a callback that can be overtaken by the next heavy segment.
+- Instead, the page waits for the heavy segment to finish, redraws the current buffers on a tiny standalone pass, then presents that completed redraw.
+- So a heavy config should now freeze or run slowly when necessary, but it should not stay black.
+
+Verification done here
+- node tests/gui.js — PASS
+- node tests/run-all.js — PASS (24/24 short profile)
+
+Relevant existing owner evidence still valid
+- experiments/logs/0.3-7-3-log.txt
+- experiments/logs/full-test-2026-09-15-16-44.log
+
+Owner-rig follow-up still wanted
+1. Manual GUI check:
+   - index.html?engine=gpu&level=7
+   - press Play
+   - verify the map is visible during play (not black), and the strip advances above 0 steps/s.
+2. Re-copy one L7 GUI strip line after ~5–10 seconds of play.
+3. Optional sanity rerun:
+   - bench.html?level=5,6&steps=1,5,20&dt=0.1
+   - webgpu-smoke.html
+
+Bottom line
+- The earlier smoke / bench correctness work is intact.
+- This session fixed the remaining GUI heavy-load present ordering bug that best explains the owner’s L7 black-screen report.

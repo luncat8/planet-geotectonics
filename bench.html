@@ -263,23 +263,25 @@
 				if (now - t0 >= box) { finish(); return; }
 			if (busy) return;
 			busy = true;
-			// The production path: the world draw rides inside the play segment
-			// encoders (one sim submit per rAF); the canvas receives only a blit of
-			// the world texture, on a drained queue.
+			// The production path still appends the world draw to play's segment
+			// encoder, but the visible canvas is refreshed only AFTER that work has
+			// finished: redraw the latest buffers on their own tiny pass, then blit.
+			// Otherwise the next segment can overtake the present on the same drain,
+			// which is exactly how the L7 GUI ended up staying black until paused.
 			var renderTail = function (enc) {
 				try { planet.renderer.appendTo(enc, 'z'); } catch (e) {}
 			};
 			GpuSim.play(state, dt, n, null, { render: renderTail }).then(function () {
+				return GpuSim.S.device.queue.onSubmittedWorkDone();
+			}).then(function () {
+				if (!(planet && planet.renderer)) return;
+				try { planet.renderer.redraw('z'); } catch (e) {}
+				return GpuSim.S.device.queue.onSubmittedWorkDone();
+			}).then(function () {
+				if (planet && planet.renderer) {
+					try { planet.renderer.present(); } catch (e) {}
+				}
 				busy = false; done += n;
-				// The play pipeline is one segment deep, so the segment just submitted is
-				// the whole backlog; the sub-millisecond blit after it completes before
-				// the next refresh. Heavy settings no longer present undrawn (black)
-				// frames, and the canvas always shows the last completed state.
-				GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
-					if (planet && planet.renderer) {
-						try { planet.renderer.present(); } catch (e) {}
-					}
-				});
 				requestAnimationFrame(tick);
 			})['catch'](function () { busy = false; finish(); });
 			}
