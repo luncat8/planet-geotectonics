@@ -1143,3 +1143,28 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	closes after four, then plays the remaining 8, and requires the world to match one that ran
 	12 straight through (t, frame, `lastEvent`, plate map, hFel), i.e. the stop skips no cycle
 	and doubles none.
+
+## webgpu usage bits, and witnesses that lie by construction
+
+	TextureUsage COPY_SRC is 0x1; 0x4 is BufferUsage's COPY_SRC, which on a texture is
+	TEXTURE_BINDING. The readback texture in GpuRenderer.initReadback shipped as 0x10|0x4
+	with a comment claiming COPY_SRC: a legal draw target and blit source, an illegal copy
+	source. The stub device validates nothing, and the structural test defined its own copy
+	of the same constant, so wrong-in-both passed its own check (two owner captures, 32
+	uncaptured errors each: "usage (TextureBinding|RenderAttachment) doesn't include
+	TextureUsage::CopySrc", then every readPixels 0 bytes while the blit kept drawing the
+	map). Pin usage bits by name in tests/gpu-readback.js; the owner capture is the proof.
+	A witness that recomputes the formula the kernel just executed, with the kernel's own
+	local inputs, is self-consistent no matter what: D1's K10 witness (stored ω ==
+	relaxed(ω_prev, fit), dt and α correct) cannot see that the device's FIT differs from
+	the CPU's fit. To localize a CPU/GPU divergence, compare the intermediates ACROSS the
+	engines (the mirror already ships per-plate M/rhs/fit/ω and per-cell uMantle/wEq) -
+	never close a defect from self-consistency. And note the device's M/rhs come back
+	divided by A0[0] (reduceB normalizes before the solve): rescale before any comparison.
+	The app strip's p95/max frame gap is blind to the async event round trip: the rAF loop
+	keeps ticking while mapAsync waits, so max stays ~5.6 ms while the sim is stalled for
+	28.5 ms (0.3-II-ondevice-2: p95 = max = 5.6 in a window carrying 7 x 28.5 ms of event
+	time). bench.html's smooth mode re-arms its rAF only after a batch completes, so its
+	hitch rate is the sim-stall rate - that is the smoothness arbiter (0.3-6: L5 1 step
+	73/633, 5 steps 66/141; cadence eventCadence/dt = 10 frames). The strip's distribution
+	line measures frame cost only.

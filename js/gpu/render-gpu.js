@@ -305,9 +305,13 @@ GpuRenderer.prototype.initReadback = function (device) {
 	var w = this.canvas.width, h = this.canvas.height;
 	this.readRow = Math.ceil(w * 4 / 256) * 256;
 	this.readSize = this.readRow * h;
+	// All three usages are load-bearing: drawn into (RENDER_ATTACHMENT), sampled by the
+	// blit (TEXTURE_BINDING), copied out by the parity check (COPY_SRC). TextureUsage
+	// COPY_SRC is 0x1 - 0x4 is BufferUsage's COPY_SRC, and that mix-up made the copy fail
+	// validation on hardware with the stub never complaining.
 	this.offscreen = device.createTexture({
 		size: [w, h], format: this.format,
-		usage: 0x10 | 0x4          // RENDER_ATTACHMENT | COPY_SRC
+		usage: 0x10 | 0x4 | 0x1    // RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC
 	});
 	this.offView = this.offscreen.createView();
 	this.staging = device.createBuffer({ size: this.readSize, usage: 0x1 | 0x8 });   // MAP_READ | COPY_DST
