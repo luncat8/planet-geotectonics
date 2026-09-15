@@ -202,12 +202,21 @@
 		if (gpu.on && gpu.ready) {
 			if (gpu.busy) return;
 			gpu.busy = true;
-			gpu.pending = GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params).then(function () {
-				gpu.busy = false; dirty = true;
-			})['catch'](function (error) {
-				gpu.busy = false; console.error('GPU engine error', error);
-				probe.textContent = 'GPU engine error: ' + error.message;
-			});
+			gpu.pending = GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params)
+				.then(function () {
+					return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+						if (!(gpu.on && gpu.ready)) return;
+						gpuRenderer.redraw(layerValue());
+						return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+							if (gpu.on && gpu.ready) gpuRenderer.present();
+						});
+					});
+				}).then(function () {
+					gpu.busy = false; dirty = false; shownVersion = viewVersion;
+				})['catch'](function (error) {
+					gpu.busy = false; console.error('GPU engine error', error);
+					probe.textContent = 'GPU engine error: ' + error.message;
+				});
 		} else {
 			Sim.step(state, +dtInput.value); dirty = true;
 		}
@@ -492,34 +501,41 @@
 						// K11 is on demand: the status line refreshes on the 150 ms tick,
 						// so ask for one diagnostic frame per tick instead of every frame.
 						if (now - lastUpdate > 150) GpuSim.wantDiag();
-						// One submit per rAF: the visible draw is appended to each segment
-						// encoder instead of a second submit afterwards. `painted` records
-						// that a tail actually ran (a segment split by the cadence awaits its
-						// round trip first), and the view/layer stamps let the .then spot a
-						// view or layer change the merged draw did not cover.
-						var painted = false;
+						// The play encoder still carries the world draw (GpuRenderer.appendTo),
+						// which keeps the render path and the event-boundary semantics of
+						// GpuSim.play intact. The VISIBLE canvas is not touched here: once the
+						// segment has finished, redraw the latest buffers on their own tiny
+						// world pass and only then blit to the canvas. That order is what keeps
+						// L7 from staying black under continuous play - a present queued on the
+						// same drain as the next heavy segment lands behind that segment again.
 						var renderTail = function (enc) {
-							painted = true;
 							mergedThisFrame = true;
 							gpuRenderer.appendTo(enc, layerValue());
-							gpu.paintedView = viewVersion;
-							gpu.paintedLayer = currentLayer;
 						};
 						gpu.busy = true;
-						gpu.pending = GpuSim.play(state, dt, steps, viewLive, { render: renderTail }).then(function (done) {
-							gpu.busy = false; ran += done;
-							if (painted && gpu.paintedView === viewVersion && gpu.paintedLayer === currentLayer) {
+						gpu.pending = GpuSim.play(state, dt, steps, viewLive, { render: renderTail })
+							.then(function (done) {
+								return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+									if (!(gpu.on && gpu.ready)) return done;
+									gpuRenderer.redraw(layerValue());
+									return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+										if (gpu.on && gpu.ready) gpuRenderer.present();
+										return done;
+									});
+								});
+							}).then(function (done) {
+								gpu.busy = false; ran += done;
+								// The redraw above used the current buffers, layer and view, so the
+								// visible frame is current even if the user changed the view or layer
+								// while the batch was in flight.
 								dirty = false; shownVersion = viewVersion;
-							} else {
-								dirty = true;
-							}
-						})['catch'](function (error) {
-							gpu.busy = false; setPlaying(false);
-							// The probe line is easy to miss and the loop stops dead here, so
-							// the stack goes to the console too: an engine error must reach a log.
-							console.error('GPU engine error', error);
-							probe.textContent = 'GPU engine error: ' + error.message;
-						});
+							})['catch'](function (error) {
+								gpu.busy = false; setPlaying(false);
+								// The probe line is easy to miss and the loop stops dead here, so
+								// the stack goes to the console too: an engine error must reach a log.
+								console.error('GPU engine error', error);
+								probe.textContent = 'GPU engine error: ' + error.message;
+							});
 					}
 				} else {
 					Sim.advance(state, dt, steps); ran += steps; dirty = true;
@@ -536,22 +552,17 @@
 	// inside the heavy segment encoder, which would present black on heavy settings.
 	if (gpu.on && gpu.ready) {
 		if (mergedThisFrame) {
-			// The play tail drew the world inside this rAF's segment encoder (it reads
-			// the buffers that encoder updates, so it is the current frame); a second
-			// world draw would only redraw the same pixels.
+			// The play path already owns this rAF's world draw; the visible frame is
+			// refreshed when that batch finishes (see the play promise above), so a
+			// same-frame redraw here would only duplicate work.
 			dirty = false; shownVersion = viewVersion;
-			presentWhenDrained();
 		} else if (dirty || viewMoved) {
-			// A state, layer or view change needs a fresh world draw first (the view
-			// quaternion rides the draw's uniform, so a drag repaints even while the
-			// sim is gated); then the same drain-gated blit.
+			// Paused frames and drag/view-only frames still redraw immediately: no heavy
+			// batch is in charge of the visible frame, so repaint the world now and blit
+			// it once the tiny draw has drained.
 			gpuRenderer.redraw(layerValue());
 			presentWhenDrained();
 			dirty = false; shownVersion = viewVersion;
-		} else if (playing) {
-			// Steady play: the in-flight batch keeps the world current, so the blit
-			// alone advances the canvas, on the drain.
-			presentWhenDrained();
 		}
 	} else if (dirty || viewMoved) {
 		if (dirty) {

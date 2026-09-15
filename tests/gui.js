@@ -352,15 +352,15 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		'the GPU engine names the device type, not the model: ' + envLine(gpuReport));
 
 	// Playing hands the loop to GpuSim.play; while that promise is open, a resolution change
-	// must not swap the grid, the state and the arenas underneath it.
+	// must not swap the grid, the state and the arenas underneath it. The world draw still
+	// rides the play encoder, but the visible canvas waits for the play to finish, then does
+	// one tiny redraw+present of the latest buffers. That is the L7 black-frame fix: the
+	// present is not allowed to race the next heavy segment on the same drain.
 	const gpuRendererNow = fakeRenderers[fakeRenderers.length - 1];
 	const appendsAtPlay = gpuRendererNow.appends, drawsAtPlay = gpuRendererNow.draws,
 		presentsAtPlay = gpuRendererNow.presents;
 	el('play').click();
 	page.pump(3, 20000);
-	// The blits are drain-gated: each one lands in a microtask after the fake drain
-	// resolves, and the pump above is synchronous - flush before counting.
-	await page.tick();
 	assert.equal(gpu.plays.length, 1, 'one play in flight');
 	assert.equal(gpu.plays[0].state.grid.V, 10242);
 	assert.ok(gpu.plays[0].renders === 1, 'the play call carries the render tail (the world draw rides the segment encoder)');
@@ -368,9 +368,9 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		'the world draw is appended to the play encoder, not submitted on its own');
 	assert.equal(gpuRendererNow.appendLayers[gpuRendererNow.appendLayers.length - 1], 'plate');
 	assert.ok(gpuRendererNow.appends > appendsAtPlay && gpuRendererNow.draws === drawsAtPlay,
-		'playing GPU frames paint the world through appendTo, with zero standalone world draws while a batch is in flight');
-	assert.ok(gpuRendererNow.presents > presentsAtPlay,
-		'the canvas blit is its own drain-gated submit, never a pass inside the heavy encoder');
+		'while the batch is in flight there is no standalone redraw yet');
+	assert.equal(gpuRendererNow.presents, presentsAtPlay,
+		'and no canvas blit yet: the visible refresh waits for the batch to finish');
 	page.pump(2, 21000);
 	assert.equal(gpu.plays.length, 1, 'a busy device is not handed a second play');
 	assert.ok((gpu.diagWants || 0) >= 1,
@@ -384,6 +384,10 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 
 	gpu.plays[0].settle(gpu.plays[0].n);
 	await page.tick();
+	assert.ok(gpuRendererNow.draws > drawsAtPlay,
+		'once the play finishes the page redraws the latest buffers before it presents them');
+	assert.ok(gpuRendererNow.presents > presentsAtPlay,
+		'and then blits that completed redraw to the canvas');
 	assert.equal(gpu.inits.length, 2, 'the rebuild runs once the transfer has settled');
 	assert.equal(gpu.inits[1].state.grid.V, 163842, 'on the new world');
 	assert.equal(gpu.inits[1].device, gpu.device,
