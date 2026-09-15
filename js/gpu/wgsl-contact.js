@@ -249,39 +249,48 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 {
 	name: 'loserRank', groups: ['colI', 'scanAlone', 'lose', 'frameOut'],
 	code: `
-// One workgroup per winner column. The winner's bin is Lw unordered column indices
+// The winner's bin is Lw unordered column indices
 // in LOSE[2COLCAP+begin .. 2COLCAP+end); each entry's rank is the number of bin
 // entries with a smaller column index (the CPU's counting-sort position, integers
-// and order-free). O(Lw^2) per workgroup instead of O(Lw*aliveN) over every column;
+// and order-free). O(Lw^2) per winner instead of O(Lw*aliveN) over every column;
 // typical Lw is single digits, a mega-collision just lengthens the per-lane sweep.
 // Barrier-free by necessity: aliveN and the bin length are memory loads, so the
-// early returns and the tile loop are non-uniform control flow to the validator
+// winner guard and the tile loop are non-uniform control flow to the validator
 // and a workgroupBarrier would not parse (dawn: "'workgroupBarrier' must only be
 // called from uniform control flow"). Each lane instead ranks its entry against
 // the whole bin with direct loads of the scratch block: reads touch only
 // [src, src+n), writes only the distinct slots LOSE[begin+rank) (ranks are a
 // permutation, bin entries are distinct), so no lane's read conflicts with any
 // lane's write and the group never needs to synchronise.
+// Winners over columns in grid-stride steps of the dispatched workgroup count.
+// The dispatch is capped at 65535 (sim-gpu.js) because colCap workgroups exceed the
+// WebGPU maxComputeWorkgroupsPerDimension at L7 - 245763 > 65535 - and the invalid
+// dispatch silently drops every encoder it rides in: the device ran nothing, the
+// map never advanced, and only the idle rAF kept ticking. At L5/L6 the cap is
+// above colCap, so nw.x == colCap and each workgroup still handles exactly one
+// winner - the L5/L6 schedule is unchanged.
 @compute @workgroup_size(64)
-fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
-	let w = wid.x;
-	if (w >= aliveN()) { return; }
-	let begin = scanOut(w);
-	let end = scanOut(w + 1u);
-	let n = end - begin;
-	if (n <= 0) { return; }
-	let src = COLCAP * 2u + u32(begin);
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
 	let lane = lid.x;
-	let nTiles = (n + 63i) / 64i;
-	for (var tq = 0i; tq < nTiles; tq = tq + 1i) {
-		let e = tq * 64i + i32(lane);
-		if (e >= n) { continue; }
-		let x = atomicLoad(&LOSE[src + u32(e)]);
-		var rank = 0i;
-		for (var k = 0i; k < n; k = k + 1i) {
-			if (atomicLoad(&LOSE[src + u32(k)]) < x) { rank = rank + 1i; }
+	for (var w = wid.x; w < aliveN(); w = w + nw.x) {
+		let begin = scanOut(w);
+		let end = scanOut(w + 1u);
+		let n = end - begin;
+		if (n > 0) {
+			let src = COLCAP * 2u + u32(begin);
+			let nTiles = (n + 63i) / 64i;
+			for (var tq = 0i; tq < nTiles; tq = tq + 1i) {
+				let e = tq * 64i + i32(lane);
+				if (e < n) {
+					let x = atomicLoad(&LOSE[src + u32(e)]);
+					var rank = 0i;
+					for (var k = 0i; k < n; k = k + 1i) {
+						if (atomicLoad(&LOSE[src + u32(k)]) < x) { rank = rank + 1i; }
+					}
+					atomicStore(&LOSE[u32(begin + rank)], x);
+				}
+			}
 		}
-		atomicStore(&LOSE[u32(begin + rank)], x);
 	}
 }
 `
@@ -373,21 +382,47 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `
 },
 {
-	name: 'winners', groups: ['plateF', 'colI', 'lose', 'frameIn', 'frameOut'],
+	name: 'winnerA', groups: ['colI', 'lose', 'reduce', 'frameOut'],
 	code: `
-// Per-plate arc feed: sum the winners' feeds (ascending column order) into the plate.
+// Per-chunk arc-feed partials, lane = plate. Every lane of a workgroup walks the same
+// column range, so each colPlate/loseWCount load is one fetch serving all 128 plates;
+// the old winners kernel gave each plate one thread scanning aliveN columns alone,
+// which measured ~17 ms at L6 - one warp crawling through the column arrays while the
+// rest of the device idled (85% of the whole frame, and 4x that at L7). Partials are
+// written per (chunk, plate); winnerB folds them in chunk order, so the sum has a
+// fixed order and repeat runs stay bit-identical.
+@compute @workgroup_size(128)
+fn main(@builtin(workgroup_id) wg: vec3<u32>, @builtin(local_invocation_id) li: vec3<u32>) {
+	let p = li.x;
+	var feed = 0.0;
+	var count = 0;
+	let end = min((wg.x + 1u) * CHUNKW, aliveN());
+	for (var w = wg.x * CHUNKW; w < end; w = w + 1u) {
+		if (colPlate(w) != i32(p)) { continue; }
+		let c = loseWCount(w);
+		if (c <= 0) { continue; }
+		feed = feed + loseWFeed(w);
+		count = count + c;
+	}
+	RED[RED_WPART + (wg.x * PLATECAP + p) * 2u] = feed;
+	RED[RED_WPART + (wg.x * PLATECAP + p) * 2u + 1u] = bitcast<f32>(count);
+}
+`
+},
+{
+	name: 'winnerB', groups: ['plateF', 'reduce', 'frameIn', 'frameOut'],
+	code: `
+// Fold the per-chunk partials in workgroup order (the reduceB shape) and publish the
+// plate's arc feed and fed-loser count for the next frames' arcs kernel.
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	let p = gid.x;
 	if (p >= fPlates()) { return; }
 	var feed = 0.0;
 	var count = 0;
-	let n = aliveN();
-	for (var w = 0u; w < n; w = w + 1u) {
-		if (colPlate(w) != i32(p)) { continue; }
-		if (loseWCount(w) <= 0) { continue; }
-		feed = feed + loseWFeed(w);
-		count = count + loseWCount(w);
+	for (var wg = 0u; wg < NWG10; wg = wg + 1u) {
+		feed = feed + RED[RED_WPART + (wg * PLATECAP + p) * 2u];
+		count = count + bitcast<i32>(RED[RED_WPART + (wg * PLATECAP + p) * 2u + 1u]);
 	}
 	setPlateArcFeed(p, feed);
 	if (count > 0) { atomicAdd(&FOUT[FO_PLATE0 + p * 5u + 2u], count); }

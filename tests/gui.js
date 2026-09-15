@@ -121,10 +121,18 @@ function fakeGpu() {
 		tsLine: 'winners 1.92 diagC 1.74 diagA 0.99',
 		init: function (state, opts) {
 			api.inits.push({ state: state, device: opts && opts.device, fallback: opts && opts.fallback });
-			if (!api.device) api.device = { name: 'fake-device',
-				// The page's drain gate: the canvas blit waits for the queue before it
-				// presents, so the fake device answers the drain like an idle one does.
-				queue: { onSubmittedWorkDone: function () { return Promise.resolve(); } } };
+			if (!api.device) {
+				let lose;
+				api.device = { name: 'fake-device',
+					// The page hooks device.lost once per device; the test resolves it to
+					// check a device-side failure stops the run instead of stalling the
+					// play promise behind an idle 150 fps loop.
+					lost: new Promise(function (resolve) { lose = resolve; }),
+					loseDevice: function (reason) { lose({ reason: reason }); },
+					// The page's drain gate: the canvas blit waits for the queue before it
+					// presents, so the fake device answers the drain like an idle one does.
+					queue: { onSubmittedWorkDone: function () { return Promise.resolve(); } } };
+			}
 			api.S = { device: api.device, tsOn: true };
 			return Promise.resolve(api.S);
 		},
@@ -398,6 +406,20 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.equal(page.Params.level, 7);
 	const level7Report = page.copy();
 	assert.ok(worldLine(level7Report).startsWith('engine gpu · L7 ·'), worldLine(level7Report));
+
+	// A lost device must stop the run and say so. Without the hook, a dead device hangs
+	// the play promise forever - gpu.busy never clears, the strip goes on ticking fps
+	// over an idle loop, and the page reads as "150 fps but the sim does nothing" (the
+	// owner-rig L7 signature). The handler also drops GpuSim.device, so the engine
+	// switch it suggests re-boots on a fresh adapter instead of the dead one.
+	el('play').click();
+	page.pump(2, 22000);
+	assert.equal(gpu.plays.length, 2, 'playing again on the rebuilt world');
+	gpu.device.loseDevice('internal');
+	await page.tick();
+	assert.match(el('probe').textContent, /GPU device lost \(internal\)/);
+	assert.equal(el('play').textContent, 'Play', 'the lost device stops the run');
+	assert.equal(gpu.device, null, 'the dead device is dropped: the next GPU boot asks for a fresh adapter');
 
 	// --- the query pre-fill names a run instead of describing clicks ----------------------
 	const asked = loadPage('?level=6&engine=cpu&seed=11&steps=5&dt=0.05&cadence=10');

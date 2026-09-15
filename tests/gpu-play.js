@@ -341,8 +341,10 @@ function bytesOf(name) {
 	// = count of smaller bin indices, the WGSL's barrier-free per-lane sweep). Its output
 	// must equal the old per-column scan's definition: positions sorted by ascending loser
 	// column index, including bins larger than a workgroup and a synthetic mega-bin.
+	// nrank is the dispatched workgroup count the kernel grid-strides over (see §11):
+	// colCap at L5/L6, the 65535 dimension cap at L7 - the result must not depend on it.
 	{
-		function binAndSort(consumed, aliveN) {
+		function binAndSort(consumed, aliveN, nrank) {
 			const colCap = consumed.length;
 			const counts = new Int32Array(colCap);
 			for (let i = 0; i < aliveN; i++) if (consumed[i] >= 0) counts[consumed[i]]++;
@@ -357,25 +359,28 @@ function bytesOf(name) {
 				const i = order[k], w = consumed[i];
 				bin[offsets[w] + cursor[w]++] = i;
 			}
-			// loserRank: one workgroup per winner; each entry is ranked against the whole bin
+			// loserRank: the workgroups stride the winner id by the dispatched count;
+			// each entry is ranked against the whole bin
 			const loseList = new Int32Array(aliveN).fill(-1);
-			for (let w = 0; w < colCap; w++) {
-				const begin = offsets[w], n = offsets[w + 1] - begin;
-				if (n <= 0) continue;
-				const nTiles = Math.ceil(n / 64);
-				for (let tq = 0; tq < nTiles; tq++) {
-					for (let lane = 0; lane < 64; lane++) {
-						const e = tq * 64 + lane;
-						if (e >= n) continue;
-						const x = bin[begin + e];
-						let rank = 0;
-						for (let ck = 0; ck < nTiles; ck++) {
-							for (let k2 = 0; k2 < 64; k2++) {
-								const ke = ck * 64 + k2;
-								if (ke < n && bin[begin + ke] < x) rank++;
+			for (let wid = 0; wid < nrank; wid++) {
+				for (let w = wid; w < aliveN; w += nrank) {
+					const begin = offsets[w], n = offsets[w + 1] - begin;
+					if (n <= 0) continue;
+					const nTiles = Math.ceil(n / 64);
+					for (let tq = 0; tq < nTiles; tq++) {
+						for (let lane = 0; lane < 64; lane++) {
+							const e = tq * 64 + lane;
+							if (e >= n) continue;
+							const x = bin[begin + e];
+							let rank = 0;
+							for (let ck = 0; ck < nTiles; ck++) {
+								for (let k2 = 0; k2 < 64; k2++) {
+									const ke = ck * 64 + k2;
+									if (ke < n && bin[begin + ke] < x) rank++;
+								}
 							}
+							loseList[begin + rank] = x;
 						}
-						loseList[begin + rank] = x;
 					}
 				}
 			}
@@ -389,7 +394,14 @@ function bytesOf(name) {
 			for (let i = 0; i < aliveN; i++) {
 				if (rng() < 0.35 && !winners.includes(i)) consumed[i] = winners[Math.floor(rng() * winners.length)];
 			}
-			const got = binAndSort(consumed, aliveN);
+			const got = binAndSort(consumed, aliveN, consumed.length);
+			// the stride must not change the ranking: a capped dispatch (small nrank, the
+			// L7 shape) sorts exactly like one-workgroup-per-winner (the L5/L6 shape)
+			for (const nrank of [16, 7]) {
+				const strided = binAndSort(consumed, aliveN, nrank);
+				assert.deepEqual(Array.from(strided), Array.from(got),
+					'loserRank grid-strides to the same ranking at nrank ' + nrank + ', trial ' + trial);
+			}
 			// reference: the CPU counting-sort cursor fills each winner's bin while walking
 			// columns up, so each bin is ascending; bins live at their scanned offsets.
 			const counts = new Int32Array(consumed.length);
@@ -408,7 +420,7 @@ function bytesOf(name) {
 		// mega-bin: 400 losers under one winner, spanning seven tiles
 		const mega = new Int32Array(410).fill(-1);
 		for (let i = 10; i < 410; i++) mega[i] = 3;
-		const out = binAndSort(mega, 410);
+		const out = binAndSort(mega, 410, 410);
 		const want = [];
 		for (let i = 10; i < 410; i++) want.push(i);
 		assert.deepEqual(Array.from(out.slice(0, 400)), want, 'the tile sweep ranks a >64-entry bin');
@@ -436,7 +448,36 @@ function bytesOf(name) {
 		assert.equal(order.filter(function (x) { return x === 'render'; }).length, 1,
 			'the canvas is acquired once per play call');
 	}
+	// 11. The dispatch-dimension audit: every kernel's workgroup count must stay within
+	// the spec's 65535 maxComputeWorkgroupsPerDimension at every offered level. The L7
+	// loserRank shipped 245763 workgroups - a validation error that invalidates the
+	// whole command buffer, so the device ran nothing, the map froze at boot, and the
+	// GUI read "150 fps · 0 steps/s · t 0.0". Walked here against fabricated layouts
+	// with no device and no WGSL: dispatchGraph only needs the kernel table and a pass
+	// that records the dispatch counts.
+	{
+		const dispatches = [];
+		const fakePass = { setPipeline() {}, setBindGroup() {},
+			dispatchWorkgroups(n) { dispatches.push(n); }, end() {} };
+		const fakeEnc = { beginComputePass: () => fakePass };
+		for (const [level, V] of [[5, 10242], [6, 40962], [7, 163842]]) {
+			const colCap = Math.ceil(V * 1.5);
+			const l = GpuSim.layout({ grid: { V: V }, colCap: colCap, plateCap: 128 }, 32);
+			const S = { K: new Proxy({}, { get: () => ({ pipe: {}, group: {}, dynamic: false }) }), tsOn: false };
+			dispatches.length = 0;
+			GpuSim.dispatchGraph(S, fakeEnc, { prescribedOmega: false }, false, l);
+			assert.ok(dispatches.length > 60, 'L' + level + ': the frame graph walked (' + dispatches.length + ' dispatches)');
+			const over = dispatches.filter((g) => g > GpuSim.WGDIM);
+			assert.equal(over.length, 0, 'L' + level + ': every dispatch is within maxComputeWorkgroupsPerDimension');
+			assert.ok(dispatches.indexOf(Math.min(colCap, GpuSim.WGDIM)) >= 0,
+				'L' + level + ': loserRank dispatches min(colCap, ' + GpuSim.WGDIM + ') = ' + Math.min(colCap, GpuSim.WGDIM));
+		}
+		// and the guard trips by name when a kernel outgrows the dimension anyway
+		assert.throws(() => GpuSim.runGroups({ K: { x: { pipe: {} } }, tsOn: false }, fakeEnc, 'x', GpuSim.WGDIM + 1, 64),
+			/over the 65535/, 'runGroups refuses a dispatch past the dimension limit');
+	}
+
 	console.log('PASS gpu-play: ' + FRAMES + ' frames, ' + cyclesPlayed + ' event cycles both paths, event round trip ships '
 		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer, a batch the drag gate stopped resumes '
-		+ 'into the same run, re-init releases the replaced arenas, K11 is on demand');
+		+ 'into the same run, re-init releases the replaced arenas, K11 is on demand, the dispatch audit is clean at L5-L7');
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });

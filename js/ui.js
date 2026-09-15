@@ -157,6 +157,19 @@
 		// The device outlives the world: a level switch re-inits the arenas on it rather
 		// than asking for a second adapter (the bench's one-planet-per-level does the same).
 		GpuSim.init(state, { device: GpuSim.device, fallback: false }).then(function () {
+			// A device-side failure used to look like "the sim does nothing": the play
+			// promise never settles, so gpu.busy stayed true and the strip went on
+			// ticking fps over an idle loop. Stop the run, drop the dead device (the
+			// next GPU boot must ask for a fresh adapter) and say so.
+			if (GpuSim.device && !GpuSim.device.lostHooked) {
+				GpuSim.device.lostHooked = true;
+				GpuSim.device.lost.then(function (info) {
+					if (playing) setPlaying(false);
+					GpuSim.device = null;
+					probe.textContent = 'GPU device lost (' + (info && info.reason || 'unknown reason')
+						+ '); the map is frozen. Switch the engine away and back to retry.';
+				});
+			}
 			GpuSim.raster(state);
 			// The old renderer's world texture is a device allocation, not a GC victim.
 			if (gpuRenderer) gpuRenderer.release();
