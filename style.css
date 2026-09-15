@@ -1,7 +1,7 @@
 :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #363636; color: #e1e8eb; }
 * { box-sizing: border-box; }
 body { margin: 0; }
-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 5%; border-bottom: 1px solid #2b3540; }
+header { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #2b3540; }
 .eyebrow, .badge, .map-top, .map-bottom, h2 { font-size: 11px; letter-spacing: 1.4px; }
 .eyebrow { color: #aab9bd; }
 .badge { border: 1px solid #3e6259; border-radius: 20px; color: #80d7b9; padding: 6px 12px; }
@@ -33,7 +33,11 @@ canvas:active { cursor: grabbing; }
 .perf .rows span { white-space: pre; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; min-width: 0; }
 .perf .rows span:last-child { color: #788c99; }
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 10px 0; border-bottom: 1px solid #2b3540; }
-.controls label { display: flex; flex-direction: column; gap: 7px; font-size: 11px; color: #aab9bd; }
+.controls label { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 7px; font-size: 11px; color: #aab9bd; }
+.controls .check { flex-direction: row; gap: 6px; padding: 10px 0; cursor: pointer; white-space: nowrap; }
+.controls .check input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: #9bdfba; }
+#follow {accent-color: #9bdfba; width: auto; min-height: 0;}
+
 button, select, input { font: inherit; border: 1px solid #3c4b57; border-radius: 5px; background: #1a2632; color: #e1e8eb; padding: 10px 12px; min-height: 39px; }
 button { cursor: pointer; font-size: 13px; }
 button:hover { background: #2b3c49; }

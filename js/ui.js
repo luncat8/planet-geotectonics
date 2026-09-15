@@ -7,6 +7,7 @@
 	var currentLayer = 'plate';
 	function layerValue() { return currentLayer; }
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
+	var followInput = document.getElementById('follow');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var extractScratch = null;
@@ -369,9 +370,18 @@
 		if (pan.suppressClick) { pan.suppressClick = false; return; }
 		probeClick(event);
 	}
+	// With "Info follows pointer" on, hovering keeps the inspector on the cell under the
+	// pointer. It reads the CPU state as it is - on the GPU engine that is the mirror, one
+	// event cycle old - because a readback per move would stall the device queue; a click
+	// still pulls a fresh mirror through probeClick.
+	function followMove(event) {
+		if (!followInput.checked || pan.active) return;
+		probeAt(event, event.currentTarget);
+	}
 	function bindPan(target) {
 		target.addEventListener('pointerdown', beginPan);
 		target.addEventListener('pointermove', movePan);
+		target.addEventListener('pointermove', followMove);
 		target.addEventListener('pointerup', endPan);
 		target.addEventListener('pointercancel', endPan);
 		target.addEventListener('click', mapClick);
