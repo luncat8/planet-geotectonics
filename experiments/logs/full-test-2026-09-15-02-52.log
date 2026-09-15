@@ -1,0 +1,258 @@
+full test · 2026-09-15 02:52 · node 22.15.1 · win x86_64
+profile full: 27 tests
+PASS classic-script loading and Canvas render API smoke test (not a browser E2E test)
+ok browser-scripts 1229 ms
+PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse, in-flight transfer waited for), load follows the blob's level, the strip holds 5 slots in place and is the copy control, the bench can measure every setting the page offers, and a pan turns the view under a running sim (probe agrees with the paint, the dead zone keeps the click, the sim never waits for the mouse, the view outlives a rebuild, both engines defer a step while the view moves and a GPU batch handed the gate stops at its frame boundary, paint never recolors)
+ok gui 5877 ms
+PASS grid L0: 12 cells
+PASS grid L3: 642 cells
+PASS grid L5: 10242 cells
+ok grid 269 ms
+PASS quaternion: analytic rotation after 10,000 steps
+ok quat 41 ms
+PASS mantle: {
+  mean: 49999.99999999993,
+  polDiv: 0.031042798211765244,
+  rigDiv: 0.000024491723359994607,
+  laterRatio: 1.0480424779998438,
+  lowOverHigh: 3.9020630294618533e+28
+}
+ok mantle 164 ms
+PASS plates: rigid-field П‰ identity and drag-only least squares { compared: 640 }
+ok plates 181 ms
+PASS edges: { boundary: 188, trench: 23, subduct: 88, flicker: 0 }
+ok edges 89 ms
+{
+  thinLoad: 20295.05390151254,
+  thickLoad: 29520.07840220006,
+  ratio: 1.4545454545454546
+}
+PASS forces: collision load grows with continental thickness and stale contacts stay finite
+ok forces 280 ms
+PASS determinism: bit-identical state, reset and dt validation
+ok determinism 1360 ms
+{
+  dt: 0.1,
+  Myr: 1000,
+  iou: 0.96987087517934,
+  gaps: 0,
+  p99: 1,
+  msPerFrame: 0.21240536999999998
+}
+{
+  dt: 0.01,
+  Myr: 100,
+  iou: 0.9661495063469676,
+  gaps: 0,
+  p99: 0,
+  msPerFrame: 0.19442712999999995
+}
+PASS raster: transport, crowded bins, deterministic ties
+ok raster 4255 ms
+{
+  myr: 160,
+  windowMyr: 140,
+  columns: 2548,
+  consumedKm2PerMyr: 642771,
+  analyticKm2PerMyr: 637100,
+  measuredTrenchFluxKm2PerMyr: 578166,
+  measuredRidgeFluxKm2PerMyr: 395529,
+  consumeRatio: 1.0089,
+  spawnRatio: 1.0357,
+  trenchKm: 21872,
+  ridgeKm: 25400,
+  subductedColumns: 512,
+  spawnedColumns: 499,
+  asymmetry: 0.046,
+  mafResidual: 3.305998541068803e-14,
+  felResidual: 9.410756217735306e-16,
+  drift: 0.0047,
+  arcCells: 93,
+  arcMaxKm: 38.98,
+  gaps: 28
+}
+PASS conveyor: subduction flux, symmetric ridge, exact ledgers, stable column count
+ok conveyor 3061 ms
+{
+  myr: 150,
+  columns: 2533,
+  gaps: 16,
+  interiorHoles: 2,
+  oceanicColumns: 376,
+  spawned: [ 251, 233 ],
+  lost: [ 88, 427 ],
+  hFelByRiftDistanceAt40Myr: [ 8.96, 19.41, 28.13, 34.76, 34.88, 34.99 ],
+  reaches15KmAtCell: 0,
+  undeformedAtCell: 3,
+  felResidual: 1.835510259954267e-15
+}
+PASS rift: 35 -> 8.96 km within 3 cells, oceanic crust forms, no interior gaps
+ok rift 2925 ms
+young ocean { actual: -2600, expected: -2600 }
+old ocean { actual: -5730, expected: -5730 }
+continent { actual: 400, expected: 400 }
+collision plateau { actual: 6234, expected: 6200 }
+rifted margin { actual: -1648, expected: -1650 }
+PASS isostasy: calibrated ocean, continent, collision and rift elevations
+ok isostasy 73 ms
+{
+  coneBeforeKm: 70,
+  coneAfterKm: 69.96005158337744,
+  basinSedKm: 0.05194976342068515,
+  massError: 0
+}
+PASS erosion: cone mass reaches basin, total crust plus mobile conserved, routing settles
+ok erosion 93 ms
+{
+  plateauCells: 145,
+  peakKm: 68.17163200443245,
+  massError: -2.2351741790771484e-8
+}
+PASS collapse: thick plateau spreads symmetrically and conserves felsic mass
+ok collapse 536 ms
+PASS split: corridor opens { capCells: 348, plateCells: 1313, minCells: 25 }
+PASS split: an unforced corridor stays put
+PASS merge: 30 Myr of a dead boundary sutures two plates into one
+PASS merge: an active boundary keeps both plates
+PASS merge: rebasing moves the frame, not the crust { moved: 1249, kept: 1313 }
+PASS merge: a sliver plate is absorbed by the neighbour it touches most
+PASS events: deterministic, ledgers exact, { plates: 16, splits: 3, merges: 3 }
+ok split 7464 ms
+PASS checkpoint: a 300 frame round trip is bit-identical, 251480 bytes
+PASS checkpoint: the ring wraps and a snapshot replays { oldest: 20.000000000000014, newest: 80.09999999999972 }
+PASS checkpoint: nine malformed blobs rejected, live state untouched
+PASS checkpoint: peek reads level/seed/V, and rejects a blob load would reject
+ok checkpoint 1713 ms
+PASS view-dir: wheel wraps once, anchors E/N/W/S, renderer pixels match, 300 cells
+ok view-dir 1030 ms
+{
+  level: 5,
+  cells: 10242,
+  columns: 9670,
+  msPerStep: 7.57,
+  framesPerSec: 132.1,
+  target: 60
+}
+{
+  events: 0.146,
+  integrate: 0.004,
+  move: 0.205,
+  bin: 0.051,
+  raster: 0.493,
+  mantle: 1.614,
+  edges: 1.073,
+  contact: 0.496,
+  apply: 0.372,
+  column: 1.098,
+  surface: 1.444,
+  forces: 0.197,
+  reduce: 0.107,
+  diag: 0.266
+}
+PASS perf: 132.1 frames/s at L5 (target 60, development floor 40)
+PASS perf strip slots: 5 fixed rows, report() drops the empty ones
+ok perf 3135 ms
+PASS clipboard: async write, file:// textarea fallback (created, readonly, selected, removed), refusal falls back, both-ways failure reported, content-safe class acknowledgement, all three pages load the module
+ok clipboard 1271 ms
+PASS wgsl-struct: 55 kernel sources balanced, entry-pointed, constants defined
+ok wgsl-struct 110 ms
+PASS gpu-play: 25 frames, 2 event cycles both paths, event round trip ships 642/963 columns and no cell or edge buffer, a batch the drag gate stopped resumes into the same run, re-init releases the replaced arenas
+ok gpu-play 418 ms
+PASS gpu-readback: parity reads an offscreen COPY_SRC texture (draw -> blit -> copy), the canvas keeps the default usage, and the app path is still one pass
+ok gpu-readback 91 ms
+{
+  dt: 0.1,
+  Myr: 500.0000000000452,
+  cm: 4.478099258072494,
+  maxCm: 9.683477724024142,
+  conv: 2189,
+  div: 1758,
+  trans: 111,
+  rigid: 6.843874359417885e-16,
+  quat: 2.220446049250313e-16,
+  finite: 1,
+  msPerFrame: 7.76142976
+}
+{
+  dt: 0.01,
+  Myr: 49.99999999999862,
+  cm: 5.092509040242936,
+  maxCm: 14.009368279313428,
+  conv: 2043,
+  div: 1956,
+  trans: 77,
+  rigid: 0,
+  quat: 2.220446049250313e-16,
+  finite: 1,
+  msPerFrame: 7.096060880000001
+}
+PASS kinematics: 16 plates, rigid v, speeds 1вЂ“10 cm/yr, mixed boundaries
+ok kinematics 74464 ms
+{
+ "oArcAtTrench": 1,
+ "oArcOnOverrider": 1,
+ "oVmsOnOceanic": 1,
+ "oOroOnContinental": 1,
+ "oBasOnThickSediment": null,
+ "violations": "0/0/0/0/0"
+}
+{
+ "withOrogenicSummit": {
+  "placed": 0.0524,
+  "mobile": 0,
+  "offPath": 0,
+  "onHighGround": 0,
+  "summitZ": 7268
+ },
+ "withoutOrogenicSummit": {
+  "placed": 0,
+  "mobile": 0
+ }
+}
+  t  100  vms  1397 mafic   108 arc   802 orogenic   150 basin   125 placer    20  max 0.994
+  t  200  vms  1254 mafic   146 arc   932 orogenic   332 basin   287 placer    53  max 0.997
+  t  300  vms   997 mafic   219 arc  1080 orogenic   494 basin   435 placer    82  max 0.995
+  t  400  vms   839 mafic   222 arc  1065 orogenic   607 basin   519 placer    99  max 0.994
+  t  500  vms   686 mafic   242 arc  1026 orogenic   742 basin   547 placer   103  max 0.995
+  t  600  vms   631 mafic   271 arc  1099 orogenic   785 basin   581 placer   110  max 0.994
+  t  700  vms   629 mafic   263 arc  1027 orogenic   767 basin   497 placer    95  max 0.994
+  t  800  vms   450 mafic   283 arc   999 orogenic   755 basin   551 placer    96  max 0.990
+{
+ "arcOnOverrider": 0.896,
+ "arcNearTrenchNow": 0.361,
+ "vmsOceanicNow": 0.685,
+ "oroContinental": 0.999,
+ "basinSediment": 0.925
+}
+PASS ores: production sites exact, placer rig downslope-only, six bounded potentials, ranked deposits, checkpoint round trip
+ok ores 53132 ms
+PASS retained-memory smoke test: { heap: 84496, buffers: 0 }
+ok alloc 22671 ms
+dt 0.1, hot start, 1500 Myr in 172 s
+  t  100 plates  21 cols  9217 cont   6.4% craton  0.00% mean 12.64 cm/yr max 20.00 Tm 1.55 splits   9 merges   4 snapshots 4
+  t  200 plates  20 cols  9621 cont  11.2% craton  0.00% mean 12.78 cm/yr max 20.00 Tm 1.50 splits  22 merges  18 snapshots 9
+  t  300 plates  23 cols  9412 cont  15.0% craton  1.03% mean 13.46 cm/yr max 20.00 Tm 1.46 splits  33 merges  25 snapshots 14
+  t  400 plates  20 cols  9483 cont  15.8% craton  2.70% mean 10.43 cm/yr max 19.70 Tm 1.42 splits  42 merges  37 snapshots 16
+  t  500 plates  17 cols  9522 cont  16.6% craton  3.76% mean 11.24 cm/yr max 20.00 Tm 1.37 splits  47 merges  45 snapshots 16
+  t  600 plates  19 cols  9333 cont  19.7% craton  5.45% mean  8.97 cm/yr max 20.00 Tm 1.33 splits  54 merges  50 snapshots 16
+  t  700 plates  16 cols  9362 cont  18.3% craton  5.77% mean  8.96 cm/yr max 18.38 Tm 1.29 splits  58 merges  57 snapshots 16
+  t  800 plates  17 cols  9336 cont  21.1% craton  6.64% mean  8.67 cm/yr max 17.80 Tm 1.26 splits  63 merges  61 snapshots 16
+  t  900 plates  16 cols  9327 cont  22.0% craton  7.93% mean  7.41 cm/yr max 15.05 Tm 1.22 splits  65 merges  64 snapshots 16
+  t 1000 plates  14 cols  9358 cont  17.7% craton  7.56% mean  7.39 cm/yr max 14.56 Tm 1.19 splits  66 merges  67 snapshots 16
+  t 1100 plates  15 cols  9446 cont  19.9% craton  8.47% mean  7.42 cm/yr max 15.57 Tm 1.16 splits  70 merges  70 snapshots 16
+  t 1200 plates  14 cols  9497 cont  19.9% craton  8.24% mean  5.98 cm/yr max 15.02 Tm 1.12 splits  72 merges  73 snapshots 16
+  t 1300 plates  14 cols  9443 cont  20.8% craton  9.19% mean  6.40 cm/yr max 17.94 Tm 1.09 splits  74 merges  75 snapshots 16
+  t 1400 plates  10 cols  9543 cont  19.0% craton  8.88% mean  5.11 cm/yr max 18.28 Tm 1.06 splits  74 merges  79 snapshots 16
+  t 1500 plates   8 cols  9486 cont  19.1% craton  9.57% mean  5.30 cm/yr max  8.83 Tm 1.04 splits  74 merges  81 snapshots 16
+PASS longrun 1500 Myr: no NaN, invariants exact, plates 6-40, middle epoch 9.05 cm/yr, continental at 1500 Myr 19.1%, 74 splits and 81 merges
+dt 0.01, 300 Myr in 415 s vs the dt 0.1 run at 300 Myr: {
+  plates: [ 23, 19 ],
+  meanCm: [ 13.46, 11.52 ],
+  continental: [ 0.15, 0.136 ],
+  splits: [ 33, 32 ],
+  merges: [ 25, 29 ]
+}
+PASS longrun: 300 Myr at dt 0.01 matches dt 0.1 at the statistics level
+ok longrun 587180 ms
+PASS all tests (full profile, 27 tests in 773 s)
+exit 0 · 773 s

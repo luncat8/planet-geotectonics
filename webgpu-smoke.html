@@ -6,7 +6,10 @@
 <!-- webgpu-smoke.html - double-click in a real browser (no build, no server, file:// ok).
      Boots the GPU engine exactly like index.html does, runs a short CPU/GPU parity
      stretch, exercises the timestamp pipeline and every map layer, and writes the
-     full report below. "Save log" downloads it as a .log file - drop that file into
+     full report below. The first two lines are the environment: one short header from
+     js/env.js (date to the minute, browser, OS/CPU type) and the GPU as a type plus one
+     vendor word - a capture never carries a UA string or an adapter model.
+     "Save log" downloads it as webgpu-smoke-<date>-<time>.log - drop that file into
      experiments/logs/ and tell the next agent session its name. -->
 <style>
 body { font: 13px/1.5 ui-monospace, Consolas, monospace; background: #10141d; color: #cdd6e4; margin: 16px; }
@@ -23,6 +26,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <button id="save">Save log</button><button id="copy">Copy log</button>
 <pre id="log">starting…</pre>
 <canvas id="map" width="256" height="128"></canvas>
+<script src="js/env.js"></script>
 <script src="js/geodesics.js"></script>
 <script src="js/params.js"></script>
 <script src="js/quat.js"></script>
@@ -71,17 +75,15 @@ console.error = function () {
 window.addEventListener('error', function (e) { errors.push('pageerror: ' + e.message); });
 window.addEventListener('unhandledrejection', function (e) { errors.push('unhandledrejection: ' + e.reason); });
 
-function adapterInfo(adapter) {
-	if (!adapter) return 'none';
-	var i = adapter.info || {};
-	return [i.description || [i.vendor, i.architecture, i.device].filter(Boolean).join('/') || 'unknown',
-		'features: ' + Array.from(adapter.features || []).join(',') || 'features: (empty)']
-		+ ' | ts-query: ' + (adapter.features.has('timestamp-query') ? 'yes' : 'no');
+// One short line per capture, built by js/env.js: date to the minute, browser, OS/CPU type,
+// then the GPU as a type plus one vendor word. No UA string, no adapter model, no seconds.
+function captureLine(adapter, fallback) {
+	return 'gpu ' + Env.gpu(adapter, fallback)
+		+ ' · ts-query ' + (adapter.features.has('timestamp-query') ? 'yes' : 'no');
 }
 
 (async function () {
-	note('boot', 'date ' + new Date().toISOString());
-	note('boot', 'browser ' + navigator.userAgent);
+	note('boot', Env.line());
 	if (!navigator.gpu) { fail('navigator.gpu missing - open in a browser with WebGPU (Chrome 113+/Firefox 141+)'); return finish(); }
 
 	var t0 = Date.now();
@@ -89,7 +91,7 @@ function adapterInfo(adapter) {
 	var usedFallback = false;
 	if (!adapter) { adapter = await navigator.gpu.requestAdapter({ forceFallbackAdapter: true }); usedFallback = true; }
 	if (!adapter) { fail('no adapter at all'); return finish(); }
-	note('boot', 'adapter ' + (usedFallback ? '(fallback/SwiftShader) ' : '(hardware) ') + adapterInfo(adapter));
+	note('boot', captureLine(adapter, usedFallback));
 
 	// Two identical worlds from the same seed: CPU reference and GPU run.
 	var level = Params.level, seed = Params.seed, dt = 0.1;
@@ -319,7 +321,7 @@ function adapterInfo(adapter) {
 });
 
 document.getElementById('save').addEventListener('click', function () {
-	var name = 'webgpu-smoke-' + new Date().toISOString().replace(/[:.]/g, '-') + '.log';
+	var name = 'webgpu-smoke-' + Env.fileStamp() + '.log';
 	var link = document.createElement('a');
 	link.href = URL.createObjectURL(new Blob([LOG.join('\n')], { type: 'text/plain' }));
 	link.download = name;

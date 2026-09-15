@@ -70,23 +70,31 @@ See `0.2-plan.md` and `0.1.5-final-design.md`.
 ## Test
 
 ```
-node tests/run-all.js
+node tests/run-all.js            short profile: every test except the four histories (~1 min)
+node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
+node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```
 
-Uses only Node built-ins. The runner launches the retained-memory test with `--expose-gc`.
+Uses only Node built-ins. The short profile is the iterating set; `--full` adds the tests whose
+runtime scales with simulated time (`longrun` alone is ~10 min on two cores, 12 of the gate's
+18 min on the owner's rig), so it belongs on a real machine - run `run_full_test.py` there
+(double-click on Windows, `python3 run_full_test.py` elsewhere) and get
+`experiments/logs/full-test-<2026-09-15-01-34>.log`; `run_gpu_parity.py` does the same for the
+headless CPU/GPU ensemble (`tests/gpu-parity.js`, needs the Chromium/puppeteer rig).
+A capture's first line is its environment, kept short: date to the minute, browser, OS/CPU type,
+and the GPU as a type plus one vendor word (`2026-09-15 01:34 · chrome 151 · linux x86_64 ·
+gpu hardware nvidia`, built by `js/env.js`).
+The runner launches the retained-memory test with `--expose-gc`.
 The JS side of the GPU engine - the mirror transfer and the play path's scheduling - runs
 headless against a stub device (`tests/gpu-play.js` on `tests/gpu-stub.js`), and
 `node experiments/roundtrip-cost.js` times the round trip.
 The GPU path itself is verified in a real browser: double-click `webgpu-smoke.html`
 (`run-smoke.bat` / `run-smoke.command`), which boots the engine, runs a CPU/GPU parity
 stretch, exercises the timestamp ring and every map layer, and offers the full report
-as a downloadable log.
-The slower release profile extends the stability histories to 4500 Myr at dt 0.1 and 500 Myr
-at dt 0.01, and makes the 60 steps/s performance proxy strict:
-
-```
-node tests/run-all.js --release
-```
+as `webgpu-smoke-<2026-09-15-01-34>.log`.
+The release profile extends the stability histories to 4500 Myr at dt 0.1 and 500 Myr
+at dt 0.01, and makes the 60 steps/s performance proxy strict - it is what
+`node tests/run-all.js --release` (and `run_full_test.py --release`) runs.
 
 A full calibration sweep is separate from the test suite because it runs 18 long histories:
 

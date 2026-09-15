@@ -15,7 +15,10 @@
 //      once the pointer rests (the old bug paused on pointerdown and waited for mouse-up), the
 //      view outlives a rebuild, both engines defer a step while the view is moving - the GPU's
 //      batch carries the event round trip, which is the stutter a drag used to have - and a
-//      view-only frame repaints without recolouring.
+//      view-only frame repaints without recolouring;
+//   7. the copied report opens with the one-line environment header (js/env.js): minute stamp,
+//      browser at its major version, OS/CPU type, and the GPU as a type plus one vendor word -
+//      a capture never carries a UA string, an adapter model or seconds.
 //
 // js/ui.js runs as a classic script against tests/dom-stub.js, which is built by parsing the
 // real index.html, and a recorded fake GpuSim: the device side of the engine is
@@ -102,15 +105,17 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 }
 
 // --- 3. the page, running ----------------------------------------------------------------
-const MODULES = ['geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
+const MODULES = ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'sim', 'render'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
-// the play promise so an in-flight transfer can be held open on purpose.
+// the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the
+// capture header reads for the GPU type (the real engine keeps it on GpuSim too).
 function fakeGpu() {
 	const api = {
 		device: null, S: null, inits: [], plays: [], steps: 0, uploads: 0, rasters: 0,
+		adapter: { info: { vendor: 'nvidia', description: 'NVIDIA GeForce RTX 4070' } },
 		tsLine: 'winners 1.92 diagC 1.74 diagA 0.99',
 		init: function (state, opts) {
 			api.inits.push({ state: state, device: opts && opts.device, fallback: opts && opts.fallback });
@@ -180,6 +185,14 @@ function loadPage(search) {
 	return page;
 }
 
+// The copy report opens with the environment header (js/env.js) and the world line follows it.
+// The header is what a capture gets filed under, so its shape is pinned: date to the minute, the
+// browser at its major version, the OS with the CPU type, and - on the GPU engine only - the GPU
+// as a type plus one vendor word. Never a UA string, never an adapter model, never seconds.
+const envLine = (text) => text.split('\n')[0];
+const worldLine = (text) => text.split('\n')[1];
+const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?$/;
+
 (async () => {
 	const page = loadPage('');
 	const { el, strip, gpu } = page;
@@ -213,11 +226,12 @@ function loadPage(search) {
 	assert.ok(/^(events|integrate|move|bin|raster|mantle|edges|contact|apply|column|surface|forces|reduce|diag) /
 		.test(strip.children[4].textContent), 'slot 4 kernel laps: ' + strip.children[4].textContent);
 
-	// --- the strip is the copy control: the capture header names its world ----------------
+	// --- the strip is the copy control: the capture header names its rig and its world -----
 	const text = page.copy();
 	await page.tick();
-	assert.ok(text.startsWith('engine cpu · L5 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7'),
-		'copy header: ' + text.split('\n')[0]);
+	assert.ok(ENV_LINE.test(envLine(text)), 'the report opens with the one-line environment header: ' + envLine(text));
+	assert.ok(worldLine(text).startsWith('engine cpu · L5 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7'),
+		'copy header: ' + worldLine(text));
 	assert.ok(!/\n\n/.test(text) && !/\n$/.test(text), 'no blank line for a reserved-but-empty slot');
 	assert.ok(/\nt 0\.1 Myr · CPU · L5$/.test(text), 'the world line closes the report: ' + text.split('\n').pop());
 	assert.ok(strip.classList.contains('copied'), 'the strip acknowledges that the write landed');
@@ -231,6 +245,28 @@ function loadPage(search) {
 	strip.dispatch('keydown', { key: ' ', preventDefault: () => {} });
 	assert.equal(page.api.document.copied.length, copies + 1, 'Space copies the strip');
 
+	// Env is the one formatter for that header - the browser rigs' boot lines and the
+	// double-click runners' log headers use it too - so its parsing is pinned on real strings.
+	const Env = globalThis.Env;
+	assert.ok(ENV_LINE.test(Env.line()), 'Env.line() is the header format: ' + Env.line());
+	assert.equal(Env.stamp(new Date(2026, 8, 15, 1, 34, 59)), '2026-09-15 01:34', 'a stamp has no seconds');
+	assert.equal(Env.fileStamp(new Date(2026, 8, 15, 1, 34, 59)), '2026-09-15-01-34');
+	const CHROME = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+	assert.equal(Env.browser(CHROME), 'chrome 151', 'a browser is a name and a major version');
+	assert.equal(Env.browser('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36 Edg/151.0.0.0'), 'edge 151');
+	assert.equal(Env.browser('Mozilla/5.0 (X11; Linux x86_64; rv:141.0) Gecko/20100101 Firefox/141.0'), 'firefox 141');
+	assert.equal(Env.browser('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15'), 'safari 18');
+	assert.equal(Env.browser('node-dom-stub'), 'unknown', 'an unrecognised UA is unknown, not a guess');
+	assert.equal(Env.platform(CHROME), 'linux x86_64');
+	assert.equal(Env.platform('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/151.0.0.0'), 'win x86_64');
+	assert.equal(Env.platform('Mozilla/5.0 (X11; Linux aarch64) Chrome/151.0.0.0'), 'linux arm64');
+	assert.equal(Env.platform('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Version/18.1 Safari/605.1.15'), 'mac',
+		'a Mac claims no architecture: its UA says "Intel" on an M-series machine too');
+	assert.equal(Env.gpu({ info: { vendor: 'nvidia', description: 'NVIDIA GeForce RTX 4070' } }), 'hardware nvidia',
+		'the GPU is a type and a vendor, never the model');
+	assert.equal(Env.gpu({ info: { vendor: 'google', description: 'Google SwiftShader LVP' } }, false), 'software swiftshader');
+	assert.equal(Env.gpu(null), 'none');
+
 	// --- the Resolution select rebuilds the world, it does not relabel it -----------------
 	el('level').value = '6';
 	el('level').dispatch('change');
@@ -241,7 +277,9 @@ function loadPage(search) {
 	assert.ok(/CPU engine runs at a few frames\/s/.test(el('probe').textContent),
 		'L6 on the CPU engine says what it will feel like: ' + el('probe').textContent);
 	page.pump(2, 5000);
-	assert.ok(page.copy().startsWith('engine cpu · L6 ·'), 'the capture header follows the level');
+	const levelReport = page.copy();
+	assert.ok(worldLine(levelReport).startsWith('engine cpu · L6 ·'), 'the capture header follows the level: '
+		+ worldLine(levelReport));
 	assert.equal(strip.children.length, page.Perf.SLOTS, 'a rebuild does not change the strip\'s shape');
 
 	// --- Load follows the blob's own level and seed ---------------------------------------
@@ -283,7 +321,10 @@ function loadPage(search) {
 	assert.ok(strip.children[4].textContent.startsWith(gpu.tsLine),
 		'the last slot is the device\'s own kernel table: ' + strip.children[4].textContent);
 	assert.ok(/CPU mirror one event cycle old/.test(strip.children[4].textContent));
-	assert.ok(page.copy().startsWith('engine gpu · L5 ·'), page.copy().split('\n')[0]);
+	const gpuReport = page.copy();
+	assert.ok(worldLine(gpuReport).startsWith('engine gpu · L5 ·'), worldLine(gpuReport));
+	assert.ok(/ · gpu hardware nvidia$/.test(envLine(gpuReport)),
+		'the GPU engine names the device type, not the model: ' + envLine(gpuReport));
 
 	// Playing hands the loop to GpuSim.play; while that promise is open, a resolution change
 	// must not swap the grid, the state and the arenas underneath it.
@@ -310,7 +351,8 @@ function loadPage(search) {
 	assert.equal(el('grid-info').textContent, 'EQUIRECTANGULAR / 163,842 CELLS / 56 KM');
 	assert.equal(el('level').value, '7');
 	assert.equal(page.Params.level, 7);
-	assert.ok(page.copy().startsWith('engine gpu · L7 ·'), page.copy().split('\n')[0]);
+	const level7Report = page.copy();
+	assert.ok(worldLine(level7Report).startsWith('engine gpu · L7 ·'), worldLine(level7Report));
 
 	// --- the query pre-fill names a run instead of describing clicks ----------------------
 	const asked = loadPage('?level=6&engine=cpu&seed=11&steps=5&dt=0.05');
@@ -319,8 +361,9 @@ function loadPage(search) {
 	assert.equal(asked.el('seed').value, '11');
 	assert.equal(asked.el('speed').value, '5');
 	assert.equal(asked.el('dt').value, '0.05');
-	assert.ok(asked.copy().startsWith('engine cpu · L6 · dt 0.05 · 5 steps/frame · view plate · map start · seed 11'),
-		asked.copy().split('\n')[0]);
+	const askedReport = asked.copy();
+	assert.ok(worldLine(askedReport).startsWith('engine cpu · L6 · dt 0.05 · 5 steps/frame · view plate · map start · seed 11'),
+		worldLine(askedReport));
 	// A level the select does not offer is ignored, not built: Grid takes 0-7 and a stray
 	// ?level=9 would throw before the page drew anything.
 	const stray = loadPage('?level=9');
