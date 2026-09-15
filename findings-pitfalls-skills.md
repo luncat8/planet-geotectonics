@@ -1192,3 +1192,29 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	a type plus one vendor word (hardware nvidia / software swiftshader). Same line in the
 	smoke log, the bench copy, the parity driver, the GUI's perf strip report and the two
 	.py runners' log headers; the log filename uses the same stamp as 2026-09-15-01-34.
+
+## workgroupBarrier is uniform-control-flow only, and memory loads are not uniform (2026-09-15)
+
+	Phase VI's loserRank shipped with workgroup barriers and never parsed: the bin
+	length (scanOut, a memory load) and aliveN() (an atomicLoad) guard its early
+	returns and the tile loop, and the validator conservatively treats every
+	memory-derived value as "possibly non-uniform" even when all lanes of the
+	workgroup provably read the same addresses - dawn: "'workgroupBarrier' must only
+	be called from uniform control flow", the note pointing at `if (w >= aliveN())
+	{ return; }`. The scan kernels were never in trouble because their loop breaks on
+	a stride derived from a constant, so every lane does identical work. Two fixes,
+	in order of preference: shape the kernel so every path to a barrier is driven by
+	constants or workgroup-builtins only, or - when the work genuinely depends on a
+	per-workgroup memory value, as here - drop the barriers and let each lane do its
+	whole job alone. loserRank now ranks each entry against the whole bin with
+	per-lane direct loads: reads touch only the scratch block [2COLCAP+begin,
+	2COLCAP+end), writes only the distinct slots LOSE[begin+rank) (ranks are a
+	permutation and bin entries are distinct - each column is scattered exactly once),
+	so no lane's read races any lane's write and no workgroup memory is needed. The
+	cost is O(Lw^2) loads per workgroup where the tile sweep did O(Lw^2)/64
+	comparisons: for the typical single-digit Lw that is a handful of L2-cached loads
+	plus three barriers gone, and a mega-collision just lengthens the per-lane sweep.
+	wgsl-struct.js cannot catch this - the structural checks (braces, defined names)
+	pass on the broken kernel too, only a real validator sees uniformity - so any new
+	barrier kernel has to be read against "every path to the barrier is constant- or
+	workgroup-builtin-driven" before it ships to the rig.

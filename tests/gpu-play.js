@@ -295,10 +295,10 @@ function bytesOf(name) {
 
 	// 9. Phase VI: the loserScatter/loserRank algorithm cannot run on the stub (no WGSL), so
 	// this is a faithful JS port of the kernels: an atomic-cursor scatter into per-winner
-	// bins in arbitrary thread order, then the workgroup tile ranking (64-lane tile pairs,
-	// one rank per target entry = count of smaller bin indices). Its output must equal the
-	// old per-column scan's definition: positions sorted by ascending loser column index,
-	// including bins larger than a tile and a synthetic mega-bin.
+	// bins in arbitrary thread order, then per-entry ranking (one rank per target entry
+	// = count of smaller bin indices, the WGSL's barrier-free per-lane sweep). Its output
+	// must equal the old per-column scan's definition: positions sorted by ascending loser
+	// column index, including bins larger than a workgroup and a synthetic mega-bin.
 	{
 		function binAndSort(consumed, aliveN) {
 			const colCap = consumed.length;
@@ -315,7 +315,7 @@ function bytesOf(name) {
 				const i = order[k], w = consumed[i];
 				bin[offsets[w] + cursor[w]++] = i;
 			}
-			// loserRank: one workgroup per winner, the 64-lane tile sweep from the WGSL
+			// loserRank: one workgroup per winner; each entry is ranked against the whole bin
 			const loseList = new Int32Array(aliveN).fill(-1);
 			for (let w = 0; w < colCap; w++) {
 				const begin = offsets[w], n = offsets[w + 1] - begin;

@@ -1,0 +1,103 @@
+2026-09-15 12:01 · chrome 151 · win x86_64 · gpu hardware nvidia
+engine gpu · L5 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7 · cadence 1 Myr
+180.0 fps  ·  step 0.00 ms  ·  frame 5.6 ms  ·  160 steps/s  ·  16.0 Myr/s
+p95 5.6 ms · max 5.6 ms
+events 8 (12.4 ms = dl 10.1 [wait 9.3] + cyc 2.0 + up 0.3)
+winners 3.12 loserRank 0.73 ledgerReduceA 0.58 subRateA 0.19 diagC 0.10 reduceA 0.10 gaps 0.07 resolve 0.06 thinning 0.05 · CPU mirror one event cycle old
+t 116.0 Myr · GPU · L5
+
+
+2026-09-15 12:01 · chrome 151 · win x86_64 · gpu hardware nvidia
+engine gpu · L6 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7 · cadence 1 Myr
+114.7 fps  ·  step 0.00 ms  ·  frame 12.4 ms  ·  47 steps/s  ·  4.7 Myr/s
+p95 22.2 ms · max 22.3 ms
+events 2 (98.8 ms = dl 92.4 [wait 89.6] + cyc 5.3 + up 1.1)
+winners 12.05 loserRank 2.27 subRateA 0.70 ledgerReduceA 0.60 reduceA 0.55 resolve 0.19 binScatter 0.17 gather 0.13 thinning 0.08 collapseDelta 0.08 · CPU mirror one event cycle old
+t 25.2 Myr · GPU · L6
+
+2026-09-15 12:01 · chrome 151 · win x86_64
+engine cpu · L6 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7 · cadence 1 Myr
+26.1 fps  ·  step 36.38 ms  ·  frame 38.7 ms  ·  26 steps/s  ·  2.6 Myr/s
+p95 44.4 ms · max 44.5 ms
+events 1.09  move 1.15  bin 0.26  raster 2.93  mantle 7.68  edges 3.94  contact 2.74  apply 1.67  column 5.57  surface 7.11  forces 0.91  reduce 0.46  diag 0.87
+t 79.7 Myr · CPU · L6
+
+2026-09-15 12:01 · chrome 151 · win x86_64
+engine cpu · L5 · dt 0.1 · 1 steps/frame · view plate · map start · seed 7 · cadence 1 Myr
+98.6 fps  ·  step 8.55 ms  ·  frame 11.0 ms  ·  95 steps/s  ·  9.5 Myr/s
+p95 11.2 ms · max 16.7 ms
+events 0.11  move 0.26  bin 0.06  raster 0.63  mantle 1.91  edges 1.03  contact 0.57  apply 0.43  column 1.31  surface 1.68  forces 0.24  reduce 0.11  diag 0.22
+t 19.3 Myr · CPU · L5
+
+
+
+2026-09-15 11:41 · chrome 151 · win x86_64 · gpu hardware nvidia
+level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+L5	1	10,242	6.825	5.6	16.6	38.9	47/801	16.0
+L5	5	10,242	0.586	5.6	16.7	33.3	76/720	71.9
+
+BENCH engine=gpu ts=on levels=5,6 steps=1,5,20 dt=0.1 diag=on-demand
+BENCH rig 2026-09-15 11:21 · chrome 151 · win x86_64 · gpu hardware nvidia
+BENCH L5 steps=1 kernels: winners 0.80 loserRank 0.15 ledgerReduceA 0.15 resolve 0.08
+BENCH L5 steps=1 iso ms/step=6.825 smooth med=5.6 p95=16.6 max=38.9 hitches=47 frames=801 myr/s=16.0
+BENCH L5 steps=5 kernels: winners 1.25 loserRank 0.23 ledgerReduceA 0.23 resolve 0.10 subRateA 0.08
+BENCH L5 steps=5 iso ms/step=0.586 smooth med=5.6 p95=16.7 max=33.3 hitches=76 frames=720 myr/s=71.9
+
+L6 seems not produced at all bench.html
+
+[boot] 2026-09-15 11:56 · chrome 151 · win x86_64
+[boot] gpu hardware nvidia · ts-query yes
+[init] GpuSim.init ok in 83 ms, tsOn=true, queries=140
+[parity] D1 boot M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 boot rhs/A0[0] rel p1 2.1e-1 p2 1.8e+0 p3 4.6e-1 p4 7.5e-1 p5 9.6e-1 p6 6.8e-1 p7 5.9e-1 p8 1.2e+0 p9 4.9e+0 p10 8.8e-1 p11 8.0e-1 p12 1.2e-1 p13 1.8e-1 p14 1.4e+0 p15 9.8e-1 p16 8.4e-1 · worst p9 4.9e+0
+[parity] D1 boot fit (omegaTarget) rel p1 4.6e-1 p2 2.9e+0 p3 6.8e-1 p4 9.3e-1 p5 4.3e-1 p6 4.9e-1 p7 5.7e-1 p8 5.8e-1 p9 4.5e+0 p10 8.0e-1 p11 3.9e-1 p12 4.4e-1 p13 1.2e+0 p14 3.0e+0 p15 5.1e-1 p16 1.0e+0 · worst p9 4.5e+0
+[parity] D1 boot omega rel p1 4.6e-1 p2 2.9e+0 p3 6.8e-1 p4 9.3e-1 p5 4.3e-1 p6 4.9e-1 p7 5.7e-1 p8 5.8e-1 p9 4.5e+0 p10 8.0e-1 p11 3.9e-1 p12 4.4e-1 p13 1.2e+0 p14 3.0e+0 p15 5.1e-1 p16 1.0e+0 · worst p9 4.5e+0
+[parity] D1 boot uMantle: worst rel 2.6e-5 (|d| 1.84e-2 m/Myr @c6214) · worst |d| 2.24e-1 m/Myr @c2056 (rel 3.8e-6)
+[parity] D1 boot wEq: worst rel 1.3e+3 (|d| 1.75e+6 m/Myr @c5658) · worst |d| 2.17e+6 m/Myr @c1644 (rel 3.5e+1)
+[FAIL] D1 (boot) layer = INPUTS: uMantle/wEq diverge before the plate solve (worst rel uMantle 2.6e-5, wEq 1.3e+3 > 0.001) - the mantle/forces field kernels disagree
+[parity] frame 5 dt 0.1 · n cpu=10242 gpu=10242 · plates cpu=16 gpu=16 · owner mismatch 0/10242 · |dz| max 307.4 m
+[parity] meanSpeed cpu=4.022 gpu=4.817 cm/yr · maxSpeed cpu=11.449 gpu=13.809 cm/yr
+[parity] omega relaxation: mean |omega|/|omegaTarget| cpu 0.837 gpu 1.000 over 16 plates · p1 cpu 0.943 gpu 1.000 · p2 cpu 0.691 gpu 1.000 · p3 cpu 0.871 gpu 1.000 · p4 cpu 0.863 gpu 1.000
+[parity] omega: worst |dR*w| plate 16 = 3.038 cm/yr · cpu from relaxed omega 4.022/11.449 · cpu from target omega 5.040/13.052 · gpu 4.817/13.809
+[parity] device K10: dt 0.100000 (uploaded 0.1) · alpha 0.200000 (expected 0.200000) · worst |stored - relaxed| omega 0.00e+0 rad/Myr
+[parity] D1 frame 5 M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 frame 5 rhs/A0[0] rel p1 2.2e-2 p2 3.2e-1 p3 3.3e-2 p4 6.6e-2 p5 9.7e-1 p6 3.3e-2 p7 1.0e-1 p8 2.6e-2 p9 1.1e-1 p10 5.1e-2 p11 9.1e-2 p12 2.2e-1 p13 8.0e-2 p14 2.2e-1 p15 6.6e-2 p16 6.5e-2 · worst p5 9.7e-1
+[parity] D1 frame 5 fit (omegaTarget) rel p1 3.9e-2 p2 1.4e-1 p3 1.2e-1 p4 1.0e-1 p5 6.5e-1 p6 8.7e-2 p7 1.8e-1 p8 5.3e-2 p9 6.1e-1 p10 1.0e-1 p11 3.5e-2 p12 9.2e-1 p13 1.8e-1 p14 2.3e-1 p15 5.6e-2 p16 9.3e-2 · worst p12 9.2e-1
+[parity] D1 frame 5 omega rel p1 1.6e-1 p2 3.1e-1 p3 1.3e-1 p4 2.3e-1 p5 3.4e-1 p6 7.7e-2 p7 1.4e-1 p8 1.6e-1 p9 8.5e-1 p10 1.5e-1 p11 8.9e-2 p12 2.3e-1 p13 3.6e-1 p14 4.6e-1 p15 1.6e-1 p16 2.3e-1 · worst p9 8.5e-1
+[parity] D1 frame 5 uMantle: worst rel 1.2e+0 (|d| 2.04e+3 m/Myr @c1571) · worst |d| 3.57e+3 m/Myr @c872 (rel 4.8e-2)
+[parity] D1 frame 5 wEq: worst rel 2.6e+2 (|d| 9.99e+5 m/Myr @c5968) · worst |d| 1.75e+6 m/Myr @c5857 (rel 1.0e+0)
+[FAIL] D1 (frame 5) layer = INPUTS: uMantle/wEq diverge before the plate solve (worst rel uMantle 1.2e+0, wEq 2.6e+2 > 0.001) - the mantle/forces field kernels disagree
+[FAIL] event round trip threw: Failed to execute 'writeBuffer' on 'GPUQueue': Number of bytes to write is too large
+[events] frame 20 t=0.5 Myr · plates 16 · columns 10242 · finite=false
+[FAIL] GPU state not finite after the event cycle
+[ts] tsCollect 3 ms · no kernel timing
+[render] canvas 1024x512 · format bgra8unorm · row 4096 · readback 2097152 B · cpu ref 2097152 B
+[FAIL] readback short on layer plate: 0 of 2097152 bytes
+[FAIL] readback short on layer type: 0 of 2097152 bytes
+[FAIL] readback short on layer z: 0 of 2097152 bytes
+[FAIL] readback short on layer damage: 0 of 2097152 bytes
+[FAIL] readback short on layer owner: 0 of 2097152 bytes
+[FAIL] readback short on layer sediment: 0 of 2097152 bytes
+[FAIL] readback short on layer speed: 0 of 2097152 bytes
+[FAIL] readback short on layer age: 0 of 2097152 bytes
+[FAIL] readback short on layer force: 0 of 2097152 bytes
+[FAIL] readback short on layer dir: 0 of 2097152 bytes
+[FAIL] readback short on layer oVms: 0 of 2097152 bytes
+[FAIL] readback short on layer oMaf: 0 of 2097152 bytes
+[FAIL] readback short on layer oArc: 0 of 2097152 bytes
+[FAIL] readback short on layer oOro: 0 of 2097152 bytes
+[FAIL] readback short on layer oBas: 0 of 2097152 bytes
+[FAIL] readback short on layer oPla: 0 of 2097152 bytes
+[render] GPU renderer drew 16 layers; pixel-parity actually compared 0/16 - 16 compared nothing (readback failures above)
+[errors] captured console/webgpu errors: 2
+  webgpu uncaptured: Dynamic Offset[0] (512) is out of bounds of [Buffer (unlabeled)] with a size of 10240 and a bound range of (offset: 0, size: 10240). The binding goes to the end of the buffer even with a dynamic offset of 0. Did you forget to specify the binding's size?
+   - While encoding [ComputePassEncoder (unlabeled)].SetBindGroup(0, [BindGroup (unlabeled)], 1, ...).
+   - While finishing [CommandEncoder (unlabeled)].
+  
+  webgpu uncaptured: [Invalid CommandBuffer] is invalid due to a previous error.
+   - While calling [Queue].Submit([[Invalid CommandBuffer]])
+  
+[FAIL] webgpu/page errors captured (see above)
+[result] FAIL (21)
+[result] total wall 1070 ms
+[log] copied 50 lines to the clipboard

@@ -252,13 +252,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 // One workgroup per winner column. The winner's bin is Lw unordered column indices
 // in LOSE[2COLCAP+begin .. 2COLCAP+end); each entry's rank is the number of bin
 // entries with a smaller column index (the CPU's counting-sort position, integers
-// and order-free). O(Lw^2) comparisons local to the bin instead of O(Lw*aliveN)
-// over every column; typical Lw is single digits. The bin is swept in 64-entry
-// tiles in workgroup memory, which keeps the comparisons off global memory and
-// leaves bin length unbounded (a mega-collision just takes more tile pairs).
-// Ranks are distinct, so the sorted writes are collision-free; the scratch bin in
-// the third COLCAP block is never overwritten by this kernel.
-var<workgroup> rankTile: array<i32, 64>;
+// and order-free). O(Lw^2) per workgroup instead of O(Lw*aliveN) over every column;
+// typical Lw is single digits, a mega-collision just lengthens the per-lane sweep.
+// Barrier-free by necessity: aliveN and the bin length are memory loads, so the
+// early returns and the tile loop are non-uniform control flow to the validator
+// and a workgroupBarrier would not parse (dawn: "'workgroupBarrier' must only be
+// called from uniform control flow"). Each lane instead ranks its entry against
+// the whole bin with direct loads of the scratch block: reads touch only
+// [src, src+n), writes only the distinct slots LOSE[begin+rank) (ranks are a
+// permutation, bin entries are distinct), so no lane's read conflicts with any
+// lane's write and the group never needs to synchronise.
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
 	let w = wid.x;
@@ -270,28 +273,15 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 	let src = COLCAP * 2u + u32(begin);
 	let lane = lid.x;
 	let nTiles = (n + 63i) / 64i;
-	// One target tile per outer pass: each lane owns one target entry, then sweeps
-	// every comparison tile, which the group loads cooperatively (load barrier,
-	// compare, drain barrier before the next load).
 	for (var tq = 0i; tq < nTiles; tq = tq + 1i) {
 		let e = tq * 64i + i32(lane);
-		var x = -1i;
+		if (e >= n) { continue; }
+		let x = atomicLoad(&LOSE[src + u32(e)]);
 		var rank = 0i;
-		if (e < n) { x = atomicLoad(&LOSE[src + u32(e)]); }
-		for (var ck = 0i; ck < nTiles; ck = ck + 1i) {
-			let li = ck * 64i + i32(lane);
-			if (li < n) { rankTile[lane] = atomicLoad(&LOSE[src + u32(li)]); }
-			workgroupBarrier();
-			if (e < n) {
-				for (var k = 0u; k < 64u; k = k + 1u) {
-					let ke = ck * 64i + i32(k);
-					if (ke < n && rankTile[k] < x) { rank = rank + 1i; }
-				}
-			}
-			workgroupBarrier();
+		for (var k = 0i; k < n; k = k + 1i) {
+			if (atomicLoad(&LOSE[src + u32(k)]) < x) { rank = rank + 1i; }
 		}
-		if (e < n) { atomicStore(&LOSE[u32(begin + rank)], x); }
-		workgroupBarrier();
+		atomicStore(&LOSE[u32(begin + rank)], x);
 	}
 }
 `
