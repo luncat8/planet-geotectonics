@@ -4,8 +4,9 @@
      1. the parity check never copies from a presented canvas texture. Chrome/D3D gives a
         swapchain texture the usage it wants, so `configure({ usage: COPY_SRC })` does not
         make `getCurrentTexture()` a legal copy source (owner's rig: 32 validation errors,
-        16 empty comparisons). The renderer owns an offscreen RENDER_ATTACHMENT|COPY_SRC
-        texture and copies from that.
+        16 empty comparisons). The renderer owns an offscreen
+        RENDER_ATTACHMENT|TEXTURE_BINDING|COPY_SRC texture (drawn into, sampled by the
+        blit, copied out) and copies from that.
      2. the order within one submit is draw -> blit, and the copy is its own submit after
         it, so the staging buffer holds the layer that was just drawn.
      3. the canvas keeps the default usage: the app's renderer never reads itself back.
@@ -16,7 +17,10 @@ const GpuSim = require('../js/gpu/sim-gpu.js');
 const GpuRenderer = require('../js/gpu/render-gpu.js');
 const { makeDevice } = require('./gpu-stub.js');
 
-const RENDER_ATTACHMENT = 0x10, COPY_SRC = 0x4, MAP_READ = 0x1, COPY_DST = 0x8;
+// TextureUsage, not BufferUsage: COPY_SRC is 0x1 there. BufferUsage's 0x4 is
+// TEXTURE_BINDING, and the one mix-up of the two shipped a readback texture that was a
+// legal draw target and blit source but an illegal copy source - hardware only.
+const RENDER_ATTACHMENT = 0x10, TEXTURE_BINDING = 0x4, COPY_SRC = 0x1, MAP_READ = 0x1, COPY_DST = 0x8;
 
 // The renderer asks the browser for the canvas format; under node that is the only global
 // it needs, and bgra8unorm is what every current adapter returns. node 22 ships a read-only
@@ -91,7 +95,8 @@ function canvasOf() {
 	assert.equal(configure.usage, 'default', 'the canvas keeps the default usage - COPY_SRC there is a lie on a real swapchain');
 	const tex = log.find((e) => e.op === 'createTexture');
 	assert.ok(tex, 'readback mode creates its own texture');
-	assert.equal(tex.usage, RENDER_ATTACHMENT | COPY_SRC, 'that texture is a legal copy source');
+	assert.equal(tex.usage, RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC,
+		'that texture is a legal draw target, blit source and copy source');
 	assert.deepEqual(tex.size, [state.grid.lookupW, state.grid.lookupH], 'sized to the lookup raster');
 	assert.equal(renderer.readRow % 256, 0, 'bytesPerRow is 256-aligned');
 	assert.equal(renderer.readSize, renderer.readRow * state.grid.lookupH, 'the staging buffer covers every row');
