@@ -1218,3 +1218,39 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	pass on the broken kernel too, only a real validator sees uniformity - so any new
 	barrier kernel has to be read against "every path to the barrier is constant- or
 	workgroup-builtin-driven" before it ships to the rig.
+
+## Dynamic storage offsets need an explicit bind-group size (2026-09-15)
+
+	hasDynamicOffset: true without resource.size binds the whole buffer. Dawn then
+	rejects any nonzero offset: "Dynamic Offset[0] (512) is out of bounds of [Buffer]
+	with a size of 10240 and a bound range of (offset: 0, size: 10240). The binding
+	goes to the end of the buffer even with a dynamic offset of 0. Did you forget to
+	specify the binding's size?" Offset 0 happens to fit, so 1-step play and boot
+	raster look fine; a 5-frame batch (smoke play(5), bench iso steps=5) invalidates
+	the encoder. onSubmittedWorkDone then returns in <1 ms because the GPU ran
+	nothing - the 0.3-7 L5×5 iso of 0.586 ms/step against 6.825 at 1 step is that
+	number, not a speedup. The L6 bench rows never appeared: the device was already
+	lost. Pin the bind group entry at { offset: 0, size: strideBytes } and the layout
+	at minBindingSize = 74*4; tests/gpu-play.js §8 walks the stub's recorded groups.
+
+## getCurrentTexture after an await presents black (2026-09-15)
+
+	Appending the draw to the play encoder is one submit only while play stays
+	synchronous. An event round trip awaits mapAsync first; getCurrentTexture in
+	that continuation is not in the rAF turn, the swapchain image is cleared and
+	never stored, and the map goes black. L5's 10 ms wait is easy to miss; L6's
+	~90 ms wait flashes once per cadence; L7 throws or stalls so the map stays
+	black until Pause (standalone draw) or a drag (view-only draw). Submit the
+	visible frame before the await, consume the tail once per play call, and leave
+	later segments of that call without a second acquire. tests/gpu-play.js §10
+	pins the order: render, then roundTrip.
+
+## Do not CPU-raster the GPU world before GpuSim.raster (2026-09-15)
+
+	Sim.raster runs forces on reset/zero edgeType, then classify. A second raster
+	on that world feeds the classified edges into forces. The smoke did
+	Sim.raster(cpu); Sim.raster(gpu); GpuSim.init; GpuSim.raster, so boot wEq on
+	the device included slab/collision the CPU boot never saw (D1 layer INPUTS,
+	wEq rel 1.3e3, |d| ~2e6 m/Myr) while uMantle agreed to 2.6e-5. GpuSim.init
+	uploads the reset world; GpuSim.raster is the boot pass. The 20% gate stays
+	closed until a capture names a layer on that pairing.

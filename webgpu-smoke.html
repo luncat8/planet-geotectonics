@@ -101,7 +101,9 @@ function captureLine(adapter, fallback) {
 	cpu.reset(seed); gpu.reset(seed);
 	cpu.ckptCap = 0; gpu.ckptCap = 0;
 	Sim.raster(cpu);
-	Sim.raster(gpu);
+	// Do not CPU-raster the GPU world: GpuSim.raster is Sim.raster's twin, and a
+	// second raster on already-classified edges feeds slab/collision into boot
+	// forces the CPU pass never saw (D1 INPUTS: wEq off by ~cm/yr at boot).
 
 	var S = await GpuSim.init(gpu, { fallback: false });
 	note('init', 'GpuSim.init ok in ' + S.built + ' ms, tsOn=' + GpuSim.S.tsOn +

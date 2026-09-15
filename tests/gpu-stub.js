@@ -34,10 +34,13 @@ function makeDevice() {
 		writeBuffer: function (buf, offset, data, dataOff, size) {
 			if (buf.mapped) throw new Error('stub: writeBuffer to a mapped buffer');
 			writes++;
-			// dataOff/size are byte counts into the source, as on the real queue;
-			// the batched frameIn upload writes only the n blocks it precomputed.
-			var srcBytes = size !== undefined ? size : data.byteLength;
-			var srcOff = dataOff || 0;
+			// Spec: TypedArray dataOffset is in elements, size is in bytes. A range
+			// past the view throws the same OperationError the real queue does.
+			var srcOff = (dataOff || 0) * (data.BYTES_PER_ELEMENT || 1);
+			var srcBytes = size !== undefined ? size : data.byteLength - srcOff;
+			if (srcOff + srcBytes > data.byteLength) {
+				throw new Error('Number of bytes to write is too large');
+			}
 			new Uint8Array(buf.bytes).set(new Uint8Array(data.buffer, data.byteOffset + srcOff, srcBytes), offset);
 		},
 		submit: function () { submits++; },
@@ -46,9 +49,13 @@ function makeDevice() {
 	// Every dynamic offset passed to setBindGroup, in call order: the Phase V
 	// batch pins one per frameIn-binding kernel per batched frame.
 	var dynamicOffsets = [];
+	var bindGroups = [];
+	var bindGroupLayouts = [];
 	return {
 		counts: function () { return { writes: writes, submits: submits }; },
 		dynamicOffsets: dynamicOffsets,
+		bindGroups: bindGroups,
+		bindGroupLayouts: bindGroupLayouts,
 		limits: { maxStorageBuffersPerShaderStage: 16, minStorageBufferOffsetAlignment: 32 },
 		features: new Set(),
 		lost: new Promise(function () {}),
@@ -56,8 +63,8 @@ function makeDevice() {
 		createBuffer: function (d) { return new FakeBuffer(d.size, d.usage); },
 		createQuerySet: function () { throw new Error('stub: no timestamp-query'); },
 		createShaderModule: function () { return { getCompilationInfo: function () { return Promise.resolve({ messages: [] }); } }; },
-		createBindGroupLayout: function () { return {}; },
-		createBindGroup: function () { return {}; },
+		createBindGroupLayout: function (d) { bindGroupLayouts.push(d); return d || {}; },
+		createBindGroup: function (d) { bindGroups.push(d); return d || {}; },
 		createPipelineLayout: function () { return {}; },
 		createComputePipeline: function () { return {}; },
 		createCommandEncoder: function () {
