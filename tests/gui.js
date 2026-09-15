@@ -419,6 +419,22 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		[mirror.colors[cell * 3], mirror.colors[cell * 3 + 1], mirror.colors[cell * 3 + 2]],
 		'the painted pixel under the probe is that cell\'s plate colour');
 
+	// "Info follows pointer" is on by default: a plain hover inspects the cell under the
+	// pointer, a drag does not (the pan owns the pointer), and unchecking it restores the
+	// click-only inspector.
+	assert.ok(pEl('follow').checked, 'the follow checkbox ships checked');
+	map.dispatch('pointermove', { pointerId: 9, clientX: 200, clientY: 200, currentTarget: map });
+	const hovered = /^Cell (\d+)/.exec(pEl('probe').textContent);
+	assert.ok(hovered, 'a hover inspects a column: ' + pEl('probe').textContent);
+	map.dispatch('pointermove', { pointerId: 9, clientX: 700, clientY: 100, currentTarget: map });
+	const hovered2 = /^Cell (\d+)/.exec(pEl('probe').textContent);
+	assert.ok(hovered2 && hovered2[1] !== hovered[1], 'the inspector follows the pointer to another cell');
+	pEl('follow').checked = false;
+	pEl('probe').textContent = 'untouched';
+	map.dispatch('pointermove', { pointerId: 9, clientX: 300, clientY: 300, currentTarget: map });
+	assert.equal(pEl('probe').textContent, 'untouched', 'unchecked, a hover leaves the inspector alone');
+	pEl('follow').checked = true;
+
 	// A press that never travels 4 px is the probe click, and the view does not move.
 	map.dispatch('pointerdown', { button: 0, pointerId: 2, clientX: 100, clientY: 100, currentTarget: map });
 	map.dispatch('pointermove', { pointerId: 2, clientX: 102, clientY: 101, currentTarget: map });

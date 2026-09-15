@@ -28,6 +28,7 @@ function El(tag, doc) {
 	this.textContent = '';
 	this.hidden = false;
 	this.disabled = false;
+	this.checked = false;
 	this.files = [];
 	this.style = {};
 	this.valid = true;
@@ -144,6 +145,7 @@ function parseAttrs(text, el) {
 	el.id = el.attrs.id || '';
 	if (el.attrs.hidden !== undefined) el.hidden = true;
 	if (el.attrs.disabled !== undefined) el.disabled = true;
+	if (el.attrs.checked !== undefined) el.checked = true;
 	if (el.tagName === 'OPTION') el.selected = el.attrs.selected !== undefined;
 }
 
