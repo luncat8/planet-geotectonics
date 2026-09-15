@@ -10,6 +10,7 @@
 </head>
 <body>
 <pre id="out">booting…</pre>
+<script src="../js/env.js"></script>
 <script src="../js/geodesics.js"></script>
 <script src="../js/params.js"></script>
 <script src="../js/quat.js"></script>
@@ -340,6 +341,13 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		report.error = String(e && e.stack || e);
 	}
 	return report;
+};
+
+// The driver prints this as the capture's first line: the same short environment header the
+// other rigs carry (js/env.js), plus the GPU as a type and one vendor word. Read after a run,
+// because the adapter only exists once the harness has built a device.
+window.__envLine = function () {
+	return Env.line() + (GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
 };
 
 window.__ready = true;

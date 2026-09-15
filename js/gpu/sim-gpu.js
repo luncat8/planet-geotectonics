@@ -27,6 +27,9 @@ var GpuSim = {
 	// Workgroup sizes are fixed per kernel family; SwiftShader caps at 256 invocations.
 	WG: 128,
 	ELEMS: 1024,
+	// The adapter init() got, kept for the one-line capture header (Env.gpu). Null until a
+	// device has been built, and kept across inits that reuse one.
+	adapter: null,
 	// Phase I1: timestamp queries. Two per dispatch (pass start/end), up to TS_MAX
 	// dispatches per frame. Adapters without the timestamp-query feature (some
 	// SwiftShader builds) fall back: no queries, no per-kernel GPU ms.
@@ -151,6 +154,9 @@ var GpuSim = {
 				adapter = await navigator.gpu.requestAdapter({ forceFallbackAdapter: true });
 			}
 			if (!adapter) throw new Error('no WebGPU adapter');
+			// Kept on the engine so a capture header can name the device by type without the
+			// page asking for a second adapter (Env.gpu).
+			GpuSim.adapter = adapter;
 			// The fattest kernels (spawn, columnStep) bind 9 storage buffers; the default
 			// stage limit is 8, so ask for the adapter's own ceiling when it is higher.
 			var req = {};

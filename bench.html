@@ -83,6 +83,7 @@
   </div>
 </div>
 
+<script src="js/env.js"></script>
 <script src="js/geodesics.js"></script>
 <script src="js/params.js"></script>
 <script src="js/quat.js"></script>
@@ -136,6 +137,12 @@
 	var planet = null;   // { level, grid, state, renderer }
 	var running = false;
 	var lines = [];
+
+	// The capture header, one line: the environment from js/env.js (date to the minute, browser,
+	// OS/CPU type) plus the GPU as a type and one vendor word - never a UA string or a model.
+	function rigLine() {
+		return Env.line() + (GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
+	}
 
 	function setStatus(s) { statusEl.textContent = s; }
 	function log(t) { lines.push(t); console.log(t); }
@@ -271,6 +278,7 @@
 			if (!GpuSim.S || !GpuSim.S.device) throw new Error('no WebGPU adapter');
 			log('BENCH engine=gpu ts=' + (GpuSim.S.tsOn ? 'on' : 'off')
 				+ ' levels=' + levels.kept.join(',') + ' steps=' + steps.kept.join(',') + ' dt=' + dt);
+			log('BENCH rig ' + rigLine());
 			for (var li = 0; li < levels.kept.length; li++) {
 				var level = levels.kept[li];
 				if (planet.level !== level) {
@@ -341,7 +349,7 @@
 		return out.join('\n');
 	}
 	function benchReport() {
-		var text = tableText();
+		var text = rigLine() + '\n' + tableText();
 		if (kernEl.textContent) text += '\n' + kernEl.textContent;
 		if (lines.length) text += '\n\n' + lines.join('\n');
 		return text;

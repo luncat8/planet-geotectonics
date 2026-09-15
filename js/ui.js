@@ -400,10 +400,14 @@
 	function showStrip(rows) {
 		for (var i = 0; i < perfStrip.children.length; i++) perfStrip.children[i].textContent = rows[i] || '';
 	}
-	// The capture an agent session needs, in one paste: which engine and world the numbers
-	// came from, then the strip exactly as it reads on screen.
+	// The capture an agent session needs, in one paste: the one-line environment header (which
+	// browser, OS/CPU type, GPU type - no UA string, no adapter model, no seconds), then which
+	// engine and world the numbers came from, then the strip exactly as it reads on screen.
 	function perfReport() {
-		return 'engine ' + (gpu.on && gpu.ready ? 'gpu' : 'cpu') + ' · L' + grid.level
+		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
+		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
+		return rig
+			+ '\nengine ' + engine + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
 			+ '\n' + Perf.report(stripRows())

@@ -10,6 +10,13 @@ const http = require('http');
 const ROOT = path.resolve(__dirname, '..');
 const PORT = 8123;
 
+// This side's half of the capture header: node and the host OS/CPU type, no model names.
+function hostLine() {
+	const os = { linux: 'linux', darwin: 'mac', win32: 'win' }[process.platform] || process.platform;
+	const arch = { x64: 'x86_64', arm64: 'arm64' }[process.arch] || process.arch;
+	return 'node ' + process.version.replace(/^v/, '') + ' · ' + os + ' ' + arch;
+}
+
 function arg(name, dflt) {
 	for (let i = 2; i < process.argv.length; i++) {
 		const a = process.argv[i];
@@ -71,6 +78,11 @@ function serve(dir) {
 				? await page.evaluate(cfg => window.__ens(cfg), cfg)
 				: await page.evaluate(cfg => window.__run(cfg), cfg);
 		const ms = Date.now() - t0;
+		// The capture's first line: the page's environment (browser, OS/CPU, GPU type plus one
+		// vendor word) and this side's (node, host type), then the numbers. Read defensively:
+		// a missing header must not cost the report the run just produced.
+		const env = await page.evaluate('window.__envLine ? window.__envLine() : ""').catch(() => '');
+		if (env) console.log(env + ' · ' + hostLine());
 		console.log(`frames=${report.frames} level=${report.level} seed=${report.seed} wall=${ms}ms gpuBuild=${report.gpuBuildMs}ms`);
 		if (report.error) console.log('ERROR:', report.error);
 		if (ensemble) {

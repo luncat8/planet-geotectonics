@@ -1168,3 +1168,27 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	hitch rate is the sim-stall rate - that is the smoothness arbiter (0.3-6: L5 1 step
 	73/633, 5 steps 66/141; cadence eventCadence/dt = 10 frames). The strip's distribution
 	line measures frame cost only.
+
+## test profiles, and capture headers that stay comparable (2026-09-15)
+
+	the suite has two profiles because one runtime is two orders of magnitude apart: the
+	histories scale with simulated time (longrun 1500+300 Myr, kinematics 2 x 5000 frames,
+	ores 800 Myr, alloc 2000 frames under two forced GCs), everything else is seconds.
+	`node tests/run-all.js` is the short profile (~1 min on 2 sandbox cores, measured:
+	ores 63 s, alloc 25 s, split 14 s, gui 10 s, raster 7 s, the rest under 4 s each);
+	`--full` adds those four (~15 min here, ~18 min on the owner rig, longrun 2/3 of it).
+	A gate that costs 15 minutes on the machine an agent iterates on is a gate that gets
+	run as a formality or not at all, so short is the default and full is the owner-rig
+	gate (run_full_test.py). Anything reaching a GPU in a sandbox is SwiftShader anyway -
+	relative-only numbers, at a fraction of the speed - which is the second reason not to
+	run full there.
+	the capture header is the other half of comparability, and it is the part agents kept
+	getting wrong by pasting whole environment dumps: a UA string and an adapter description
+	are ~200 characters of model names that no diff ever reads, and the seconds of a run's
+	start time are noise. js/env.js is the single formatter - date to the minute, the browser
+	at its major version (chrome 151; order the UA regexes Edge/Opera/Firefox/Chrome/Safari
+	or "Chrome/" matches everything), the OS with the CPU architecture (never a Mac
+	architecture: "Intel Mac OS X" is what an M-series machine reports too), and the GPU as
+	a type plus one vendor word (hardware nvidia / software swiftshader). Same line in the
+	smoke log, the bench copy, the parity driver, the GUI's perf strip report and the two
+	.py runners' log headers; the log filename uses the same stamp as 2026-09-15-01-34.

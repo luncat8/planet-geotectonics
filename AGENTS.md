@@ -38,6 +38,21 @@
 	never advect crust fields on the grid (measured: freezes or smears at sub-cell steps).
 	see 0.1.5-final-design.md.
 
+## tests
+
+	node tests/run-all.js		short profile (default): 23 kernel, rig and GUI tests, ~1 min here
+	node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
+	node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
+
+	do not run the full profile in the sandbox. It is ~15 min against ~1 min for short:
+	longrun alone is ~10 min on these two cores (12 of 18 min on the owner rig) and the other
+	three histories ~3.5 min; anything that reaches a GPU here runs on SwiftShader, a CPU
+	rasterizer, so device numbers are slower and relative-only. full is the owner-rig gate:
+	run short while iterating, run_full_test.py (double-click on Windows) on a real machine - it writes
+	experiments/logs/full-test-<stamp>.log. run_gpu_parity.py does the same for
+	tests/gpu-parity.js (headless CPU/GPU ensemble; needs the Chromium rig).
+
+
 ## files
 
 0.0-*.txt - original brief.
@@ -47,7 +62,10 @@
 0.2-plan.md - development plan built on the design.
 0.3-plan.md - GPU smoothness and measurement plan (post 0.2-H).
 experiments/ - measurement scripts (node), not loaded by the page.
-experiments/logs/ - keep useful
+experiments/logs/ - keep useful; run_full_test.py / run_gpu_parity.py write their logs here
+
+run_bench.py, run_full_test.py, run_gpu_parity.py - double-clickable runners (page bench, the
+full node profile, the headless GPU parity ensemble)
 
 findings-pitfalls-skills.md - notes and pitfalls for LLM agents. write here if found good way to do something.
 
