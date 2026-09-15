@@ -1,0 +1,58 @@
+it seems in gui performance improvement last commits. but now it has black flicker. L5 none, L6 once per 1-2sec, L7 all black until stop AND move map by drag
+
+----------------- previous session report
+
+All work for Phases III–VII is now in tree, the full short regression profile is green (24 tests, ~76 s), and the branch is pushed. Summary of this session:
+
+## Completed this session
+
+**Phase IV — on-demand diagnostics** (verified, was already in working tree): `frame/step(..., diag)`, `wantDiag()` on the HUD tick, unconditional full-download `diagFrame`, `tsReset`, bench iso on the diag-off path; pinned by gpu-play §7 and gui.
+
+**Phase V — N frames per encoder** (`js/gpu/sim-gpu.js`):
+- `frameIn` is 20 blocks of 74 f32, each padded to the device `minStorageBufferOffsetAlignment`; the frameIn bind group carries a dynamic offset.
+- `fillFrame`/`frameBlocks` precompute mantle bookkeeping with per-frame `t += dt` adds (never `run*dt`) — a bulk-add initially broke bit-identity (`2.5` vs `2.500000000000001`); caught and fixed.
+- `dispatchGraph` is the factored per-frame list; `batch()` repeats it per block in one encoder, timestamps frame 0, and copies the last block over block 0 so an on-demand `diagFrame` reads current `fPlates()`.
+- `play()` encodes one run per round-trip segment; the drag gate polls at segment boundaries and defers, never skips.
+- New `--batch` rig (`__batch`, zero-tolerance vs `step()` at eight frame counts) and gpu-play §8 (block identity, aligned offsets, FIN_MAX refusal, tail copy, segment gate).
+
+**Phase VI — bounded loserRank**: `loserScatter` bins via atomic cursor; `loserRank` is one workgroup per winner ranking entries through 64-lane workgroup-memory tiles (O(Lw²) local comparisons, unbounded bin length). `LOSE` is now atomic i32; gpu-play §9 is a JS port including a 400-loser mega-bin. `experiments/heavy-overlap.html` + driver log the overlap load and contact-block ms for the ≥5× capture.
+
+**Phase VII — single submit + cadence UI**: `GpuRenderer.appendTo` appends the draw (and readback blit) to the play encoder via a batch `tail`, so sim + visible frame is one submit; standalone `draw` remains for paused/view-only frames; bench smooth uses the merged path. New Event cadence select (1/5/10 Myr, live-applied, `?cadence=`, in the copy header). gui.js pins zero standalone draw submits during GPU play and the cadence behavior. Milestone rows in `0.3-plan.md` updated with exact owner-gate lists (the 20% D1 gate is still not widened).
+
+## Owner-rig gates still required (no WebGPU adapter in this sandbox)
+
+1. `python3 run_full_test.py --release` (CPU bit-identity incl. longrun)
+2. `python3 run_gpu_parity.py` (1000-frame ensemble, 3 seeds)
+3. `node tests/gpu-parity.js --batch` (new Phase V zero-tolerance gate)
+4. Clean `webgpu-smoke.html` capture — D1 table must name a layer before any gate decision
+5. `node experiments/gpu-bench.js` — ms/step L1/5/20 ±10%, hitch L5 ≤2% (1-step) / ≤10% (5-step), L6 p95 ≤ 2× median
+6. `node experiments/heavy-overlap.js` on pre- and post-Phase-VI builds for the ≥5× loserRank line
+7. One real-drag capture for the view gate.
+
+Commit `5799894` on `arena/01a0a398-planet-geotectonics` (pushed; contains Phases III–VII in one diff against `7656a44`).
+
+
+## Review of the last commit → root cause
+
+The `loserRank` kernel in `js/gpu/wgsl-contact.js` (Phase VI, one workgroup per winner column) put three `workgroupBarrier()` calls inside control flow that the WGSL validator can't prove uniform:
+
+- `aliveN()` is `u32(atomicLoad(&FOUT[FO_N]))` and the bin length comes from `scanOut()` — both **memory loads**. Dawn conservatively treats any memory-derived value as "possibly non-uniform," even though all 64 lanes provably read the same addresses.
+- So `if (w >= aliveN()) { return; }`, `if (n <= 0) { return; }`, and the `nTiles` tile loops all make every barrier call non-uniform → parse failure → `GPU engine failed … back on CPU` at kernel build.
+- The other barrier users (`scanA`/`scanB`) were never in trouble: their loop breaks on a power-of-two stride derived from a **constant**, so every lane does identical work.
+
+A barrier path can only be driven by constants or workgroup builtins, and the tile count is data — so re-guarding can't fix it; the barriers had to go.
+
+## The fix
+
+`loserRank` is now **barrier-free**: each lane loads its target entry and ranks it against the whole bin with direct loads of the scratch block (same rank definition: count of smaller bin indices; same output: `LOSE[begin+rank)` ascending by column index, bin length unbounded). It's race-free because reads only touch the scratch block `[2COLCAP+begin, 2COLCAP+end)` while writes only touch the distinct slots of the first block (ranks are a permutation — each column is scattered exactly once), so no lane's read conflicts with any lane's write.
+
+Cost: O(Lw²) loads per workgroup vs the tile sweep's O(Lw²)/64 workgroup-mem comparisons — for the typical single-digit Lw that's a handful of L2-cached loads *plus three barriers gone*; a mega-collision just lengthens the per-lane sweep (the heavy-overlap ≥5× acceptance is vs the pre-Phase-VI O(Lw·aliveN) baseline, which is still far worse).
+
+Also updated the now-stale "64-lane tile sweep" comments in `tests/gpu-play.js` (the pinned math is unchanged and still passes), the milestone VI row in `0.3-plan.md`, and added a findings entry on why `tests/wgsl-struct.js` can't catch this (structural checks pass on the broken kernel too — only a real validator sees uniformity).
+
+## Verification
+
+- `node tests/run-all.js` — **PASS, 24/24 short-profile tests in 73 s** (including `wgsl-struct` and the `gpu-play` §9 algorithm pin with the 400-loser mega-bin)
+- Assembled the exact module `makeKernel` compiles: no barrier calls remain, prelude + kernel verified
+
+Still owner-rig gates (no GPU in this sandbox): the real-validator parse on your browser, and the Phase VI heavy-overlap capture (`node experiments/heavy-overlap.js`) to confirm the ≥5× loserRank line.
