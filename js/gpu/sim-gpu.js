@@ -27,6 +27,11 @@ var GpuSim = {
 	// Workgroup sizes are fixed per kernel family; SwiftShader caps at 256 invocations.
 	WG: 128,
 	ELEMS: 1024,
+	// The spec's required maxComputeWorkgroupsPerDimension. dispatchWorkgroups past
+	// this is a validation error that invalidates the whole command buffer - the GPU
+	// runs nothing and nothing on the JS side ever notices (the L7 loserRank bug).
+	// Kernels that would need more workgroups loop grid-stride instead (loserRank).
+	WGDIM: 65535,
 	// Phase V batches up to this many frames in one command buffer. frameIn becomes
 	// FIN_MAX per-frame blocks; each block is padded to the device's dynamic-storage
 	// offset alignment (a bind group is bound with i * blockBytes).
@@ -66,6 +71,9 @@ var GpuSim = {
 		l.nwgD = Math.ceil(colCap / l.chunkD);
 		l.chunkL = 2048;
 		l.nwgL = Math.ceil(colCap / l.chunkL);
+		// winnerA's column chunk: nwg10 workgroups cover colCap so a run's alive columns
+		// (which can exceed V after a spawn wave) always land in some chunk.
+		l.chunkW = Math.ceil(colCap / l.nwg10);
 		l.nBlocksMax = Math.ceil(colCap / GpuSim.ELEMS);
 		l.gridF = 83 * V;
 		l.gridI = 7 * V;
@@ -79,7 +87,7 @@ var GpuSim = {
 		l.bins = V + colCap;
 		l.lose = colCap * 3;
 		l.reduceF = l.nwg10 * plateCap * 12 + l.nwg10 * plateCap + l.nwgD * 12 + l.nwgD * 4
-			+ 7 * colCap + 7 * l.nwgL + plateCap;
+			+ 7 * colCap + 7 * l.nwgL + l.nwg10 * plateCap * 2 + plateCap;
 		l.scan = 2 * colCap + 1 + l.nBlocksMax;
 		l.frameIn = finStride * GpuSim.FIN_MAX;
 		l.frameOut = l.foPlate0 + plateCap * 5;
@@ -554,6 +562,14 @@ var GpuSim = {
 	runGroups: function (S, enc, name, groups, wg) {
 		var k = S.K[name];
 		if (!k) throw new Error('missing kernel ' + name);
+		// Fail here, at the call site with the kernel's name, rather than as a dropped
+		// encoder: an over-limit dispatchWorkgroups is a validation error whose only
+		// spec-mandated symptom is that the segment's submit runs nothing (the map
+		// freezes while the frame loop keeps ticking). Grid-stride the kernel instead.
+		if (groups > GpuSim.WGDIM) {
+			throw new Error(name + ' dispatches ' + groups + ' workgroups, over the '
+				+ GpuSim.WGDIM + ' maxComputeWorkgroupsPerDimension dimension limit');
+		}
 		// Phase I1: one start and one end timestamp per dispatch, tagged with the
 		// kernel name for the 2 Hz report. Only inside a timed frame (tsActive),
 		// so the boot raster and test paths stay untouched. The spec writes pass
@@ -622,11 +638,14 @@ var GpuSim = {
 		GpuSim.runGroups(S, enc, 'scanCB', 1, 256);
 		GpuSim.run(S, enc, 'scanCC', colCap, WG);
 		GpuSim.run(S, enc, 'loserScatter', colCap, WG);
-		// one workgroup per winner column (lanes split the bin's comparisons)
-		GpuSim.runGroups(S, enc, 'loserRank', colCap, 64);
+		// one workgroup per winner column (lanes split the bin's comparisons), capped at
+		// the dispatch dimension limit - colCap workgroups would exceed it at L7 and
+		// invalidate every encoder in the segment (the device ran nothing)
+		GpuSim.runGroups(S, enc, 'loserRank', Math.min(colCap, GpuSim.WGDIM), 64);
 		GpuSim.run(S, enc, 'gather', colCap, 64);
 		GpuSim.run(S, enc, 'ownerClear', V, WG);
-		GpuSim.run(S, enc, 'winners', l.plateCap, WG);
+		GpuSim.run(S, enc, 'winnerA', l.nwg10, WG);
+		GpuSim.run(S, enc, 'winnerB', l.plateCap, WG);
 		GpuSim.runGroups(S, enc, 'subRateA', l.nwg10, WG);
 		GpuSim.run(S, enc, 'subRateB', l.plateCap, WG);
 		GpuSim.run(S, enc, 'arcs', colCap, 64);

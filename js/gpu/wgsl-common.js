@@ -260,10 +260,12 @@ var CommonWGSL = {
 			'const RED_DIAGCELL: u32 = RED_DIAGCOL + NWGD * 12u;\n\n' +
 			'const NWGL: u32 = ' + l.nwgL + 'u;\n' +
 			'const CHUNKL: u32 = ' + l.chunkL + 'u;\n' +
+			'const CHUNKW: u32 = ' + l.chunkW + 'u;\n' +
 			'const RED_LEDGER: u32 = RED_DIAGCELL + NWGD * 4u;\n' +
 			'const RED_LPART: u32 = RED_LEDGER + 7u * COLCAP;\n' +
+			'const RED_WPART: u32 = RED_LPART + NWGL * 7u;\n' +
 			// One f32 per plate slot: reduceB's relaxation witness, folded by diagB.
-			'const RED_RELAX: u32 = RED_LPART + NWGL * 7u;\n' +
+			'const RED_RELAX: u32 = RED_WPART + NWG10 * PLATECAP * 2u;\n' +
 			'// Mass ledgers run ~1e14-1e15: fixed point overflows even i64, so each\n' +
 			'// column accumulates an f32 delta here (one writer per column per kernel)\n' +
 			'// and ledgerReduce folds them, in fixed order, into an f64-like hi/lo total.\n' +

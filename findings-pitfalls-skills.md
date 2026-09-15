@@ -1254,3 +1254,35 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	wEq rel 1.3e3, |d| ~2e6 m/Myr) while uMantle agreed to 2.6e-5. GpuSim.init
 	uploads the reset world; GpuSim.raster is the boot pass. The 20% gate stays
 	closed until a capture names a layer on that pairing.
+
+## dispatchWorkgroups has a per-dimension ceiling, and breaking it silences the whole encoder (2026-09-15)
+
+	loserRank shipped as one workgroup per winner column, dispatched colCap wide: 15,363
+	workgroups at L5, 61,443 at L6 - and 245,763 at L7. The spec's required
+	maxComputeWorkgroupsPerDimension is 65535, so every L7 encoder carrying that dispatch
+	was invalid: the submit ran nothing, no error reached the page (an uncaptured
+	validation error at worst), the map froze at the boot raster and the GUI read
+	"179.9 fps · 0 steps/s · t 0.0" while the rAF loop ticked on. L5/L6 passed every rig
+	because 61,443 < 65,535 - the one level the bug killed was the one level no sandbox
+	rig could reach. Rules: any dispatch whose workgroup count is V-, colCap- or
+	edge-count-wide must be checked against GpuSim.WGDIM (runGroups throws past it now),
+	and a kernel that wants more workgroups loops grid-stride over its index with
+	@builtin(num_workgroups) as the stride (loserRank does; tests/gpu-play.js §11 walks
+	the whole dispatch graph at fabricated L5/L6/L7 layouts and asserts every count).
+	The deep trap is the failure mode: an over-limit dispatch does not fail the call,
+	the pass, or the submit with an exception - the whole command buffer is invalidated
+	and the device quietly runs nothing, which looks exactly like a device hang.
+
+## one thread per plate scanning all columns is a 100x kernel (2026-09-15)
+
+	winners summed each plate's arc feed with one thread per plate looping aliveN
+	columns: ~16 active threads on a GPU with thousands, each crawling the column arrays
+	serially - 17.3 ms of the ~20 ms L6 frame on the owner rig (85%), ~70 ms projected
+	at L7, and invisible in every sandbox capture because SwiftShader is uniformly slow.
+	The fix is the subRateA/reduceA shape: lane = plate, the whole workgroup walks the
+	same column chunk so each colPlate/loseWCount load is one broadcast fetch serving all
+	128 lanes, per-(chunk, plate) f32 partials into RED, then a fixed-order fold
+	(winnerB). ~17 ms -> sub-ms at L6, deterministic (chunk-major, ascending column
+	within the chunk), and bit-identical run to run. The general lesson: a GPU kernel
+	with O(plateCount) threads is a CPU kernel; the parallel dimension is the columns,
+	and the plate dimension should ride the lanes.

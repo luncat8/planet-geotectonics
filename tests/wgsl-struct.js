@@ -115,11 +115,13 @@ for (const key of Object.keys(GpuSim.DIAG)) {
 }
 assert.equal(layout.diagOut, Math.max(...Object.values(GpuSim.DIAG)) + 1, 'diagOut covers the last slot');
 
-// The reduce scratch must actually hold the region reduceB writes and diagB folds.
+// The reduce scratch must actually hold the regions winnerB writes, reduceB writes and
+// diagB folds: the ledger partials, the winnerA arc-feed partials, the relaxation witness.
 const reducePrelude = CommonWGSL.reduce(CommonWGSL.B, layout);
-const redRelax = +reducePrelude.match(/const RED_RELAX: u32 = RED_LPART \+ NWGL \* (\d+)u;/)[1];
-assert.equal(redRelax, 7, 'RED_RELAX starts after the ledger partials');
-assert.ok(layout.nwgL * redRelax + layout.plateCap <= layout.reduceF, 'reduceF covers RED_RELAX + plateCap');
+const redRelax = +reducePrelude.match(/const RED_RELAX: u32 = RED_WPART \+ NWG10 \* PLATECAP \* (\d+)u;/)[1];
+assert.equal(redRelax, 2, 'RED_RELAX starts after the winner partials');
+assert.ok(layout.nwg10 * layout.plateCap * redRelax + layout.plateCap <= layout.reduceF,
+	'reduceF covers RED_RELAX + plateCap');
 
 const zeroSrc = sources.find((s) => s.name === 'zeroFrame').src;
 for (const shape of ['t < 6u', 't < 6u + PLATECAP * 3u', 't < 6u + PLATECAP * 3u + COLCAP',
