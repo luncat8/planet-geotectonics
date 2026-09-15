@@ -73,24 +73,27 @@ function bytesOf(name) {
 	assert.equal(c.gpuAlpha, Math.fround(Math.min(1, 0.1 / Params.tauOmega)), 'DIAG[D_ALPHA] mirrors to state.gpuAlpha');
 	assert.equal(c.gpuRelaxErr, Math.fround(1.5e-7), 'DIAG[D_RELAXERR] mirrors to state.gpuRelaxErr');
 
-	// 1c. the drag gate. `play` polls an optional hold predicate at the frame boundary, which
-	// is the only point in a batch where the event loop runs at all (the steps between two
-	// round trips are one task), so a drag that starts mid-batch stops the batch there instead
-	// of queueing the rest of its compute - and the round trip that would have landed under the
-	// pointer. What the stop must not do is change the run: the frames it did not submit are
-	// the next batch's, and the world that stopped and resumed has to match the world that ran
-	// straight through, cadence included.
+	// 1c. the drag gate. Phase V batches run between round-trip boundaries, so an
+	// encoder is the atomic unit: `play` polls the hold predicate only at a segment
+	// boundary (an encoder already submitted cannot be un-submitted). The page's view
+	// gate stops a batch starting at all, so a drag that starts mid-encoder catches at
+	// the end of the current one - at dt 0.1 the first segment is 11 frames (frames
+	// 1..11; the event cycle is due before frame 12). What the stop must not do is
+	// change the run: the frames it did not submit are the next batch's, and the world
+	// that stopped and resumed has to match the world that ran straight through,
+	// cadence included.
 	const held = world(23), plain = world(23);
 	await GpuSim.init(held, { device: makeDevice() });
 	let polls = 0;
-	const stopped = await GpuSim.play(held, DT, 12, function () { return ++polls >= 4; });
-	assert.equal(stopped, 4, 'the batch reports the frames it submitted, not the ones it was asked for');
-	assert.equal(held.frame, 4, 'and submitted exactly those');
-	assert.equal(polls, 4, 'the predicate is polled once per frame boundary after the first frame');
-	const resumed = await GpuSim.play(held, DT, 8);
+	const stopped = await GpuSim.play(held, DT, 13, function () { return ++polls >= 1; });
+	assert.equal(stopped, 11, 'the batch reports the frames it submitted, not the ones it was asked for');
+	assert.equal(held.frame, 11, 'and stops at the segment boundary, the only pollable point');
+	assert.equal(polls, 1, 'the predicate is polled once per segment boundary after the first segment');
+	assert.ok(!held.lastEvent, 'no cycle was deferred: the segment ended before its due frame');
+	const resumed = await GpuSim.play(held, DT, 2);
 	await GpuSim.init(plain, { device: makeDevice() });
-	await GpuSim.play(plain, DT, 12);
-	assert.equal(resumed, 8, 'the rest of the batch is the next batch\'s work');
+	await GpuSim.play(plain, DT, 13);
+	assert.equal(resumed, 2, 'the rest of the batch is the next batch\'s work');
 	assert.equal(held.t, plain.t, 't');
 	assert.equal(held.frame, plain.frame, 'frame');
 	assert.equal(held.lastEvent, plain.lastEvent, 'lastEvent: the stop skipped no cycle and doubled none');
@@ -174,7 +177,202 @@ function bytesOf(name) {
 			assert.equal(GpuSim.S.buf[name].destroyed, false, 'the new arena ' + name + ' is live');
 		}
 	}
+	// 7. Phase IV: the K11 diagnostic passes (diagA/diagC/diagB) are on demand. The
+	// parity path (step/frame default) keeps them every frame; play runs them only
+	// on a frame the HUD asked for (wantDiag), and a full download folds the
+	// current frame's numbers with a diag-only submit. A light event round trip
+	// must not.
+	{
+		const d = world(29);
+		await GpuSim.init(d, { device: makeDevice() });
+		const counts = {};
+		const realRun = GpuSim.run;
+		GpuSim.run = function (s0, enc, name) { counts[name] = (counts[name] || 0) + 1; return realRun.apply(GpuSim, arguments); };
+
+		await GpuSim.frame(d, DT, false);
+		assert.equal(counts.diagA || 0, 0, 'frame(dt, false) skips diagA');
+		assert.equal(counts.diagC || 0, 0, 'frame(dt, false) skips diagC');
+		assert.equal(counts.diagB || 0, 0, 'frame(dt, false) skips diagB');
+
+		await GpuSim.frame(d, DT);
+		assert.equal(counts.diagA, 1, 'frame(dt) keeps diagA - the parity harness is untouched');
+		assert.equal(counts.diagC, 1, 'frame(dt) keeps diagC');
+		assert.equal(counts.diagB, 1, 'frame(dt) keeps diagB');
+
+		await GpuSim.play(d, DT, 12);
+		assert.equal(counts.diagA, 1, 'play runs no K11 pass while the HUD has not asked');
+		GpuSim.wantDiag();
+		await GpuSim.play(d, DT, 12);
+		assert.equal(counts.diagA, 2, 'wantDiag enables K11 on the first batch frame');
+		assert.equal(counts.diagB, 2, 'diagB runs on that same frame');
+		GpuSim.wantDiag();
+		GpuSim.wantDiag();
+		await GpuSim.play(d, DT, 12);
+		assert.equal(counts.diagA, 3, 'repeated wants coalesce into one diagnostic frame');
+
+		const before = counts.diagB;
+		await GpuSim.download(d);
+		assert.equal(counts.diagB, before + 1, 'a full download folds one diag-only submit first');
+		await GpuSim.roundTrip(d, true, false);
+		assert.equal(counts.diagB, before + 1, 'a light event round trip runs no diagnostics');
+
+		GpuSim.run = realRun;
+	}
+
+	// 8. Phase V: one encoder for n frames. The n frameIn blocks have to be bit-for-bit
+	// what n uploadFrame calls would have produced - same t and frame per block, same
+	// sequential mantle bookkeeping - with padding only between blocks; each frameIn-
+	// binding kernel rebinds at its frame's aligned offset; the state clock is restored
+	// after precomputing; and a batch of n produces the same mirror as n step() calls.
+	{
+		const dev = makeDevice();
+		const s = world(31);
+		await GpuSim.init(s, { device: dev });
+		const ref = world(31);
+		await GpuSim.init(ref, { device: makeDevice() });
+		const blocks = [];
+		for (let i = 0; i < 8; i++) {
+			GpuSim.uploadFrame(ref, DT);
+			blocks.push(Array.from(GpuSim.S.finSingle));
+			ref.t += DT; ref.frame++;
+		}
+		// back onto s's singleton before the batch assertions
+		await GpuSim.init(s, { device: dev });
+		const l = GpuSim.S.l;
+		const strideBytes = l.finStride * 4;
+		assert.equal(strideBytes % 32, 0, 'the per-frame block stride is a multiple of minStorageBufferOffsetAlignment');
+		assert.ok(strideBytes >= 74 * 4, 'and holds all 74 fields');
+		const t0 = s.t, f0 = s.frame;
+		GpuSim.frameBlocks(s, DT, 8);
+		assert.equal(s.t, t0, 'frameBlocks precomputes ahead but restores state.t');
+		assert.equal(s.frame, f0, 'and state.frame');
+		for (let i = 0; i < 8; i++) {
+			const got = Array.from(GpuSim.S.finBlocks.subarray(i * l.finStride, i * l.finStride + 74));
+			assert.deepEqual(got, blocks[i], 'batched block ' + i + " is frame " + i + "'s single-step upload");
+			assert.equal(got[7], i, 'block ' + i + ' carries its frame number (field 7, the contact hash salt)');
+			for (let p = 74; p < l.finStride; p++) {
+				assert.equal(GpuSim.S.finBlocks[i * l.finStride + p], 0, 'padding word ' + p + ' of block ' + i + ' is zero');
+			}
+		}
+		// the upload covers exactly the n blocks; the tail blocks stay untouched
+		const tailView = new Float32Array(GpuSim.S.buf.frameIn.bytes, 8 * strideBytes, 74);
+		for (let i = 0; i < 74; i++) assert.equal(tailView[i], 0, 'no bytes past the nth block are uploaded');
+
+		dev.dynamicOffsets.length = 0;
+		GpuSim.batch(s, DT, 8, -1);
+		const perFrame = {};
+		for (const off of dev.dynamicOffsets) {
+			assert.equal(off % strideBytes, 0, 'dynamic offset ' + off + ' is block-aligned');
+			perFrame[off] = (perFrame[off] || 0) + 1;
+		}
+		assert.equal(Object.keys(perFrame).length, 8, 'the encoder visits 8 distinct frame blocks');
+		let bindsPerFrame = -1;
+		for (let i = 0; i < 8; i++) {
+			const c = perFrame[i * strideBytes];
+			assert.ok(c > 0, 'block ' + i + " is bound");
+			if (bindsPerFrame < 0) bindsPerFrame = c;
+			assert.equal(c, bindsPerFrame, 'block ' + i + ' binds the same kernel set as block 0');
+		}
+		// FIN_MAX frames in one encoder: 20 distinct block offsets, each fully aligned
+		const before20 = dev.dynamicOffsets.length;
+		GpuSim.batch(s, DT, GpuSim.FIN_MAX, -1);
+		const offs20 = dev.dynamicOffsets.slice(before20);
+		const distinct = new Set(offs20);
+		assert.equal(distinct.size, GpuSim.FIN_MAX, 'a FIN_MAX batch binds all 20 blocks');
+		for (const o of distinct) assert.equal(o % strideBytes, 0, 'FIN_MAX offset ' + o + ' aligned');
+		assert.throws(() => GpuSim.frameBlocks(s, DT, GpuSim.FIN_MAX + 1), /FIN_MAX/, 'oversized batches are refused, not silently truncated');
+		// the encoder ends with the bind offset back at 0, so a following frame() reads block 0
+		GpuSim.batch(s, DT, 3, 2);
+		assert.equal(GpuSim.S.finOffset || 0, 0, 'batch resets its dynamic offset');
+		// the tail copy leaves block 0 holding the LAST frame's scalars, the single-frame
+		// invariant an on-demand diagFrame relies on for fPlates() after a mid-batch spawn
+		const devView = new Float32Array(GpuSim.S.buf.frameIn.bytes);
+		for (let i = 0; i < 74; i++) {
+			assert.equal(devView[i], GpuSim.S.finBlocks[2 * l.finStride + i],
+				'batch tail copies the final block over block 0, word ' + i);
+		}
+	}
+
+	// 9. Phase VI: the loserScatter/loserRank algorithm cannot run on the stub (no WGSL), so
+	// this is a faithful JS port of the kernels: an atomic-cursor scatter into per-winner
+	// bins in arbitrary thread order, then the workgroup tile ranking (64-lane tile pairs,
+	// one rank per target entry = count of smaller bin indices). Its output must equal the
+	// old per-column scan's definition: positions sorted by ascending loser column index,
+	// including bins larger than a tile and a synthetic mega-bin.
+	{
+		function binAndSort(consumed, aliveN) {
+			const colCap = consumed.length;
+			const counts = new Int32Array(colCap);
+			for (let i = 0; i < aliveN; i++) if (consumed[i] >= 0) counts[consumed[i]]++;
+			const offsets = new Int32Array(colCap + 1);
+			for (let w = 0; w < colCap; w++) offsets[w + 1] = offsets[w] + counts[w];
+			// loserScatter: visit losers in a deliberately shuffled order, atomicAdd cursor
+			const cursor = new Int32Array(colCap);
+			const bin = new Int32Array(aliveN).fill(-1);
+			const order = [];
+			for (let i = 0; i < aliveN; i++) if (consumed[i] >= 0) order.push(i);
+			for (let k = order.length - 1; k >= 0; k--) {   // reverse is as arbitrary as any
+				const i = order[k], w = consumed[i];
+				bin[offsets[w] + cursor[w]++] = i;
+			}
+			// loserRank: one workgroup per winner, the 64-lane tile sweep from the WGSL
+			const loseList = new Int32Array(aliveN).fill(-1);
+			for (let w = 0; w < colCap; w++) {
+				const begin = offsets[w], n = offsets[w + 1] - begin;
+				if (n <= 0) continue;
+				const nTiles = Math.ceil(n / 64);
+				for (let tq = 0; tq < nTiles; tq++) {
+					for (let lane = 0; lane < 64; lane++) {
+						const e = tq * 64 + lane;
+						if (e >= n) continue;
+						const x = bin[begin + e];
+						let rank = 0;
+						for (let ck = 0; ck < nTiles; ck++) {
+							for (let k2 = 0; k2 < 64; k2++) {
+								const ke = ck * 64 + k2;
+								if (ke < n && bin[begin + ke] < x) rank++;
+							}
+						}
+						loseList[begin + rank] = x;
+					}
+				}
+			}
+			return loseList;
+		}
+		const rng = (function (s) { return function () { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; }(12345));
+		for (const trial of [0, 1, 2, 3]) {
+			const aliveN = 300 + Math.floor(rng() * 500);
+			const winners = [1, 17, 42, 200, 257, 299, 301].filter(w => w < aliveN);
+			const consumed = new Int32Array(aliveN).fill(-1);
+			for (let i = 0; i < aliveN; i++) {
+				if (rng() < 0.35 && !winners.includes(i)) consumed[i] = winners[Math.floor(rng() * winners.length)];
+			}
+			const got = binAndSort(consumed, aliveN);
+			// reference: the CPU counting-sort cursor fills each winner's bin while walking
+			// columns up, so each bin is ascending; bins live at their scanned offsets.
+			const counts = new Int32Array(consumed.length);
+			let total = 0;
+			for (let i = 0; i < aliveN; i++) if (consumed[i] >= 0) { counts[consumed[i]]++; total++; }
+			let off = 0;
+			for (const w of winners) {
+				const expected = [];
+				for (let i = 0; i < aliveN; i++) if (consumed[i] === w) expected.push(i);
+				assert.deepEqual(Array.from(got.slice(off, off + counts[w])), expected,
+					"winner " + w + "'s bin is column-index sorted under arbitrary scatter order, trial " + trial);
+				off += counts[w];
+			}
+			assert.equal(off, total, 'every loser sits in exactly one bin');
+		}
+		// mega-bin: 400 losers under one winner, spanning seven tiles
+		const mega = new Int32Array(410).fill(-1);
+		for (let i = 10; i < 410; i++) mega[i] = 3;
+		const out = binAndSort(mega, 410);
+		const want = [];
+		for (let i = 10; i < 410; i++) want.push(i);
+		assert.deepEqual(Array.from(out.slice(0, 400)), want, 'the tile sweep ranks a >64-entry bin');
+		assert.equal(out[400], -1, 'no loser spills past the bin');
+	}
 	console.log('PASS gpu-play: ' + FRAMES + ' frames, ' + cyclesPlayed + ' event cycles both paths, event round trip ships '
 		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer, a batch the drag gate stopped resumes '
-		+ 'into the same run, re-init releases the replaced arenas');
+		+ 'into the same run, re-init releases the replaced arenas, K11 is on demand');
 })().catch(e => { console.error(e && e.stack || e); process.exit(1); });

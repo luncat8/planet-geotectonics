@@ -2,6 +2,7 @@
 	var canvas = document.getElementById('map'), gpuCanvas = document.getElementById('mapgpu');
 	var play = document.getElementById('play'), step = document.getElementById('step');
 	var dtInput = document.getElementById('dt'), speedInput = document.getElementById('speed');
+	var cadenceInput = document.getElementById('cadence');
 	var runToInput = document.getElementById('run-to'), runToStart = document.getElementById('run-to-start');
 	var seedInput = document.getElementById('seed'), layerGroup = document.getElementById('layer');
 	var currentLayer = 'plate';
@@ -57,6 +58,11 @@
 	seedInput.value = String(Params.seed);
 	if (query.get('dt')) dtInput.value = query.get('dt');
 	if (query.get('steps')) speedInput.value = query.get('steps');
+	// The event cadence is a Params setting, not world state, so like dt it applies
+	// live (both engines read Params.eventCadence at the top of every step); the
+	// canonical run stays at 1 Myr - the 5/10 Myr options are the fast-forward.
+	if (query.get('cadence')) cadenceInput.value = query.get('cadence');
+	Params.eventCadence = +cadenceInput.value;
 	if (query.get('engine')) engineInput.value = query.get('engine');
 	Sim.raster(state);
 	Perf.reset();
@@ -163,6 +169,12 @@
 		setPlaying(false); runTarget = Infinity;
 		Perf.reset();
 		whenGpuIdle(function () { bootEngine(function () { dirty = true; }); });
+	});
+	// Fast-forward escape hatch: rebuild the plate table only every 5/10 Myr instead
+	// of every 1 Myr. No rebuild needed: Events.cycle is span-aware and both engines
+	// read Params.eventCadence per step; the span due next can be several Myr long.
+	cadenceInput.addEventListener('change', function () {
+		Params.eventCadence = +cadenceInput.value;
 	});
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
@@ -420,6 +432,7 @@
 			+ '\nengine ' + engine + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
+			+ ' · cadence ' + Params.eventCadence + ' Myr'
 			+ '\n' + Perf.report(stripRows())
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
 	}
@@ -433,6 +446,9 @@
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
 		var viewMoved = viewVersion !== shownVersion;
+		// Set by the render tail the moment this rAF's play encoder is built with the
+		// draw inside it; the bottom repaint gate then skips the standalone draw submit.
+		var mergedThisFrame = false;
 		// The step gate is the view, never the pointer: it closes on the frame a move lands and
 		// stays closed for VIEW_HOLD_FRAMES more, so a held-still button pauses nothing and a
 		// resting pointer resumes the sim whether or not it is still down. Both engines need it,
@@ -453,12 +469,34 @@
 				if (gpu.on && gpu.ready) {
 					// Frames submit to the device without any readback; only the event
 					// cadence inside GpuSim.play pulls the mirror back to the CPU. `viewLive`
-					// lets a batch that a drag caught mid-flight stop at its next frame
-					// boundary instead of queueing the rest of its compute under the pointer.
+					// lets a batch that a drag caught mid-encoder stop at its next segment
+					// boundary (the round-trip edge) instead of queueing the rest of its
+					// compute under the pointer - at most one encoder, FIN_MAX frames.
 					if (!gpu.busy) {
+						// K11 is on demand: the status line refreshes on the 150 ms tick,
+						// so ask for one diagnostic frame per tick instead of every frame.
+						if (now - lastUpdate > 150) GpuSim.wantDiag();
+						// One submit per rAF: the visible draw is appended to each segment
+						// encoder instead of a second submit afterwards. `painted` records
+						// that a tail actually ran (a segment split by the cadence awaits its
+						// round trip first), and the view/layer stamps let the .then spot a
+						// view or layer change the merged draw did not cover.
+						var painted = false;
+						var renderTail = function (enc) {
+							painted = true;
+							mergedThisFrame = true;
+							gpuRenderer.appendTo(enc, layerValue());
+							gpu.paintedView = viewVersion;
+							gpu.paintedLayer = currentLayer;
+						};
 						gpu.busy = true;
-						gpu.pending = GpuSim.play(state, dt, steps, viewLive).then(function (done) {
-							gpu.busy = false; ran += done; dirty = true;
+						gpu.pending = GpuSim.play(state, dt, steps, viewLive, { render: renderTail }).then(function (done) {
+							gpu.busy = false; ran += done;
+							if (painted && gpu.paintedView === viewVersion && gpu.paintedLayer === currentLayer) {
+								dirty = false; shownVersion = viewVersion;
+							} else {
+								dirty = true;
+							}
 						})['catch'](function (error) {
 							gpu.busy = false; setPlaying(false);
 							// The probe line is easy to miss and the loop stops dead here, so
@@ -479,10 +517,21 @@
 		// re-samples the screen table and repaints the last colours (the GPU draw is one
 		// triangle either way).
 		if (dirty || viewMoved) {
-			if (gpu.on && gpu.ready) gpuRenderer.draw(layerValue());
-			else if (dirty) renderer.draw(layerValue());
-			else renderer.paint();
-			dirty = false; shownVersion = viewVersion;
+			// The merged draw rode inside this rAF's play encoder (it reads the buffers
+			// that encoder updated, so it is the current frame); a second submit would
+			// only redraw the same pixels.
+			if (gpu.on && gpu.ready && mergedThisFrame) {
+				dirty = false; shownVersion = viewVersion;
+			} else if (gpu.on && gpu.ready) {
+				gpuRenderer.draw(layerValue());
+				dirty = false; shownVersion = viewVersion;
+			} else if (dirty) {
+				renderer.draw(layerValue());
+				dirty = false; shownVersion = viewVersion;
+			} else {
+				renderer.paint();
+				shownVersion = viewVersion;
+			}
 		}
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {

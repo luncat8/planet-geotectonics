@@ -71,19 +71,26 @@ function serve(dir) {
 		await page.waitForFunction('window.__ready === true', { timeout: 30000 });
 		const cfg = { frames, level, seed, stopOnFirst: !all && stop, fields: fields ? fields.split(',') : null };
 		if (ensemble) cfg.seeds = seeds ? seeds.split(',').map(Number) : [7, 8, 9];
+		const batch = process.argv.includes('--batch');
 		const t0 = Date.now();
 		const report = process.argv.includes('--determinism')
 			? await page.evaluate(cfg => window.__det(cfg), cfg)
-			: ensemble
-				? await page.evaluate(cfg => window.__ens(cfg), cfg)
-				: await page.evaluate(cfg => window.__run(cfg), cfg);
+			: batch
+				? await page.evaluate(cfg => window.__batch(cfg), cfg)
+				: ensemble
+					? await page.evaluate(cfg => window.__ens(cfg), cfg)
+					: await page.evaluate(cfg => window.__run(cfg), cfg);
 		const ms = Date.now() - t0;
 		// The capture's first line: the page's environment (browser, OS/CPU, GPU type plus one
 		// vendor word) and this side's (node, host type), then the numbers. Read defensively:
 		// a missing header must not cost the report the run just produced.
 		const env = await page.evaluate('window.__envLine ? window.__envLine() : ""').catch(() => '');
 		if (env) console.log(env + ' · ' + hostLine());
-		console.log(`frames=${report.frames} level=${report.level} seed=${report.seed} wall=${ms}ms gpuBuild=${report.gpuBuildMs}ms`);
+		if (!batch) {
+			console.log(`frames=${report.frames} level=${report.level} seed=${report.seed} wall=${ms}ms gpuBuild=${report.gpuBuildMs}ms`);
+		} else {
+			console.log(`batch-identity level=${report.level} seed=${report.seed} wall=${ms}ms`);
+		}
 		if (report.error) console.log('ERROR:', report.error);
 		if (ensemble) {
 			if (report.error) console.log('ERROR:', report.error);
@@ -98,6 +105,23 @@ function serve(dir) {
 				for (const v of report.violations.slice(0, 30)) console.log('  ' + v);
 			} else {
 				console.log('all seeds within predeclared statistical bounds');
+			}
+			process.exitCode = report.ok ? 0 : 1;
+			return;
+		}
+		if (batch) {
+			if (report.error) console.log('ERROR:', report.error);
+			console.log(`batch-identity: ${report.runs.length} frame counts, seed ${report.seed}, level ${report.level} (zero tolerance)`);
+			for (const r of report.runs) {
+				console.log(`  ${r.frames} frames: t=${r.t.toPrecision(17)} frame=${r.frame} lastEvent=${r.lastEvent} ` +
+					(r.bad.length ? 'MISMATCH ' + r.bad.map(f => f.name).slice(0, 8).join(',') : 'identical'));
+			}
+			if (report.ok) console.log('batch encoders are bit-identical to one-frame encoders');
+			else {
+				console.log(`BATCH DIVERGENCE at ${report.firstBadFrames} frames:`);
+				for (const b2 of report.bad || []) {
+					console.log(`  ${b2.name}: ${b2.mismatches} bad, first at [${b2.at}] single=${b2.cpu} batch=${b2.gpu}`);
+				}
 			}
 			process.exitCode = report.ok ? 0 : 1;
 			return;

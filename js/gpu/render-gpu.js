@@ -371,16 +371,19 @@ GpuRenderer.prototype.passInto = function (enc, view) {
 	pass.end();
 };
 
-GpuRenderer.prototype.draw = function (layer) {
+// Append the draw to an encoder the caller owns and submits. The frame loop merges the
+// visible frame into the play batch's encoder (one submit per rAF for sim plus draw);
+// the standalone draw below is the paused / view-only / rig path. getCurrentTexture
+// is cached per canvas frame, so a play call split into several segment encoders still
+// paints the same presentation texture, last render pass winning.
+GpuRenderer.prototype.appendTo = function (enc, layer) {
 	var id = GpuRenderer.LAYERS[layer];
 	if (id === undefined) id = 0;
 	this.layerWord[0] = id;
 	var device = GpuSimRef.S.device;
 	device.queue.writeBuffer(this.uniform, 0, this.uniformBytes);
-	var enc = device.createCommandEncoder();
 	if (!this.offscreen) {
 		this.passInto(enc, this.context.getCurrentTexture().createView());
-		device.queue.submit([enc.finish()]);
 		return;
 	}
 	this.passInto(enc, this.offView);
@@ -394,6 +397,12 @@ GpuRenderer.prototype.draw = function (layer) {
 	blit.setBindGroup(0, this.blitGroup);
 	blit.draw(3);
 	blit.end();
+};
+
+GpuRenderer.prototype.draw = function (layer) {
+	var device = GpuSimRef.S.device;
+	var enc = device.createCommandEncoder();
+	this.appendTo(enc, layer);
 	device.queue.submit([enc.finish()]);
 };
 

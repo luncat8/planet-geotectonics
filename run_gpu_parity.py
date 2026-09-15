@@ -15,8 +15,11 @@
     type, GPU as a type plus one vendor word) and this side's (node, host type).
 
     Command line, optional - the arguments go straight to tests/gpu-parity.js:
-        python3 run_gpu_parity.py 1000 --ensemble   (the default)
+        python3 run_gpu_parity.py 1000 --ensemble    (the default; phase H gate)
         python3 run_gpu_parity.py 200 --level=6
+        python3 run_gpu_parity.py --batch            (Phase V: batched vs one-frame
+                                                      encoders, zero tolerance)
+        python3 run_gpu_parity.py 8 --determinism    (same-upload two-run bit identity)
 """
 import os
 import sys

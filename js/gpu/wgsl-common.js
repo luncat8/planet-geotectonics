@@ -236,13 +236,16 @@ var CommonWGSL = {
 			'fn scanOut(i: u32) -> i32 { return atomicLoad(&SCAN[NMAX + i]); }\n';
 	},
 	lose: function (b) {
-		return '@group(0) @binding(' + b.lose + ') var<storage, read_write> LOSE: array<i32>;\n' +
-			'fn loseList(at: u32) -> i32 { return LOSE[at]; }\n' +
-			'fn setLoseList(at: u32, v: i32) { LOSE[at] = v; }\n' +
-			'fn loseWFeed(w: u32) -> f32 { return bitcast<f32>(LOSE[COLCAP + w]); }\n' +
-			'fn setLoseWFeed(w: u32, v: f32) { LOSE[COLCAP + w] = bitcast<i32>(v); }\n' +
-			'fn loseWCount(w: u32) -> i32 { return LOSE[COLCAP * 2u + w]; }\n' +
-			'fn setLoseWCount(w: u32, v: i32) { LOSE[COLCAP * 2u + w] = v; }\n';
+		// The tail two thirds double as the loser-bin scratch between loserScatter and
+		// loserRank, and the cursor there is atomicAdd-ed across threads, so the whole
+		// buffer is atomic i32; the per-winner feed floats ride through bitcast.
+		return '@group(0) @binding(' + b.lose + ') var<storage, read_write> LOSE: array<atomic<i32>>;\n' +
+			'fn loseList(at: u32) -> i32 { return atomicLoad(&LOSE[at]); }\n' +
+			'fn setLoseList(at: u32, v: i32) { atomicStore(&LOSE[at], v); }\n' +
+			'fn loseWFeed(w: u32) -> f32 { return bitcast<f32>(atomicLoad(&LOSE[COLCAP + w])); }\n' +
+			'fn setLoseWFeed(w: u32, v: f32) { atomicStore(&LOSE[COLCAP + w], bitcast<i32>(v)); }\n' +
+			'fn loseWCount(w: u32) -> i32 { return atomicLoad(&LOSE[COLCAP * 2u + w]); }\n' +
+			'fn setLoseWCount(w: u32, v: i32) { atomicStore(&LOSE[COLCAP * 2u + w], v); }\n';
 	},
 	reduce: function (b, l) {
 		return '@group(0) @binding(' + b.reduceF + ') var<storage, read_write> RED: array<f32>;\n' +

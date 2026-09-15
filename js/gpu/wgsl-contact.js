@@ -201,11 +201,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `
 },
 {
-	name: 'loserZero', groups: ['scanAlone'],
+	name: 'loserZero', groups: ['scanAlone', 'lose'],
 	code: `
 @compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-	if (gid.x < COLCAP) { atomicStore(&SCAN[gid.x], 0); }
+	if (gid.x < COLCAP) {
+		atomicStore(&SCAN[gid.x], 0);
+		// The two LOSE tail regions are the loser-bin scratch: [COLCAP,2COLCAP) is
+		// the per-winner scatter cursor, [2COLCAP,3COLCAP) the unordered bin entries;
+		// gather() overwrites both with per-winner feed/count afterwards.
+		atomicStore(&LOSE[COLCAP + gid.x], 0);
+		atomicStore(&LOSE[COLCAP * 2u + gid.x], 0);
+	}
 }
 `
 },
@@ -222,22 +229,70 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `
 },
 {
-	name: 'loserRank', groups: ['colI', 'scanAlone', 'lose', 'frameOut'],
+	name: 'loserScatter', groups: ['colI', 'scanAlone', 'lose', 'frameOut'],
 	code: `
-// Rank a loser among its winner's losers by index: the counting-sort position the CPU
-// gets from a cursor, computed here as a sum (integers, order-free).
-@compute @workgroup_size(64)
+// Place every loser into its winner's scanned bin (the scratch third COLCAP block
+// of LOSE), in arbitrary dispatch order. loserRank sorts the scratch bin by column
+// index into the loseList block; the atomic cursor only hands out distinct slots
+// (one per counted loser, so every bin slot is filled once).
+@compute @workgroup_size(128)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	let i = gid.x;
 	if (i >= aliveN()) { return; }
 	let w = colConsumed(i);
 	if (w < 0) { return; }
-	var rank = 0;
-	let n = aliveN();
-	for (var j = 0u; j < n; j = j + 1u) {
-		if (j < i && colConsumed(j) == w) { rank = rank + 1; }
+	let pos = atomicAdd(&LOSE[COLCAP + u32(w)], 1);
+	atomicStore(&LOSE[COLCAP * 2u + u32(scanOut(u32(w))) + u32(pos)], i32(i));
+}
+`
+},
+{
+	name: 'loserRank', groups: ['colI', 'scanAlone', 'lose', 'frameOut'],
+	code: `
+// One workgroup per winner column. The winner's bin is Lw unordered column indices
+// in LOSE[2COLCAP+begin .. 2COLCAP+end); each entry's rank is the number of bin
+// entries with a smaller column index (the CPU's counting-sort position, integers
+// and order-free). O(Lw^2) comparisons local to the bin instead of O(Lw*aliveN)
+// over every column; typical Lw is single digits. The bin is swept in 64-entry
+// tiles in workgroup memory, which keeps the comparisons off global memory and
+// leaves bin length unbounded (a mega-collision just takes more tile pairs).
+// Ranks are distinct, so the sorted writes are collision-free; the scratch bin in
+// the third COLCAP block is never overwritten by this kernel.
+var<workgroup> rankTile: array<i32, 64>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+	let w = wid.x;
+	if (w >= aliveN()) { return; }
+	let begin = scanOut(w);
+	let end = scanOut(w + 1u);
+	let n = end - begin;
+	if (n <= 0) { return; }
+	let src = COLCAP * 2u + u32(begin);
+	let lane = lid.x;
+	let nTiles = (n + 63i) / 64i;
+	// One target tile per outer pass: each lane owns one target entry, then sweeps
+	// every comparison tile, which the group loads cooperatively (load barrier,
+	// compare, drain barrier before the next load).
+	for (var tq = 0i; tq < nTiles; tq = tq + 1i) {
+		let e = tq * 64i + i32(lane);
+		var x = -1i;
+		var rank = 0i;
+		if (e < n) { x = atomicLoad(&LOSE[src + u32(e)]); }
+		for (var ck = 0i; ck < nTiles; ck = ck + 1i) {
+			let li = ck * 64i + i32(lane);
+			if (li < n) { rankTile[lane] = atomicLoad(&LOSE[src + u32(li)]); }
+			workgroupBarrier();
+			if (e < n) {
+				for (var k = 0u; k < 64u; k = k + 1u) {
+					let ke = ck * 64i + i32(k);
+					if (ke < n && rankTile[k] < x) { rank = rank + 1i; }
+				}
+			}
+			workgroupBarrier();
+		}
+		if (e < n) { atomicStore(&LOSE[u32(begin + rank)], x); }
+		workgroupBarrier();
 	}
-	setLoseList(u32(scanOut(u32(w)) + rank), i32(i));
 }
 `
 },

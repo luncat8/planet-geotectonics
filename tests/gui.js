@@ -48,8 +48,10 @@ function options(html, id) {
 }
 const levelOptions = options(indexHtml, 'level').map(Number);
 const stepsOptions = options(indexHtml, 'speed').map(Number);
+const cadenceOptions = options(indexHtml, 'cadence').map(Number);
 assert.deepEqual(levelOptions, [5, 6, 7], 'the Resolution select offers L5, L6 and L7');
 assert.deepEqual(stepsOptions, [1, 5, 20], 'the Steps/frame select offers 1, 5 and 20');
+assert.deepEqual(cadenceOptions, [1, 5, 10], 'the Event cadence select offers 1, 5 and 10 Myr');
 
 // The bench's accepted ranges, read out of its own source: the drift between these numbers and
 // the page's options is what dropped `20` from every bench run taken with the defaults.
@@ -125,16 +127,24 @@ function fakeGpu() {
 		},
 		release: function () { api.releases = (api.releases || 0) + 1; },
 		raster: function () { api.rasters++; },
-		play: function (state, dt, n, hold) {
-			const rec = { state: state, dt: dt, n: n, hold: hold, settle: null };
+		play: function (state, dt, n, hold, opts) {
+			const rec = { state: state, dt: dt, n: n, hold: hold, settle: null, renders: 0 };
+			rec.encoder = { fake: true };
 			rec.promise = new Promise(function (resolve) { rec.settle = resolve; });
+			// The real play appends each segment encoder's render tail synchronously as
+			// encoders are built; call once for the synchronous first segment, handing the
+			// fake encoder the page would otherwise submit sim plus draw in.
+			if (opts && opts.render) { opts.render(rec.encoder); rec.renders++; }
+			rec.renderAgain = function () { if (opts && opts.render) { opts.render(rec.encoder); rec.renders++; } };
 			api.plays.push(rec);
 			return rec.promise;
 		},
 		step: function () { api.steps++; return Promise.resolve(); },
 		download: function () { return Promise.resolve(); },
 		uploadState: function () { api.uploads++; return Promise.resolve(); },
+		wantDiag: function () { api.diagWants = (api.diagWants || 0) + 1; },
 		tsCollect: function () {},
+		tsReset: function () {},
 		tsReport: function () { return api.tsLine; }
 	};
 	return api;
@@ -143,7 +153,7 @@ function fakeGpu() {
 // width 0 makes the page's mapRect bail out of every drag on the GPU canvas, which would turn
 // the GPU drag gate into a test of a drag that never happened.
 const fakeRenderers = [];
-function FakeRenderer(canvas) { this.canvas = canvas; this.draws = 0; this.views = []; fakeRenderers.push(this); }
+function FakeRenderer(canvas) { this.canvas = canvas; this.draws = 0; this.appends = 0; this.appendLayers = []; this.views = []; fakeRenderers.push(this); }
 FakeRenderer.prototype.init = function (state) {
 	this.state = state;
 	this.canvas.width = state.grid.lookupW; this.canvas.height = state.grid.lookupH;
@@ -151,6 +161,13 @@ FakeRenderer.prototype.init = function (state) {
 };
 FakeRenderer.prototype.setView = function (q) { this.views.push(q.slice(0)); };
 FakeRenderer.prototype.draw = function () { this.draws++; };
+// The single-submit merge: play's encoder carries the draw via appendTo, so a playing
+// GPU page paints without a second submit (draw() stays the paused/view-only path).
+FakeRenderer.prototype.appendTo = function (enc, layer) {
+	this.appends++;
+	this.lastEncoder = enc;
+	this.appendLayers.push(layer);
+};
 // FileReader is only ever asked for an ArrayBuffer the test already has.
 function FakeReader() { this.result = null; this.onload = null; }
 FakeReader.prototype.readAsArrayBuffer = function (file) {
@@ -328,12 +345,22 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 
 	// Playing hands the loop to GpuSim.play; while that promise is open, a resolution change
 	// must not swap the grid, the state and the arenas underneath it.
+	const gpuRendererNow = fakeRenderers[fakeRenderers.length - 1];
+	const appendsAtPlay = gpuRendererNow.appends, drawsAtPlay = gpuRendererNow.draws;
 	el('play').click();
 	page.pump(3, 20000);
 	assert.equal(gpu.plays.length, 1, 'one play in flight');
 	assert.equal(gpu.plays[0].state.grid.V, 10242);
+	assert.ok(gpu.plays[0].renders === 1, 'the play call carries the render tail (single submit per rAF)');
+	assert.equal(gpuRendererNow.lastEncoder, gpu.plays[0].encoder,
+		'the draw is appended to the play encoder, not submitted on its own');
+	assert.equal(gpuRendererNow.appendLayers[gpuRendererNow.appendLayers.length - 1], 'plate');
+	assert.ok(gpuRendererNow.appends > appendsAtPlay && gpuRendererNow.draws === drawsAtPlay,
+		'playing GPU frames paint through appendTo, with zero standalone draw submits while a batch is in flight');
 	page.pump(2, 21000);
 	assert.equal(gpu.plays.length, 1, 'a busy device is not handed a second play');
+	assert.ok((gpu.diagWants || 0) >= 1,
+		'a HUD tick due while playing asks for one diagnostic frame; play does not run K11 every frame');
 
 	el('level').value = '7';
 	el('level').dispatch('change');
@@ -355,14 +382,19 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.ok(worldLine(level7Report).startsWith('engine gpu · L7 ·'), worldLine(level7Report));
 
 	// --- the query pre-fill names a run instead of describing clicks ----------------------
-	const asked = loadPage('?level=6&engine=cpu&seed=11&steps=5&dt=0.05');
+	const asked = loadPage('?level=6&engine=cpu&seed=11&steps=5&dt=0.05&cadence=10');
 	assert.equal(asked.el('badge').textContent, 'CPU · L6', asked.el('badge').textContent);
 	assert.equal(asked.el('grid-info').textContent, 'EQUIRECTANGULAR / 40,962 CELLS / 112 KM');
 	assert.equal(asked.el('seed').value, '11');
 	assert.equal(asked.el('speed').value, '5');
 	assert.equal(asked.el('dt').value, '0.05');
+	assert.equal(asked.el('cadence').value, '10', '?cadence= pre-fills the Event cadence select');
+	assert.equal(asked.Params.eventCadence, 10, 'the cadence is applied live to Params, no rebuild involved');
+	asked.el('cadence').value = '5';
+	asked.el('cadence').dispatch('change');
+	assert.equal(asked.Params.eventCadence, 5, 'changing the select applies the new cadence immediately');
 	const askedReport = asked.copy();
-	assert.ok(worldLine(askedReport).startsWith('engine cpu · L6 · dt 0.05 · 5 steps/frame · view plate · map start · seed 11'),
+	assert.ok(worldLine(askedReport).startsWith('engine cpu · L6 · dt 0.05 · 5 steps/frame · view plate · map start · seed 11 · cadence 5 Myr'),
 		worldLine(askedReport));
 	// A level the select does not offer is ignored, not built: Grid takes 0-7 and a stray
 	// ?level=9 would throw before the page drew anything.

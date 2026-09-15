@@ -1,8 +1,11 @@
 <!DOCTYPE html>
-<!-- gpu-parity.html - CPU/GPU parity harness (plan H2). Loads the CPU kernels and the
+<!-- gpu-parity.html - GPU parity harness (plan H2, Phase V). Loads the CPU kernels and the
      GPU port side by side, runs identical worlds from the same seed and reports the
-     first divergence plus per-field max errors. Driven headless by tests/gpu-parity.js
-     through window.__run; open directly in a browser for interactive runs. -->
+     first divergence plus per-field max errors. Four headless rigs, picked by
+     tests/gpu-parity.js: window.__run (CPU vs GPU field tolerances), __ens (three-seed
+     statistical ensemble), __det (same-upload two-run bit determinism), __batch (Phase V:
+     batched encoders vs one-frame encoders, zero tolerance). Open directly in a browser
+     and call the rigs from the console for interactive runs. -->
 <html>
 <head>
 <meta charset="utf-8">
@@ -201,6 +204,64 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 			report.fields = cmp;
 			report.bad = bad;
 			report.ok = bad.length === 0;
+		} catch (e) {
+			report.ok = false;
+			report.error = String(e && e.stack || e);
+		}
+		return report;
+	};
+
+	// Phase V same-device bit-identity: n single-frame step() calls (one encoder per
+	// frame, frameIn block 0) vs one play() call (one encoder per round-trip segment,
+	// frameIn rebound at a dynamic block offset per frame). The dispatch lists, inputs
+	// and round-trip order are the same by construction, so every field in the final
+	// mirror must agree with zero tolerance - a missed frame advance, a shifted event
+	// cycle or a wrong offset shows up here. Lengths are chosen to cross every segment
+	// shape: 1 frame, a mid-segment stop, the frame just before a cycle, the due frame,
+	// a single cycle, and multiple cycles. (The FIN_MAX encoder cap cannot be reached
+	// through play at dt 0.1 / cadence 1 Myr, where segments top out at 11 frames; it
+	// is pinned in tests/gpu-play.js.)
+	window.__batch = async function (cfg) {
+		cfg = cfg || {};
+		var level = cfg.level || 5, dt = cfg.dt || 0.1, seed = cfg.seed !== undefined ? cfg.seed : 7;
+		var lengths = cfg.framesList || [1, 7, 11, 12, 20, 21, 25, 40];
+		var report = { level: level, dt: dt, seed: seed, ok: true, runs: [] };
+		try {
+			for (var li = 0; li < lengths.length; li++) {
+				var frames = lengths[li];
+				var gridA = new Grid(level).build(), gridB = new Grid(level).build();
+				var a = new State(gridA, level), b = new State(gridB, level);
+				a.reset(seed);
+				b.reset(seed);
+				await GpuSim.init(a, {});
+				GpuSim.raster(a);
+				await GpuSim.download(a);
+				cloneState(a, b);
+				// Reference: one encoder per frame, the step() path with diagnostics on.
+				await GpuSim.uploadState(a);
+				for (var f = 0; f < frames; f++) {
+					await GpuSim.step(a, dt, Events, Checkpoint, Params);
+				}
+				await GpuSim.download(a);
+				// Batched: the app's play path, K11 on the final frame so the post-run
+				// download folds identical diagnostic counters.
+				await GpuSim.uploadState(b);
+				await GpuSim.play(b, dt, frames, null, { diagLast: true });
+				await GpuSim.download(b);
+				var cmp = compare(a, b, null, 0, 0, -1);
+				var bad = [];
+				for (var i = 0; i < cmp.length; i++) {
+					if (cmp[i].mismatches > 0 || cmp[i].worstRatio > 0) bad.push(cmp[i]);
+				}
+				var row = { frames: frames, t: b.t, frame: b.frame, lastEvent: b.lastEvent, bad: bad };
+				report.runs.push(row);
+				if (bad.length) {
+					report.ok = false;
+					report.firstBadFrames = frames;
+					report.bad = bad;
+					break;
+				}
+			}
 		} catch (e) {
 			report.ok = false;
 			report.error = String(e && e.stack || e);

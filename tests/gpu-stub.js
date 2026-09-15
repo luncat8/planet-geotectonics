@@ -31,17 +31,25 @@ FakeBuffer.prototype.destroy = function () { this.destroyed = true; };
 function makeDevice() {
 	var writes = 0, submits = 0;
 	var queue = {
-		writeBuffer: function (buf, offset, data) {
+		writeBuffer: function (buf, offset, data, dataOff, size) {
 			if (buf.mapped) throw new Error('stub: writeBuffer to a mapped buffer');
 			writes++;
-			new Uint8Array(buf.bytes).set(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), offset);
+			// dataOff/size are byte counts into the source, as on the real queue;
+			// the batched frameIn upload writes only the n blocks it precomputed.
+			var srcBytes = size !== undefined ? size : data.byteLength;
+			var srcOff = dataOff || 0;
+			new Uint8Array(buf.bytes).set(new Uint8Array(data.buffer, data.byteOffset + srcOff, srcBytes), offset);
 		},
 		submit: function () { submits++; },
 		onSubmittedWorkDone: function () { return Promise.resolve(); }
 	};
+	// Every dynamic offset passed to setBindGroup, in call order: the Phase V
+	// batch pins one per frameIn-binding kernel per batched frame.
+	var dynamicOffsets = [];
 	return {
 		counts: function () { return { writes: writes, submits: submits }; },
-		limits: { maxStorageBuffersPerShaderStage: 16 },
+		dynamicOffsets: dynamicOffsets,
+		limits: { maxStorageBuffersPerShaderStage: 16, minStorageBufferOffsetAlignment: 32 },
 		features: new Set(),
 		lost: new Promise(function () {}),
 		queue: queue,
@@ -59,7 +67,10 @@ function makeDevice() {
 				},
 				// Dispatches are accepted and dropped: the stub runs the scheduling, not WGSL.
 				beginComputePass: function () {
-					return { setPipeline: function () {}, setBindGroup: function () {},
+					return { setPipeline: function () {},
+						setBindGroup: function (slot, group, offsets) {
+							if (offsets && offsets.length) Array.prototype.push.apply(dynamicOffsets, offsets);
+						},
 						dispatchWorkgroups: function () {}, end: function () {} };
 				},
 				finish: function () { return {}; }
