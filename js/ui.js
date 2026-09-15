@@ -103,6 +103,20 @@
 		if (!inflight) { done(); return; }
 		inflight.then(done, done);
 	}
+	// The canvas blit rides a drained queue, never a heavy encoder: the spec vends a
+	// fresh transparent-black drawing buffer on each getCurrentTexture after the
+	// presentation, and the compositor shows whatever is in it at the next refresh - a
+	// blit queued behind an unfinished segment would still be in flight then and present
+	// black (the black frames every setting heavier than the refresh used to flash). The
+	// blit is a sub-millisecond pass on an empty queue, so it always completes before its
+	// presentation. The .then guards a rebuild: a level switch sets ready=false, so a
+	// drain that resolves mid-rebuild blits nothing.
+	function presentWhenDrained() {
+		if (!(gpu.on && gpu.ready)) return;
+		GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+			if (gpu.on && gpu.ready) gpuRenderer.present();
+		});
+	}
 	// One world rebuild, shared by the Resolution select, Reset world and Load: the columns are
 	// Lagrangian on one grid, so a different level is a different world and there is nothing to
 	// carry over. `after` runs once the engine is ready on the new world.
@@ -140,11 +154,13 @@
 				return;
 			}
 			gpu.on = true; gpu.ready = false;
-			// The device outlives the world: a level switch re-inits the arenas on it rather
-			// than asking for a second adapter (the bench's one-planet-per-level does the same).
-			GpuSim.init(state, { device: GpuSim.device, fallback: false }).then(function () {
-				GpuSim.raster(state);
-				gpuRenderer = new GpuRenderer(gpuCanvas).init(state);
+		// The device outlives the world: a level switch re-inits the arenas on it rather
+		// than asking for a second adapter (the bench's one-planet-per-level does the same).
+		GpuSim.init(state, { device: GpuSim.device, fallback: false }).then(function () {
+			GpuSim.raster(state);
+			// The old renderer's world texture is a device allocation, not a GC victim.
+			if (gpuRenderer) gpuRenderer.release();
+			gpuRenderer = new GpuRenderer(gpuCanvas).init(state);
 				if (gpuRenderer.setView) gpuRenderer.setView(viewQ);
 				gpuCanvas.hidden = false; canvas.hidden = true;
 				gpu.ready = true; dirty = true;
@@ -513,26 +529,39 @@
 				runTarget = Infinity; setPlaying(false);
 			}
 		}
-		// `dirty` is a changed layer or state and recolours the cells; a view move alone only
-		// re-samples the screen table and repaints the last colours (the GPU draw is one
-		// triangle either way).
-		if (dirty || viewMoved) {
-			// The merged draw rode inside this rAF's play encoder (it reads the buffers
-			// that encoder updated, so it is the current frame); a second submit would
-			// only redraw the same pixels.
-			if (gpu.on && gpu.ready && mergedThisFrame) {
-				dirty = false; shownVersion = viewVersion;
-			} else if (gpu.on && gpu.ready) {
-				gpuRenderer.draw(layerValue());
-				dirty = false; shownVersion = viewVersion;
-			} else if (dirty) {
-				renderer.draw(layerValue());
-				dirty = false; shownVersion = viewVersion;
-			} else {
-				renderer.paint();
-				shownVersion = viewVersion;
-			}
+	// `dirty` is a changed layer or state and recolours the cells; a view move alone only
+	// re-samples the screen table and repaints the last colours (the GPU draw is one
+	// triangle either way). On the GPU engine the canvas always shows the world texture,
+	// and the blit onto it rides a drained queue (presentWhenDrained) - never a pass
+	// inside the heavy segment encoder, which would present black on heavy settings.
+	if (gpu.on && gpu.ready) {
+		if (mergedThisFrame) {
+			// The play tail drew the world inside this rAF's segment encoder (it reads
+			// the buffers that encoder updates, so it is the current frame); a second
+			// world draw would only redraw the same pixels.
+			dirty = false; shownVersion = viewVersion;
+			presentWhenDrained();
+		} else if (dirty || viewMoved) {
+			// A state, layer or view change needs a fresh world draw first (the view
+			// quaternion rides the draw's uniform, so a drag repaints even while the
+			// sim is gated); then the same drain-gated blit.
+			gpuRenderer.redraw(layerValue());
+			presentWhenDrained();
+			dirty = false; shownVersion = viewVersion;
+		} else if (playing) {
+			// Steady play: the in-flight batch keeps the world current, so the blit
+			// alone advances the canvas, on the drain.
+			presentWhenDrained();
 		}
+	} else if (dirty || viewMoved) {
+		if (dirty) {
+			renderer.draw(layerValue());
+			dirty = false; shownVersion = viewVersion;
+		} else {
+			renderer.paint();
+			shownVersion = viewVersion;
+		}
+	}
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.update(now);

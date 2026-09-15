@@ -68,8 +68,19 @@ function makeDevice() {
 		createPipelineLayout: function () { return {}; },
 		createComputePipeline: function () { return {}; },
 		createCommandEncoder: function () {
+			// Strict where Dawn is strict: a buffer copied onto itself is rejected and
+			// the WHOLE encoder is invalidated (the submit then runs nothing and
+			// onSubmittedWorkDone returns in a fraction of a millisecond - which is how
+			// the Phase V tail self-copy looked from the bench). A lenient stub performs
+			// the in-place memcpy and stays green, so the rule lives here, not in a test
+			// that routes around it.
+			var invalid = null;
 			return {
 				copyBufferToBuffer: function (src, srcOff, dst, dstOff, size) {
+					if (src === dst) {
+						invalid = 'source and destination are the same buffer';
+						return;
+					}
 					new Uint8Array(dst.bytes).set(new Uint8Array(src.bytes, srcOff, size), dstOff);
 				},
 				// Dispatches are accepted and dropped: the stub runs the scheduling, not WGSL.
@@ -80,7 +91,11 @@ function makeDevice() {
 						},
 						dispatchWorkgroups: function () {}, end: function () {} };
 				},
-				finish: function () { return {}; }
+				finish: function () {
+					if (invalid) throw new Error('stub: encoder invalid (' + invalid +
+						') - Dawn invalidates the whole command buffer and the submit runs nothing');
+					return {};
+				}
 			};
 		}
 	};

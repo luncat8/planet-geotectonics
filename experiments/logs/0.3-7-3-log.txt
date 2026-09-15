@@ -1,0 +1,100 @@
+2026-09-15 16:40 · chrome 151 · win x86_64 · gpu hardware nvidia
+engine gpu · L6 · dt 0.1 · 1 steps/frame · view z · map start · seed 7 · cadence 1 Myr
+176.6 fps  ·  step 0.00 ms  ·  frame 5.8 ms  ·  46 steps/s  ·  4.6 Myr/s
+p95 5.7 ms · max 11.2 ms
+events 2 (27.8 ms = dl 19.2 [wait 16.3] + cyc 7.6 + up 1.0)
+winners 12.54 loserRank 2.53 subRateA 0.77 ledgerReduceA 0.59 reduceA 0.57 resolve 0.22 thinning 0.08 collapseDelta 0.07 overlaps 0.07 arcs 0.07 · CPU mirror one event cycle old
+t 94.6 Myr · GPU · L6
+
+
+2026-09-15 16:40 · chrome 151 · win x86_64 · gpu hardware nvidia
+engine gpu · L7 · dt 0.1 · 1 steps/frame · view z · map start · seed 7 · cadence 1 Myr
+179.9 fps  ·  step 0.00 ms  ·  frame 5.7 ms  ·  0 steps/s  ·  0.0 Myr/s
+p95 5.6 ms · max 5.7 ms
+no kernel timing (the adapter lacks timestamp-query) · CPU mirror one event cycle old
+t 0.0 Myr · GPU · L7
+
+
+2026-09-15 16:41 · chrome 151 · win x86_64
+engine cpu · L6 · dt 0.1 · 1 steps/frame · view z · map start · seed 7 · cadence 1 Myr
+27.0 fps  ·  step 34.54 ms  ·  frame 37.3 ms  ·  27 steps/s  ·  2.7 Myr/s
+p95 39.0 ms · max 44.5 ms
+events 0.39  move 1.14  bin 0.24  raster 2.64  mantle 7.73  edges 3.87  contact 2.40  apply 1.59  column 5.12  surface 7.06  forces 0.94  reduce 0.47  diag 0.87
+t 26.9 Myr · CPU · L6
+
+2026-09-15 16:43 · chrome 151 · win x86_64 · gpu hardware nvidia
+level	steps	cells	iso ms/step	smooth med	p95	max	hitches	Myr/s
+L5	1	10,242	6.865	5.6	16.7	38.9	115/618	12.3
+L5	5	10,242	6.034	27.8	55.5	55.6	5/159	15.8
+L5	20	10,242	6.179	133.3	138.9	161.1	0/42	16.4
+L6	1	40,962	21.355	22.2	38.9	72.3	6/224	4.5
+L6	5	40,962	19.845	161.1	177.8	188.9	0/48	4.8
+L6	20	40,962	20.189	422.2	450.0	466.7	0/13	4.9
+L5 steps=1: winners 0.84 loserRank 0.20 ledgerReduceA 0.15
+L5 steps=5: winners 0.74 ledgerReduceA 0.15 loserRank 0.13
+L5 steps=20: winners 0.77 loserRank 0.20 ledgerReduceA 0.15
+L6 steps=1: winners 3.19 loserRank 0.67 subRateA 0.18 ledgerReduceA 0.16 reduceA 0.15
+L6 steps=5: winners 3.13 loserRank 0.62 subRateA 0.20 ledgerReduceA 0.15 reduceA 0.13
+L6 steps=20: winners 3.03 loserRank 0.56 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15 loserScatter 0.07
+
+BENCH engine=gpu ts=on levels=5,6 steps=1,5,20 dt=0.1 diag=on-demand
+BENCH rig 2026-09-15 16:42 · chrome 151 · win x86_64 · gpu hardware nvidia
+BENCH L5 steps=1 kernels: winners 0.84 loserRank 0.20 ledgerReduceA 0.15
+BENCH L5 steps=1 iso ms/step=6.865 smooth med=5.6 p95=16.7 max=38.9 hitches=115 frames=618 myr/s=12.3
+BENCH L5 steps=5 kernels: winners 0.74 ledgerReduceA 0.15 loserRank 0.13
+BENCH L5 steps=5 iso ms/step=6.034 smooth med=27.8 p95=55.5 max=55.6 hitches=5 frames=159 myr/s=15.8
+BENCH L5 steps=20 kernels: winners 0.77 loserRank 0.20 ledgerReduceA 0.15
+BENCH L5 steps=20 iso ms/step=6.179 smooth med=133.3 p95=138.9 max=161.1 hitches=0 frames=42 myr/s=16.4
+BENCH L6 steps=1 kernels: winners 3.19 loserRank 0.67 subRateA 0.18 ledgerReduceA 0.16 reduceA 0.15
+BENCH L6 steps=1 iso ms/step=21.355 smooth med=22.2 p95=38.9 max=72.3 hitches=6 frames=224 myr/s=4.5
+BENCH L6 steps=5 kernels: winners 3.13 loserRank 0.62 subRateA 0.20 ledgerReduceA 0.15 reduceA 0.13
+BENCH L6 steps=5 iso ms/step=19.845 smooth med=161.1 p95=177.8 max=188.9 hitches=0 frames=48 myr/s=4.8
+BENCH L6 steps=20 kernels: winners 3.03 loserRank 0.56 subRateA 0.20 reduceA 0.15 ledgerReduceA 0.15 loserScatter 0.07
+BENCH L6 steps=20 iso ms/step=20.189 smooth med=422.2 p95=450.0 max=466.7 hitches=0 frames=13 myr/s=4.9
+BENCH done
+
+
+[boot] 2026-09-15 16:43 · chrome 151 · win x86_64
+[boot] gpu hardware nvidia · ts-query yes
+[init] GpuSim.init ok in 85 ms, tsOn=true, queries=140
+[parity] D1 boot M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 boot rhs/A0[0] rel p1 8.2e-8 p2 3.6e-7 p3 3.9e-8 p4 2.0e-7 p5 7.1e-7 p6 3.3e-7 p7 4.4e-8 p8 2.1e-7 p9 1.5e-6 p10 1.0e-7 p11 9.9e-7 p12 5.1e-7 p13 1.1e-7 p14 4.5e-7 p15 3.9e-7 p16 3.9e-7 · worst p9 1.5e-6
+[parity] D1 boot fit (omegaTarget) rel p1 2.2e-7 p2 4.3e-7 p3 9.1e-8 p4 1.9e-7 p5 3.2e-7 p6 1.3e-7 p7 1.8e-7 p8 2.5e-7 p9 1.4e-6 p10 1.1e-7 p11 4.8e-7 p12 6.8e-7 p13 1.2e-7 p14 5.4e-7 p15 3.4e-7 p16 3.9e-7 · worst p9 1.4e-6
+[parity] D1 boot omega rel p1 2.2e-7 p2 4.3e-7 p3 9.1e-8 p4 1.9e-7 p5 3.2e-7 p6 1.3e-7 p7 1.8e-7 p8 2.5e-7 p9 1.4e-6 p10 1.1e-7 p11 4.8e-7 p12 6.8e-7 p13 1.2e-7 p14 5.4e-7 p15 3.4e-7 p16 3.9e-7 · worst p9 1.4e-6
+[parity] D1 boot uMantle: worst rel 2.6e-5 (|d| 1.84e-2 m/Myr @c6214) · worst |d| 2.24e-1 m/Myr @c2056 (rel 3.8e-6)
+[parity] D1 boot wEq: worst rel 6.1e-4 (|d| 4.78e-1 m/Myr @c9542) · worst |d| 4.84e-1 m/Myr @c1684 (rel 7.9e-6)
+[parity] frame 5 dt 0.1 · n cpu=10242 gpu=10242 · plates cpu=16 gpu=16 · owner mismatch 0/10242 · |dz| max 2.2 m
+[parity] meanSpeed cpu=4.022 gpu=4.022 cm/yr · maxSpeed cpu=11.449 gpu=11.449 cm/yr
+[parity] omega relaxation: mean |omega|/|omegaTarget| cpu 0.837 gpu 0.837 over 16 plates · p1 cpu 0.943 gpu 0.943 · p2 cpu 0.691 gpu 0.691 · p3 cpu 0.871 gpu 0.871 · p4 cpu 0.863 gpu 0.863
+[parity] omega: worst |dR*w| plate 6 = 0.000 cm/yr · cpu from relaxed omega 4.022/11.449 · cpu from target omega 5.040/13.052 · gpu 4.022/11.449
+[parity] device K10: dt 0.100000 (uploaded 0.1) · alpha 0.200000 (expected 0.200000) · worst |stored - relaxed| omega 0.00e+0 rad/Myr
+[parity] D1 frame 5 M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 frame 5 rhs/A0[0] rel p1 4.5e-8 p2 3.9e-7 p3 5.6e-8 p4 1.7e-7 p5 4.0e-7 p6 2.4e-7 p7 6.1e-8 p8 1.4e-7 p9 4.3e-7 p10 1.3e-7 p11 6.1e-7 p12 6.7e-8 p13 1.6e-7 p14 1.7e-7 p15 2.5e-7 p16 1.9e-7 · worst p11 6.1e-7
+[parity] D1 frame 5 fit (omegaTarget) rel p1 2.8e-7 p2 2.0e-7 p3 2.0e-7 p4 1.3e-7 p5 2.3e-7 p6 1.5e-7 p7 2.3e-7 p8 2.5e-7 p9 4.0e-7 p10 1.2e-7 p11 1.8e-7 p12 1.9e-7 p13 1.6e-7 p14 1.9e-7 p15 1.2e-7 p16 1.4e-7 · worst p9 4.0e-7
+[parity] D1 frame 5 omega rel p1 2.1e-7 p2 2.1e-7 p3 2.3e-7 p4 1.5e-7 p5 2.6e-7 p6 1.5e-7 p7 5.6e-8 p8 2.6e-7 p9 6.6e-7 p10 8.9e-8 p11 2.3e-7 p12 1.9e-7 p13 9.5e-8 p14 2.3e-7 p15 1.0e-7 p16 1.3e-7 · worst p9 6.6e-7
+[parity] D1 frame 5 uMantle: worst rel 1.3e-5 (|d| 2.76e-2 m/Myr @c9837) · worst |d| 2.12e-1 m/Myr @c2056 (rel 3.7e-6)
+[parity] D1 frame 5 wEq: worst rel 2.8e-4 (|d| 1.94e-1 m/Myr @c5166) · worst |d| 6.48e-1 m/Myr @c578 (rel 1.6e-5)
+[events] frame 20 t=2.0 Myr · plates 16 · columns 10241 · finite=true
+[ts] tsCollect 1 ms · winners 5.83 ledgerReduceA 1.56 loserRank 0.43 subRateA 0.26 reduceA 0.15
+[render] canvas 1024x512 · format bgra8unorm · row 4096 · readback 2097152 B · cpu ref 2097152 B
+[render] plate: mean|d| 0.53 max|d| 1 ch>16: 0 · 1572864 samples
+[render] type: mean|d| 0.73 max|d| 1 ch>16: 0 · 1572864 samples
+[render] z: mean|d| 0.64 max|d| 1 ch>16: 0 · 1572864 samples
+[render] damage: mean|d| 0.08 max|d| 1 ch>16: 0 · 1572864 samples
+[render] owner: mean|d| 0.00 max|d| 0 ch>16: 0 · 1572864 samples
+[render] sediment: mean|d| 0.01 max|d| 1 ch>16: 0 · 1572864 samples
+[render] speed: mean|d| 0.41 max|d| 1 ch>16: 0 · 1572864 samples
+[render] age: mean|d| 0.53 max|d| 1 ch>16: 0 · 1572864 samples
+[render] force: mean|d| 0.31 max|d| 1 ch>16: 0 · 1572864 samples
+[render] dir: mean|d| 0.89 max|d| 31 ch>16: 1706 · 1385472 samples
+[render] oVms: mean|d| 0.02 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oMaf: mean|d| 0.02 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oArc: mean|d| 0.06 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oOro: mean|d| 0.00 max|d| 0 ch>16: 0 · 1572864 samples
+[render] oBas: mean|d| 0.01 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oPla: mean|d| 0.00 max|d| 0 ch>16: 0 · 1572864 samples
+[render] GPU renderer drew 16 layers; pixel-parity actually compared 16/16 (map below: dir)
+[errors] captured console/webgpu errors: 0
+[result] PASS
+[result] total wall 1466 ms
+[log] copied 43 lines to the clipboard

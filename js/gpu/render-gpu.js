@@ -3,8 +3,11 @@
    frame needs no readback at all. One fullscreen-triangle draw per frame; the layer id and
    view quaternion ride a small uniform. The CPU mirror stays one event cycle old (download
    runs there).
-   The one exception is `init(state, { readback: true })`, which the parity rigs use to read
-   their own pixels back through an offscreen texture - see initReadback. */
+   The draw always lands on the renderer's own world texture; the canvas receives only a
+   blit of it, submitted on a drained device queue (present) - never a pass queued behind a
+   sim segment, which would finish after the next compositor refresh and present an
+   undrawn (black) drawing buffer. `init(state, { readback: true })` adds the staging the
+   parity rigs read the world texture out through - see initReadback. */
 // Like the kernel modules, this file runs both as a classic script (GpuSim is already a
 // global) and under node, where the renderer's readback path is tested on the stub device.
 var GpuRendererNode = typeof module !== 'undefined' && module.exports;
@@ -214,9 +217,9 @@ struct Out { @location(0) color: vec4<f32> };
 }
 `;
 
-// One-triangle blit of the readback texture onto the canvas. The uv rides the same
+// One-triangle blit of the world texture onto the canvas. The uv rides the same
 // fullscreen triangle and the sampler is nearest, so the blit is a texel-for-texel copy:
-// what the parity check reads out of the offscreen texture is what the map shows.
+// what the parity check reads out of the world texture is what the map shows.
 GpuRenderer.BLIT = `@group(0) @binding(0) var SAMP: sampler;
 @group(0) @binding(1) var TEX: texture_2d<f32>;
 
@@ -293,28 +296,26 @@ GpuRenderer.prototype.init = function (state, opts) {
 		vertex: { module: shaderModule, entryPoint: 'vs' },
 		fragment: { module: shaderModule, entryPoint: 'fs', targets: [{ format: this.format }] }
 	});
-	if (opts && opts.readback) this.initReadback(device);
-	return this;
-};
-
-// Readback rig (the smoke's pixel-parity check): an offscreen color texture the fragment
-// shader renders into, a staging buffer to copy it out through, and a blit pipeline that
-// puts the same pixels on the canvas. All three are allocated once, so a layer sweep is
-// allocation-free apart from the mapped-range view.
-GpuRenderer.prototype.initReadback = function (device) {
+	// The world texture: the renderer's working image, every mode. Every layer draw
+	// (appendTo, redraw) lands here; the canvas only ever receives a blit of it. This
+	// split is the black-frame fix: the spec replaces a presented canvas's drawing
+	// buffer with a fresh transparent-black one on each getCurrentTexture after the
+	// presentation, and the compositor shows whatever is in it at the next refresh -
+	// so a layer pass queued behind a sim segment finishes after that refresh and the
+	// frame presents black (every setting whose per-frame GPU work outruns the refresh:
+	// L6 1 step, L5 5 steps, "so any heavy"). The blit is a sub-millisecond pass the
+	// caller submits on a drained queue, so it always completes before its presentation.
 	var w = this.canvas.width, h = this.canvas.height;
-	this.readRow = Math.ceil(w * 4 / 256) * 256;
-	this.readSize = this.readRow * h;
-	// All three usages are load-bearing: drawn into (RENDER_ATTACHMENT), sampled by the
-	// blit (TEXTURE_BINDING), copied out by the parity check (COPY_SRC). TextureUsage
-	// COPY_SRC is 0x1 - 0x4 is BufferUsage's COPY_SRC, and that mix-up made the copy fail
-	// validation on hardware with the stub never complaining.
-	this.offscreen = device.createTexture({
+	this.world = device.createTexture({
 		size: [w, h], format: this.format,
-		usage: 0x10 | 0x4 | 0x1    // RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_SRC
+		// All three usages are load-bearing: drawn into (RENDER_ATTACHMENT), sampled
+		// by the blit (TEXTURE_BINDING), copied out by the parity check (COPY_SRC).
+		// TextureUsage COPY_SRC is 0x1 - 0x4 is BufferUsage's COPY_SRC, and that
+		// mix-up made the copy fail validation on hardware with the stub never
+		// complaining.
+		usage: 0x10 | 0x4 | 0x1
 	});
-	this.offView = this.offscreen.createView();
-	this.staging = device.createBuffer({ size: this.readSize, usage: 0x1 | 0x8 });   // MAP_READ | COPY_DST
+	this.worldView = this.world.createView();
 	var blit = device.createShaderModule({ code: GpuRenderer.BLIT });
 	this.blitPipeline = device.createRenderPipeline({
 		layout: 'auto',
@@ -325,27 +326,57 @@ GpuRenderer.prototype.initReadback = function (device) {
 		layout: this.blitPipeline.getBindGroupLayout(0),
 		entries: [
 			{ binding: 0, resource: device.createSampler({ magFilter: 'nearest', minFilter: 'nearest' }) },
-			{ binding: 1, resource: this.offView }
+			{ binding: 1, resource: this.worldView }
 		]
 	});
+	if (opts && opts.readback) this.initReadback(device);
 	return this;
 };
 
-// The pixels of the last draw(), row-padded to bytesPerRow, in the canvas format's byte
-// order (bgra8unorm on every current adapter: B at offset 0). Awaited, so it belongs to
-// the smoke and the parity rigs, never to the frame loop.
+// The renderer's own resources (the world texture, the blit pipeline): a level switch
+// re-inits the sim arenas through GpuSim.release, but the renderer outlives its state,
+// so its textures go here - 2 MB at the lookup raster per level otherwise.
+GpuRenderer.prototype.release = function () {
+	if (this.world) { this.world.destroy(); this.world = null; }
+	if (this.blitPipeline && this.blitPipeline.destroy) this.blitPipeline.destroy();
+	if (this.staging) { this.staging.destroy(); this.staging = null; }
+};
+
+// Readback rig (the smoke's pixel-parity check): the staging buffer the world texture is
+// copied out through. The texture itself is owned by every renderer (init), because the
+// canvas blit samples it in the app's mode too. Allocated once, so a layer sweep is
+// allocation-free apart from the mapped-range view.
+GpuRenderer.prototype.initReadback = function (device) {
+	var w = this.canvas.width, h = this.canvas.height;
+	this.readRow = Math.ceil(w * 4 / 256) * 256;
+	this.readSize = this.readRow * h;
+	this.staging = device.createBuffer({ size: this.readSize, usage: 0x1 | 0x8 });   // MAP_READ | COPY_DST
+	return this;
+};
+
+// The pixels of the last world draw, row-padded to bytesPerRow, in the canvas format's
+// byte order (bgra8unorm on every current adapter: B at offset 0). The source is the
+// world texture, never a swapchain texture. Awaited, so it belongs to the smoke and the
+// parity rigs, never to the frame loop.
 GpuRenderer.prototype.readPixels = async function () {
 	var device = GpuSimRef.S.device;
 	if (this.readPending) await this.readPending;
 	var enc = device.createCommandEncoder();
-	enc.copyTextureToBuffer({ texture: this.offscreen },
+	enc.copyTextureToBuffer({ texture: this.world },
 		{ buffer: this.staging, bytesPerRow: this.readRow },
 		[this.canvas.width, this.canvas.height]);
 	device.queue.submit([enc.finish()]);
 	this.readPending = this.staging.mapAsync(0x1);
 	await this.readPending;
 	this.readPending = null;
-	var bytes = new Uint8Array(this.staging.getMappedRange());
+	// Copy the pixels OUT before unmap: getMappedRange hands back a view on the
+	// transient mapping, and unmap() invalidates it - a returned view is empty by the
+	// time the caller touches it (owner's rig: 16 x "readback short 0 bytes", which is
+	// why the pixel parity never actually compared). GpuSim.pull consumes its ranges
+	// before its unmaps, which is why the mirror was fine while this was not.
+	var range = this.staging.getMappedRange();
+	var bytes = new Uint8Array(range.byteLength);
+	bytes.set(new Uint8Array(range));
 	this.staging.unmap();
 	return bytes;
 };
@@ -371,24 +402,37 @@ GpuRenderer.prototype.passInto = function (enc, view) {
 	pass.end();
 };
 
-// Append the draw to an encoder the caller owns and submits. The frame loop merges the
-// visible frame into the play batch's encoder (one submit per rAF for sim plus draw);
-// the standalone draw below is the paused / view-only / rig path. getCurrentTexture
-// is cached per canvas frame, so a play call split into several segment encoders still
-// paints the same presentation texture, last render pass winning.
+// Append the layer draw to an encoder the caller owns and submits. It targets the world
+// texture, never the canvas: a canvas pass inside a segment encoder would finish after
+// the segment's compute, i.e. after the next compositor refresh, and present black (see
+// init). The play path appends it as its render tail (one sim submit per rAF still holds
+// for the world); the canvas blit is present(), on the page's drained-queue gate.
 GpuRenderer.prototype.appendTo = function (enc, layer) {
 	var id = GpuRenderer.LAYERS[layer];
 	if (id === undefined) id = 0;
 	this.layerWord[0] = id;
 	var device = GpuSimRef.S.device;
 	device.queue.writeBuffer(this.uniform, 0, this.uniformBytes);
-	if (!this.offscreen) {
-		this.passInto(enc, this.context.getCurrentTexture().createView());
-		return;
-	}
-	this.passInto(enc, this.offView);
-	// The visible map is a copy of the texture the parity check reads, so the two can never
-	// disagree about what was drawn.
+	this.passInto(enc, this.worldView);
+};
+
+// The standalone world draw: the paused / view-only / rig path. Own encoder, own submit;
+// the canvas is not touched (present() shows the result, when the page wants it).
+GpuRenderer.prototype.redraw = function (layer) {
+	var device = GpuSimRef.S.device;
+	var enc = device.createCommandEncoder();
+	this.appendTo(enc, layer);
+	device.queue.submit([enc.finish()]);
+};
+
+// The canvas blit: world -> current texture, one sub-millisecond pass on its own
+// encoder. Contract: the caller submits it on a drained queue (queue.onSubmittedWorkDone
+// resolved), or the presented frame can still be in flight at the refresh - the black
+// frames this split exists to remove. The world is only sampled here, so the blit reads
+// the last completed state by construction.
+GpuRenderer.prototype.present = function () {
+	var device = GpuSimRef.S.device;
+	var enc = device.createCommandEncoder();
 	var blit = enc.beginRenderPass({ colorAttachments: [{
 		view: this.context.getCurrentTexture().createView(),
 		loadOp: 'clear', storeOp: 'store', clearValue: { r: 0, g: 0, b: 0, a: 1 }
@@ -397,12 +441,6 @@ GpuRenderer.prototype.appendTo = function (enc, layer) {
 	blit.setBindGroup(0, this.blitGroup);
 	blit.draw(3);
 	blit.end();
-};
-
-GpuRenderer.prototype.draw = function (layer) {
-	var device = GpuSimRef.S.device;
-	var enc = device.createCommandEncoder();
-	this.appendTo(enc, layer);
 	device.queue.submit([enc.finish()]);
 };
 
