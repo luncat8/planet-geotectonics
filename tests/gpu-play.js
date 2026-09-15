@@ -8,7 +8,11 @@
 //      back over what the kernels computed;
 //   3. what it does ship is faithful, and the rows past aliveN carry alive = 0;
 //   4. a full sync followed by an event round trip - the app's real sequence - reads only
-//      the buffers that transfer mapped, never the wider set left in the staging cache.
+//      the buffers that transfer mapped, never the wider set left in the staging cache;
+//   8. a batched encoder's frameIn bind group names its per-block size (Dawn rejects a
+//      nonzero dynamic offset on an unspecified whole-buffer range);
+//  10. a play that opens on a due event submits the render tail before the round trip
+//      awaits, and acquires the canvas once.
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Params = require('../js/params.js');
 const Events = require('../js/events.js');
@@ -242,6 +246,30 @@ function bytesOf(name) {
 		const strideBytes = l.finStride * 4;
 		assert.equal(strideBytes % 32, 0, 'the per-frame block stride is a multiple of minStorageBufferOffsetAlignment');
 		assert.ok(strideBytes >= 74 * 4, 'and holds all 74 fields');
+		// Dawn rejects a dynamic offset when the bind group range is the whole
+		// buffer: offset 512 on a 20-block frameIn is out of bounds. The entry
+		// must name the per-frame block size.
+		let frameInBinds = 0;
+		for (const g of dev.bindGroups) {
+			for (const e of g.entries) {
+				if (e.resource && e.resource.buffer === GpuSim.S.buf.frameIn) {
+					assert.equal(e.resource.size, strideBytes, 'frameIn bind group names its block size');
+					assert.equal(e.resource.offset || 0, 0, 'the dynamic offset is applied at setBindGroup, not createBindGroup');
+					frameInBinds++;
+				}
+			}
+		}
+		assert.ok(frameInBinds > 0, 'at least one kernel binds frameIn');
+		let frameInLayouts = 0;
+		for (const lay of dev.bindGroupLayouts) {
+			for (const e of lay.entries) {
+				if (e.buffer && e.buffer.hasDynamicOffset) {
+					assert.equal(e.buffer.minBindingSize, GpuSim.FIN_FIELDS * 4, 'dynamic frameIn layout has minBindingSize');
+					frameInLayouts++;
+				}
+			}
+		}
+		assert.ok(frameInLayouts > 0, 'the frameIn layout is marked hasDynamicOffset');
 		const t0 = s.t, f0 = s.frame;
 		GpuSim.frameBlocks(s, DT, 8);
 		assert.equal(s.t, t0, 'frameBlocks precomputes ahead but restores state.t');
@@ -371,6 +399,28 @@ function bytesOf(name) {
 		for (let i = 10; i < 410; i++) want.push(i);
 		assert.deepEqual(Array.from(out.slice(0, 400)), want, 'the tile sweep ranks a >64-entry bin');
 		assert.equal(out[400], -1, 'no loser spills past the bin');
+	}
+
+	// 10. A play that opens on a due event must submit the render tail BEFORE the
+	// round trip awaits: getCurrentTexture after a yield presents black (L6 flash
+	// per cadence, L7 blank until pause). The tail is consumed once, so later
+	// segments of the same call do not acquire the canvas again.
+	{
+		const due = world(41);
+		due.lastEvent = due.t - Params.eventCadence;
+		await GpuSim.init(due, { device: makeDevice() });
+		const order = [];
+		const realRT = GpuSim.roundTrip;
+		GpuSim.roundTrip = async function () {
+			order.push('roundTrip');
+			return realRT.apply(GpuSim, arguments);
+		};
+		await GpuSim.play(due, DT, 2, null, { render: function () { order.push('render'); } });
+		GpuSim.roundTrip = realRT;
+		assert.equal(order[0], 'render', 'the visible frame is submitted before the round trip yields');
+		assert.ok(order.indexOf('roundTrip') > 0, 'the due event still runs');
+		assert.equal(order.filter(function (x) { return x === 'render'; }).length, 1,
+			'the canvas is acquired once per play call');
 	}
 	console.log('PASS gpu-play: ' + FRAMES + ' frames, ' + cyclesPlayed + ' event cycles both paths, event round trip ships '
 		+ full.n + '/' + full.colCap + ' columns and no cell or edge buffer, a batch the drag gate stopped resumes '

@@ -266,24 +266,36 @@ var GpuSim = {
 			for (var g = 0; g < groups.length; g++) {
 				var bufs = groupBufs[groups[g]];
 				for (var b = 0; b < bufs.length; b++) {
-					if (seen[bufs[b]]) continue;
-					seen[bufs[b]] = 1;
-					entries.push({ binding: B[bufs[b]], resource: { buffer: S.buf[bufs[b]] } });
+				if (seen[bufs[b]]) continue;
+				seen[bufs[b]] = 1;
+				// A dynamic-offset binding MUST name its size: without it the range is
+				// the whole buffer, and offset 512 on a 20-block frameIn (10240 B) is
+				// out of bounds even though offset 0 happens to fit. Dawn: "Did you
+				// forget to specify the binding's size?"
+				var resource = { buffer: S.buf[bufs[b]] };
+				if (bufs[b] === 'frameIn') {
+					resource.offset = 0;
+					resource.size = l.finStride * 4;
 				}
+				entries.push({ binding: B[bufs[b]], resource: resource });
 			}
-			if (entries.length > device.limits.maxStorageBuffersPerShaderStage) {
-				throw new Error(name + ' binds ' + entries.length + ' storage buffers (limit '
-					+ device.limits.maxStorageBuffersPerShaderStage + ')');
+		}
+		if (entries.length > device.limits.maxStorageBuffersPerShaderStage) {
+			throw new Error(name + ' binds ' + entries.length + ' storage buffers (limit '
+				+ device.limits.maxStorageBuffersPerShaderStage + ')');
+		}
+		var dynamic = groups.indexOf('frameIn') >= 0;
+		var layout = device.createBindGroupLayout({ entries: entries.map(function (e) {
+			var ro = e.binding === B.gridF || e.binding === B.gridI || e.binding === B.frameIn;
+			// frameIn carries one 74-float block per batched frame; the bind group is
+			// reused with a dynamic offset, so the same WGSL FIN[...] indexes block i.
+			var buffer = { type: ro ? 'read-only-storage' : 'storage' };
+			if (e.binding === B.frameIn) {
+				buffer.hasDynamicOffset = true;
+				buffer.minBindingSize = GpuSim.FIN_FIELDS * 4;
 			}
-			var dynamic = groups.indexOf('frameIn') >= 0;
-			var layout = device.createBindGroupLayout({ entries: entries.map(function (e) {
-				var ro = e.binding === B.gridF || e.binding === B.gridI || e.binding === B.frameIn;
-				// frameIn carries one 74-float block per batched frame; the bind group is
-				// reused with a dynamic offset, so the same WGSL FIN[...] indexes block i.
-				var buffer = { type: ro ? 'read-only-storage' : 'storage' };
-				if (e.binding === B.frameIn) buffer.hasDynamicOffset = true;
-				return { binding: e.binding, visibility: 4, buffer: buffer };
-			}) });
+			return { binding: e.binding, visibility: 4, buffer: buffer };
+		}) });
 			var group = device.createBindGroup({ layout: layout, entries: entries });
 			var pipe = device.createComputePipeline({ layout: device.createPipelineLayout({ bindGroupLayouts: [layout] }),
 				compute: { module: mod, entryPoint: 'main' } });
@@ -527,7 +539,9 @@ var GpuSim = {
 			tt += dt;
 		}
 		state.t = realT; state.frame = realFrame;
-		S.device.queue.writeBuffer(S.buf.frameIn, 0, S.finBlocks, 0, l.finStride * n * 4);
+		// Subarray, not dataOffset: Chrome/SwiftShader reject a nonzero dataOffset
+		// with "Number of bytes to write is too large" even when the range fits.
+		S.device.queue.writeBuffer(S.buf.frameIn, 0, S.finBlocks.subarray(0, l.finStride * n));
 		return n;
 	},
 
@@ -1050,16 +1064,29 @@ var GpuSim = {
 	// stop (an encoder already submitted cannot be un-submitted); the page's view
 	// gate stops a batch starting at all, so a drag catches at most one segment.
 	// Returns the number of frames submitted so the frame loop counts real work.
-	// opts.render(enc), if given, is appended to every segment encoder: the frame
-	// loop passes GpuRenderer.appendTo so one submit carries sim plus the visible
-	// frame; standalone draw() stays for paused and view-only frames.
+	// opts.render(enc), if given, is the visible frame. It is consumed once: appended
+	// to the first segment encoder when that encoder is submitted in this turn, or
+	// submitted on its own encoder BEFORE a round trip that must await (getCurrentTexture
+	// after a yield presents black: L6 flash per cadence, L7 blank until pause). Later
+	// segments of the same call do not acquire the canvas again. Standalone draw() stays
+	// for paused and view-only frames.
 	play: async function (state, dt, n, hold, opts) {
 		var P = GpuSim.Params, S = GpuSim.S;
 		var done = 0, want = !!S.diagWanted;
 		S.diagWanted = false;
+		var tail = opts && opts.render;
+		function takeRender() { var r = tail; tail = null; return r; }
+		function presentNow() {
+			var r = takeRender();
+			if (!r) return;
+			var enc = S.device.createCommandEncoder();
+			r(enc);
+			S.device.queue.submit([enc.finish()]);
+		}
 		while (done < n) {
 			if (done > 0 && hold && hold()) return done;
 			if (state.t - state.lastEvent >= P.eventCadence) {
+				presentNow();
 				await GpuSim.roundTrip(state, true, false, GpuSim.Events, GpuSim.Checkpoint);
 				if (S.diagWanted) { want = true; S.diagWanted = false; }
 			}
@@ -1077,7 +1104,7 @@ var GpuSim = {
 			// for one on the final segment overall, so a full download afterwards reads
 			// current counters (used by the batch-identity rig).
 			var diagHere = want || (opts && opts.diagLast && done + run === n);
-			GpuSim.batch(state, dt, run, diagHere ? run - 1 : -1, opts && opts.render);
+			GpuSim.batch(state, dt, run, diagHere ? run - 1 : -1, takeRender());
 			want = false;
 			for (var j = 0; j < run; j++) { state.t += dt; state.frame++; }
 			done += run;
