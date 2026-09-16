@@ -92,6 +92,14 @@ assert.ok(/overflow-x: auto/.test(spanCss) && /scrollbar-width: none/.test(spanC
 assert.ok(/cursor: copy/.test(rowsCss), 'the whole strip reads as a copy control');
 rule('.perf .rows.copied');
 rule('.perf .rows.copy-failed');
+// The settings live in two named groups (index.html), and the slow-on-CPU warning has its
+// amber rule: the test realm's DOM stub reads classes but not styles, so the stylesheet is
+// pinned the way the strip rules are.
+rule('.controls fieldset');
+rule('.controls fieldset legend');
+const slowCss = rule('.controls label.slow');
+assert.ok(/#e8b45a/.test(slowCss), 'the slow warning is amber, not red: ' + slowCss);
+assert.ok(/label\.slow select/.test(css), 'the slow rule tints the control itself');
 assert.ok(!/id="copy-perf"/.test(indexHtml) && !/\.perf \.copy\b/.test(css),
 	'the separate Copy button is gone from the page and stylesheet');
 assert.ok(/id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report"/.test(indexHtml),
@@ -118,7 +126,7 @@ const MODULES = ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state'
 // capture header reads for the GPU type (the real engine keeps it on GpuSim too).
 function fakeGpu() {
 	const api = {
-		device: null, S: null, inits: [], plays: [], steps: 0, uploads: 0, rasters: 0,
+		device: null, S: null, inits: [], plays: [], steps: 0, uploads: 0, downloads: 0, rasters: 0,
 		adapter: { info: { vendor: 'nvidia', description: 'NVIDIA GeForce RTX 4070' } },
 		tsLine: 'winners 1.92 diagC 1.74 diagA 0.99',
 		init: function (state, opts) {
@@ -153,7 +161,7 @@ function fakeGpu() {
 			return rec.promise;
 		},
 		step: function () { api.steps++; return Promise.resolve(); },
-		download: function () { return Promise.resolve(); },
+		download: function () { api.downloads = (api.downloads || 0) + 1; return Promise.resolve(); },
 		uploadState: function () { api.uploads++; return Promise.resolve(); },
 		wantDiag: function () { api.diagWants = (api.diagWants || 0) + 1; },
 		tsCollect: function () {},
@@ -614,6 +622,102 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		'the GPU renderer sees the moved view, not the boot view');
 	pEl('play').click();
 
+	// --- live controls: hover view modes, groups, an engine switch that keeps the run, slow warnings
+	// This scenario loads its pages last-on-purpose: the stub's global rAF is re-pointed at
+	// the newest page by every loadPage, so only the newest page's frame loop can pump.
+	const modeLabel = (page, value) => {
+		const group = page.el('layer');
+		for (const label of group.children)
+			for (const child of label.children)
+				if (child.getAttribute && child.getAttribute('name') === 'layer' && child.getAttribute('value') === value) return label;
+		return null;
+	};
+	// The view mode: without a hover-capable fine pointer (this stub has no matchMedia),
+	// hovering a label does nothing; the click path is the only switch.
+	const stillPage = loadPage('');
+	const stillGroup = stillPage.el('layer');
+	// The stub does not bubble: the hover reaches the group's listener with the label as
+	// the event's target, exactly what a browser delivers.
+	stillGroup.dispatch('pointerover', { type: 'pointerover', target: modeLabel(stillPage, 'z') });
+	assert.ok(worldLine(stillPage.copy()).includes(' · view plate ·'),
+		'no fine pointer, no hover switch: ' + worldLine(stillPage.copy()));
+
+	// With one, a hover over a label selects that view mode and moves the radio's checked
+	// state with it; crossing the group without touching a label changes nothing.
+	globalThis.matchMedia = (q) => ({ matches: /hover: hover/.test(q) && /pointer: fine/.test(q) });
+	const hoverPage = loadPage('');
+	const hEl = hoverPage.el;
+	hEl('layer').dispatch('pointerover', { type: 'pointerover', target: hEl('layer') });
+	assert.ok(worldLine(hoverPage.copy()).includes(' · view plate ·'), 'crossing the group is not a choice');
+	hEl('layer').dispatch('pointerover', { type: 'pointerover', target: modeLabel(hoverPage, 'z') });
+	assert.ok(worldLine(hoverPage.copy()).includes(' · view z ·'), 'a hover switches the view mode: ' + worldLine(hoverPage.copy()));
+	assert.equal(modeLabel(hoverPage, 'z').children[0].checked, true, 'the hovered radio reads checked');
+	hEl('layer').dispatch('pointerover', { type: 'pointerover', target: modeLabel(hoverPage, 'plate') });
+	assert.ok(worldLine(hoverPage.copy()).includes(' · view plate ·'), 'and hovering back switches again');
+	globalThis.matchMedia = undefined;
+
+	// A fresh page, CPU engine - now the newest, so its frame loop pumps below.
+	const livePage = loadPage('');
+	const lEl = livePage.el;
+	const groupOf = (node) => {
+		while (node && node.tagName !== 'FIELDSET') node = node.parentNode;
+		return node;
+	};
+	for (const id of ['level', 'start', 'seed', 'reset', 'load'])
+		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'startup', '#' + id + ' lives in the Startup group');
+	for (const id of ['dt', 'speed', 'cadence', 'run-to', 'engine', 'save', 'deposits'])
+		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'adjust', '#' + id + ' lives in the Adjust group');
+	assert.equal(groupOf(lEl('play')), null, 'the transport buttons are outside both groups');
+
+	// The slow-on-CPU warning: L7 on the CPU flags the Resolution control, more than one
+	// step per frame flags Steps/frame too, the GPU engine clears both, and the boot
+	// fallbacks repaint it because paintSlow rides bootEngine's completion.
+	const levelSlow = () => lEl('level').parentNode.classList.contains('slow');
+	const stepsSlow = () => lEl('speed').parentNode.classList.contains('slow');
+	assert.ok(!levelSlow() && !stepsSlow(), 'L5 at one step per frame on the CPU is not slow');
+	lEl('level').value = '7';
+	lEl('level').dispatch('change');
+	assert.ok(levelSlow() && !stepsSlow(), 'L7 on the CPU flags the Resolution control');
+	lEl('speed').value = '5';
+	lEl('speed').dispatch('change');
+	assert.ok(levelSlow() && stepsSlow(), 'L7 with 5 steps/frame flags both controls');
+	lEl('level').value = '6';
+	lEl('level').dispatch('change');
+	assert.ok(levelSlow() && stepsSlow(), 'L6 at 5 steps/frame keeps both flags: both are the cause');
+	lEl('speed').value = '1';
+	lEl('speed').dispatch('change');
+	assert.ok(!levelSlow() && !stepsSlow(), 'L6 at one step per frame is the acceptable CPU case');
+	globalThis.navigator.gpu = { getPreferredCanvasFormat: () => 'bgra8unorm' };
+	lEl('engine').value = 'gpu';
+	lEl('engine').dispatch('change');
+	await livePage.tick();
+	assert.ok(!levelSlow() && !stepsSlow(), 'the GPU engine is never slow-flagged');
+
+	// The engine switch keeps the run: while a GPU batch is in flight the frame loop stops
+	// stepping (the CPU mirror is not the world to advance), the switch to CPU pulls the
+	// full mirror first, and afterwards the sim continues on the CPU at the same run state.
+	lEl('play').click();
+	// Five frames, not two: this page has never pumped, so the boot draw's view hold
+	// consumes the first frames before the first batch is handed to the device.
+	livePage.pump(5, 30000);
+	const liveGpu = livePage.gpu;
+	assert.equal(liveGpu.plays.length, 1, 'one GPU batch in flight');
+	lEl('engine').value = 'cpu';
+	lEl('engine').dispatch('change');
+	assert.equal(lEl('play').textContent, 'Pause', 'the switch does not stop the run');
+	livePage.pump(3, 31000);
+	assert.equal(liveGpu.downloads, 0, 'nothing is pulled while the batch is still in flight');
+	liveGpu.plays[0].settle(liveGpu.plays[0].n);
+	await livePage.tick();
+	await livePage.tick();
+	assert.ok(liveGpu.downloads >= 1, 'the CPU handover pulls the full mirror (the event mirror is a cycle old)');
+	assert.equal(lEl('badge').textContent, 'CPU · L6', 'the switch completed');
+	assert.equal(lEl('play').textContent, 'Pause', 'still playing on the CPU engine');
+	const liveT = () => +/^t (\d+\.\d) Myr/.exec(livePage.copy().split('\n').pop())[1];
+	livePage.pump(4, 32000);
+	assert.ok(liveT() > 0, 'the sim advances on the CPU engine: t ' + liveT());
+	lEl('play').click();
+
 	// --- the CPU renderer's view path, straight: fast re-sample, repaint without recolour ---
 	const g5 = new Grid(5, 7).build();
 	const s5 = new State(g5, 7);
@@ -702,5 +806,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' and a pan turns the view under a running sim (probe agrees with the paint, the dead zone keeps the click,'
 		+ ' the sim never waits for the mouse, the view outlives a rebuild, both engines defer a step'
 		+ ' while the view moves, the copied report records that gate, a GPU batch handed the gate stops'
-		+ ' at its frame boundary, and paint never recolors)');
+		+ ' at its frame boundary, and paint never recolors); a fine-pointer hover switches the view mode,'
+		+ ' the controls live in Startup/Adjust groups, the slow-on-CPU warning flags L7 and L6 >1 step/frame,'
+		+ ' and an engine switch mid-run pulls the full mirror and keeps playing');
 })().catch((error) => { console.error(error); process.exit(1); });

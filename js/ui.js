@@ -7,10 +7,13 @@
 	var seedInput = document.getElementById('seed'), layerGroup = document.getElementById('layer');
 	var currentLayer = 'plate';
 	function layerValue() { return currentLayer; }
+	// One writer for the view mode: click, keyboard and hover all land here.
+	function setLayer(value) { if (currentLayer === value) return; currentLayer = value; dirty = true; }
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var followInput = document.getElementById('follow');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
+	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var perfStrip = document.getElementById('perf-rows');
@@ -83,6 +86,18 @@
 	Perf.reset();
 	function paintBadge() {
 		badge.textContent = (gpu.on && gpu.ready ? 'GPU · L' : 'CPU · L') + grid.level;
+	}
+	// "Slow on the CPU engine" warning: L7, and L6 with more than one step per frame,
+	// run at a few frames per second on the CPU. Amber on the labels and controls, not
+	// red - the run is slow, not broken - and only on the CPU engine, since L6-L7 are
+	// the WebGPU path. Painted from the selects, so every path that changes engine or
+	// level (the boot fallbacks included) repaints it through bootEngine's completion.
+	function paintSlow() {
+		var cpu = engineInput.value !== 'gpu';
+		var level = +levelInput.value, steps = +speedInput.value;
+		var slow = cpu && (level === 7 || (level === 6 && steps > 1));
+		levelLabel.classList[slow ? 'add' : 'remove']('slow');
+		speedLabel.classList[slow && steps > 1 ? 'add' : 'remove']('slow');
 	}
 	// The one gate the frame loop and an in-flight GPU batch both ask: is the view moving, or
 	// did it move within the last VIEW_HOLD_FRAMES? `viewHold` is the frame loop's count; the
@@ -162,11 +177,12 @@
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
 	// and at the event cadence inside GpuSim.play, so no per-frame readback happens.
 	function bootEngine(done) {
+		var doneSlow = function () { paintSlow(); done(); };
 		if (engineInput.value === 'gpu') {
 			if (!navigator.gpu) {
 				engineInput.value = 'cpu';
 				probe.textContent = 'WebGPU is not available in this browser; staying on the CPU engine.';
-				done();
+				doneSlow();
 				return;
 			}
 			gpu.on = true; gpu.ready = false;
@@ -194,27 +210,40 @@
 				gpuCanvas.hidden = false; canvas.hidden = true;
 				gpu.ready = true; dirty = true;
 				paintBadge();
-				done();
+				doneSlow();
 			})['catch'](function (error) {
 				gpu.on = false; engineInput.value = 'cpu';
 				gpuCanvas.hidden = true; canvas.hidden = false;
 				paintBadge();
 				probe.textContent = 'GPU engine failed (' + error.message + '); back on CPU.';
-				done();
+				doneSlow();
 			});
 		} else {
 			gpu.on = false; gpu.ready = false;
 			gpuCanvas.hidden = true; canvas.hidden = false;
 			Sim.raster(state);
 			paintBadge();
-			done();
+			doneSlow();
 		}
 	}
+	// Engine switching keeps the run: the world lives in `state`, so the other engine
+	// takes over at the same t instead of the run stopping. A GPU handover pulls the
+	// full mirror first - the light event mirror leaves the cell arrays one event cycle
+	// old, and the CPU engine would restart from those. While the handover is in flight
+	// the frame loop keeps drawing but starts no steps (`switching`): the CPU mirror of
+	// a GPU run is not the world to advance, and a fresh GPU boot must not race a batch.
+	var switching = false;
 	engineInput.addEventListener('change', function () {
-		setPlaying(false); runTarget = Infinity;
+		if (switching) { engineInput.value = gpu.on && gpu.ready ? 'gpu' : 'cpu'; return; }
+		var wasGpu = gpu.on && gpu.ready;
+		switching = true; gpu.ready = false;
 		Perf.reset();
 		resetViewStats();
-		whenGpuIdle(function () { bootEngine(function () { dirty = true; }); });
+		whenGpuIdle(function () {
+			(wasGpu ? GpuSim.download(state) : Promise.resolve()).then(function () {
+				bootEngine(function () { dirty = true; switching = false; });
+			}, function () { switching = false; });
+		});
 	});
 	// Fast-forward escape hatch: rebuild the plate table only every 5/10 Myr instead
 	// of every 1 Myr. No rebuild needed: Events.cycle is span-aware and both engines
@@ -222,6 +251,7 @@
 	cadenceInput.addEventListener('change', function () {
 		Params.eventCadence = +cadenceInput.value;
 	});
+	speedInput.addEventListener('change', paintSlow);
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
 		play.setAttribute('aria-pressed', String(playing)); step.disabled = playing;
@@ -258,8 +288,23 @@
 		setPlaying(true);
 	});
 	layerGroup.addEventListener('change', function (event) {
-		if (event.target && event.target.name === 'layer') currentLayer = event.target.value;
-		dirty = true;
+		if (event.target && event.target.name === 'layer') setLayer(event.target.value);
+	});
+	// A hover-capable fine pointer switches the view mode by hovering, no click: the
+	// radio's checked state follows so a later click cannot undo the hover choice. Touch
+	// and stylus-only devices keep the click - there is no resting hover to steer with.
+	var hoverFine = typeof matchMedia === 'function' && matchMedia('(hover: hover) and (pointer: fine)').matches;
+	if (hoverFine) layerGroup.addEventListener('pointerover', function (event) {
+		var node = event.target;
+		while (node && node !== layerGroup && node.tagName !== 'LABEL') node = node.parentNode;
+		if (!node || node === layerGroup) return;
+		for (var i = 0; i < node.children.length; i++) {
+			var input = node.children[i];
+			if (input.getAttribute && input.getAttribute('name') === 'layer') {
+				input.checked = true;
+				setLayer(input.value);
+			}
+		}
 	});
 	document.getElementById('reset').addEventListener('click', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
@@ -532,7 +577,7 @@
 		} else if (viewStats.gated) {
 			viewStats.gated = false; viewStats.reopens++;
 		}
-		if (playing && !gateClosed) {
+		if (playing && !gateClosed && !switching) {
 			steps = +speedInput.value;
 			if (runTarget < Infinity) steps = Math.min(steps, Math.max(0, Math.ceil((runTarget - state.t) / dt - 1e-9)));
 			if (steps > 0) {
@@ -633,6 +678,7 @@
 	}
 	paintGrid();
 	paintBadge();
+	paintSlow();
 	mountStrip();
 	// The page's own default is the CPU engine, whose world is already rastered; a prefilled
 	// ?engine=gpu has to boot the device before a frame tries to draw from it.

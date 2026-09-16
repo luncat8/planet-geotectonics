@@ -335,6 +335,10 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 					Sim.step(cpu, dt);
 					if (cfg.progress && f % 200 === 0) cfg.progress('seed ' + seed + ' · cpu ' + f + '/' + frames);
 					if ((f + 1) % every === 0) cpuS.push(sample(cpu));
+					// The CPU half is synchronous; a slice every 200 frames keeps the status
+					// line painting and the page answering. No step reads the wall clock, so
+					// pacing changes no result.
+					if (f % 200 === 199) await yieldTick();
 				}
 				await GpuSim.init(gpu, { fallback: false });
 				GpuSim.raster(gpu);
@@ -477,6 +481,10 @@ async function runAndLog(kind, cfg) {
 	busy = true;
 	lockButtons(false);
 	render();
+	// Let the status line and the locked buttons actually paint before the runner's
+	// first synchronous stretch blocks the thread - a start nobody saw is the "did my
+	// click land?" confusion the status line exists to answer.
+	await nextPaint();
 	var tick = setInterval(render, 500);
 	var report;
 	try {
@@ -552,6 +560,26 @@ function dumpErrors() {
 	if (!errors.length) return;
 	say('[errors] captured console/webgpu errors: ' + errors.length);
 	errors.forEach(function(e){ say('  ' + e.split('\n').join('\n  ')); });
+}
+
+// One timer slice; a long synchronous stretch (a CPU half, a grid build) ends before it.
+function yieldTick() {
+	return new Promise(function (resolve) { setTimeout(resolve, 0); });
+}
+
+// The runner's first segment is synchronous CPU work, so the status line reaches the
+// screen only if this task ends before that work starts: hand the job to rAF (which
+// runs in front of the next paint) and continue from a timer, i.e. after that paint.
+// The 60 ms fallback covers a background tab, where rAF is throttled to nothing.
+function nextPaint() {
+	return new Promise(function (resolve) {
+		var done = false;
+		function fire() { if (done) return; done = true; resolve(); }
+		if (typeof requestAnimationFrame === 'function') {
+			requestAnimationFrame(function () { setTimeout(fire, 0); });
+			setTimeout(fire, 60);
+		} else setTimeout(fire, 0);
+	});
 }
 
 function hostLine() {

@@ -62,14 +62,18 @@ const RUN_IDS = ['run-1', 'run-ens', 'run-batch', 'run-det'];
 		return { frames: 1, level: 5, seed: 7, ok: true, firstBadFrame: -1, last: [] };
 	};
 	byId('run-1').click();
-	assert.ok(statusShown(), 'the status line is shown while a run works');
+	// The status line and the button lock land in the click task itself, before the
+	// runner is even handed control (the page yields to a paint first, so the start is
+	// visible before the runner's first synchronous stretch blocks the thread).
+	assert.ok(statusShown(), 'the status line is shown the moment the run starts');
 	assert.ok(status().indexOf('parity running') === 0, 'the status names the run: ' + status());
 	assert.ok(/\d+\.\d s/.test(status()), 'the status counts the elapsed seconds: ' + status());
-	assert.ok(status().indexOf('frame 0/1') > 0, 'runner progress lands in the status: ' + status());
 	for (const id of RUN_IDS) {
 		assert.equal(byId(id).disabled, true, id + ' locked while the run is in flight');
 	}
 	byId('run-ens').click();
+	await waitUntil(() => status().indexOf('frame 0/1') > 0, 'the runner to start after the paint handoff');
+	assert.ok(status().indexOf('frame 0/1') > 0, 'runner progress lands in the status: ' + status());
 	await waitUntil(() => out().indexOf('[result] PASS') >= 0, 'the first run to finish');
 	assert.equal(count(out(), 'PASS parity OK'), 1, 'the second click did not start a run');
 	assert.ok(out().indexOf('already in flight') >= 0, 'the refused click says why');

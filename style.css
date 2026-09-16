@@ -34,8 +34,15 @@ canvas:active { cursor: grabbing; }
 .perf .rows span:last-child { color: #788c99; }
 .controls { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; padding: 10px 0; border-bottom: 1px solid #2b3540; }
 .controls label { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 7px; font-size: 11px; color: #aab9bd; }
+.controls fieldset { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; margin: 0; padding: 6px 12px 10px; border: 1px solid #2b3540; border-radius: 8px; min-width: 0; }
+.controls fieldset legend { font-size: 11px; letter-spacing: 1.4px; color: #97aab2; padding: 0 6px; }
 .controls .check { flex-direction: row; gap: 6px; padding: 10px 0; cursor: pointer; white-space: nowrap; }
 .controls .check input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: #9bdfba; }
+
+/* Slow-on-CPU warning (ui.js paintSlow): amber label text and a tinted control, not red -
+   the run is slow, not broken. */
+.controls label.slow { color: #e8b45a; }
+.controls label.slow select { border-color: #8a6d2f; background: #241d10; }
 #follow {accent-color: #9bdfba; width: auto; min-height: 0;}
 
 button, select, input { font: inherit; border: 1px solid #3c4b57; border-radius: 5px; background: #1a2632; color: #e1e8eb; padding: 10px 12px; min-height: 39px; }

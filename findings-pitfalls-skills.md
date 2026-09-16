@@ -1374,3 +1374,35 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	CI/headless automation (no human clicks, 1000×3 frames logged to `experiments/logs/`).
 	`run_gpu_parity.py` says so on every failure and `--help` documents all five vars
 	(`PGT_PUPPETEER`, `PGT_CHROME`, `PUPPETEER_EXECUTABLE_PATH`, `CHROME_PATH`, `PGT_LIBS`).
+
+## A start message nobody sees: paint between tasks, and the rAF you must not trust (2026-09-16)
+
+\tA click handler that sets a status line and then runs seconds of synchronous work
+\t(grid builds, the ensemble's whole CPU half) never shows that line: the browser
+\tpaints at frame boundaries, not between tasks, so a `setTimeout(0)` handoff can
+\tstill run before the next paint and the user reads "nothing happened" — the exact
+\tconfusion the status line exists to kill. `tests/gpu-parity.html`'s `nextPaint()`
+\tdoes it right: hand the continuation to `requestAnimationFrame` (which runs in
+\tfront of the next paint) and resume from a `setTimeout(0)` inside it (which runs
+\tafter that paint), with a 60 ms timer as the fallback for a background tab where
+\trAF is throttled to nothing. The second half is the long synchronous stretch
+\titself: `__ens`' CPU half never awaited, so even elapsed-second ticks could not
+\tpaint for ~15 s — one `yieldTick()` per 200 frames fixes both, and no step reads
+\tthe wall clock, so pacing changes no result. The node stub cannot follow the rAF
+\tpath (its rAF only fires when a test pumps), which is exactly why the fallback
+\tbelongs in the page: `tests/gpu-parity-ui.js` waits for the runner to start and
+\tpasses in both worlds.
+
+## dom-stub: only the newest loadPage can pump its frame loop (2026-09-16)
+
+\t`installGlobals` re-points the global `requestAnimationFrame` at the newest
+\tpage's pump array on every `loadPage`, and `frame()` resolves the global at call
+\ttime — so a page loaded earlier registers its frames into the newest page's
+\tarray. Pump an older page and it runs out of callbacks: "the frame loop stopped
+\tregistering callbacks". The existing scenarios never noticed because each pumped
+\tonly while it was the newest page (panPage loads, then pumps, last). A scenario
+\tthat loads page A, then page B, then pumps A hangs. Order the loads so the
+\tpumping page is loaded last (what the live-controls scenario in tests/gui.js now
+\tdoes), and note the cousin pitfall: the stub does not bubble, so a delegated
+\tlistener (the hover switch on the #layer fieldset) is tested by dispatching on
+\tthe group with the label as the event's `target`, not by dispatching on the label.

@@ -40,7 +40,7 @@
 
 ## tests
 
-	node tests/run-all.js		short profile (default): 23 kernel, rig and GUI tests, ~1 min here
+	node tests/run-all.js		short profile (default): 25 kernel, rig and GUI tests, ~1.5 min here
 	node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 	node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 
@@ -57,10 +57,12 @@
 
 0.0-*.txt - original brief.
 0.1-diz-*.md - three LLM designs (inputs, kept for reference).
-0.1.5-compare.md - comparison and verdicts with measurements.
 0.1.5-final-design.md - normative design.
-0.2-plan.md - development plan built on the design.
-0.3-plan.md - GPU smoothness and measurement plan (post 0.2-H).
+0.3.2-tweak-ui.md - UI tweak plan (archive/0.3-plan.md follow-up).
+0.3.3-draft-adj.md - draft: live-adjustable global settings (temperature, erosion, relief ramp).
+0.3.3-plan.md - the live adjustment plan built on the draft (temperature, friction, erosion, relief).
+archive/0.2-plan.md, archive/0.3-plan.md - implemented plans, kept as artifacts for a fork
+or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.
 experiments/logs/ - keep useful; run_full_test.py / run_gpu_parity.py write their logs here
 
@@ -68,5 +70,3 @@ run_bench.py, run_full_test.py, run_gpu_parity.py - double-clickable runners (pa
 full node profile, the headless GPU parity ensemble)
 
 findings-pitfalls-skills.md - notes and pitfalls for LLM agents. write here if found good way to do something.
-
-archive/ - for implemented plans
