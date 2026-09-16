@@ -53,6 +53,16 @@ Open `index.html` directly in a browser.
 - Performance counter: smoothed fps, physics step time and per-kernel milliseconds, text
   rebuilt twice a second. Static geometric coefficients and bounded-vector length kernels keep
   the strict L5 Node proxy above 60 steps/s on the calibration host.
+- Live adjustment (the Adjust group, 0.3.3): a Cooling switch and a Mantle Tm slider on the
+  world's temperature, `Friction ×` on the asthenosphere damping exponent, `Erosion ×` on the
+  sediment intake and a `Relief range` for the elevation ramp. Temperature and its switch are
+  JS-side bookkeeping the frame block already carries, friction and erosion each promote one
+  slot into that block, and the ramp is renderer-only, so all four apply mid-play on both
+  engines with no restart and no measurable cost. The Tm slider re-anchors the cooling curve and
+  follows the sim at 2 Hz while nothing is holding it, and a capture's header records every
+  non-default value, so `?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9` re-runs what a log describes.
+  The erosion intake itself is quadratic in elevation around `zKnee`, a calibrated release const
+  (see `0.1.5-final-design.md` §7.3).
 - CPU release tooling: a reproducible one-factor calibration sweep at both calibration frame steps,
   an optional 4.5 Gyr release test, and a browser run-to-time control (4500 Myr by default).
 - WebGPU engine (Phase H): the same kernel graph runs on the device (engine select in the

@@ -39,6 +39,12 @@ canvas:active { cursor: grabbing; }
 .controls .check { flex-direction: row; gap: 6px; padding: 10px 0; cursor: pointer; white-space: nowrap; }
 .controls .check input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: #9bdfba; }
 
+/* Adjust sliders (ui.js): the checkbox accent on a compact track, with the value under it.
+   The readout is fixed-width and tabular so the 2 Hz Mantle Tm follow rewrites text without
+   moving the label. */
+.controls input[type="range"] { width: 132px; min-height: 0; padding: 0; border: 0; background: none; accent-color: #9bdfba; }
+.controls .value { display: block; min-width: 4.5em; text-align: center; color: #80d7b9; font-variant-numeric: tabular-nums; }
+
 /* Slow-on-CPU warning (ui.js paintSlow): amber label text and a tinted control, not red -
    the run is slow, not broken. */
 .controls label.slow { color: #e8b45a; }

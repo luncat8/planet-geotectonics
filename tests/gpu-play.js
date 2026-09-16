@@ -245,7 +245,16 @@ function bytesOf(name) {
 		const l = GpuSim.S.l;
 		const strideBytes = l.finStride * 4;
 		assert.equal(strideBytes % 32, 0, 'the per-frame block stride is a multiple of minStorageBufferOffsetAlignment');
-		assert.ok(strideBytes >= 74 * 4, 'and holds all 74 fields');
+		assert.ok(strideBytes >= GpuSim.FIN_FIELDS * 4, 'and holds all ' + GpuSim.FIN_FIELDS + ' fields');
+		// The block's own arithmetic: the mantle block plus fA00 (0..73) and the two promoted
+		// Adjust sliders (74 friction, 75 eroScale) fit a 32-byte-aligned 80-float block with
+		// 4 floats to spare - the contract that lets a slider ride frameIn instead of taking a
+		// binding or a pipeline rebuild.
+		assert.equal(GpuSim.FIN_FIELDS, 76, 'the block carries 76 fields');
+		assert.equal(l.finStride, 80, 'padded to 80 floats');
+		assert.equal(l.finStride - GpuSim.FIN_FIELDS, 4, '4 spare floats, and the padding stays zero');
+		assert.equal(GpuSim.FIN_FRICTION, 74, 'friction rides field 74');
+		assert.equal(GpuSim.FIN_EROSCALE, 75, 'eroScale rides field 75');
 		// Dawn rejects a dynamic offset when the bind group range is the whole
 		// buffer: offset 512 on a 20-block frameIn is out of bounds. The entry
 		// must name the per-frame block size.
@@ -275,16 +284,16 @@ function bytesOf(name) {
 		assert.equal(s.t, t0, 'frameBlocks precomputes ahead but restores state.t');
 		assert.equal(s.frame, f0, 'and state.frame');
 		for (let i = 0; i < 8; i++) {
-			const got = Array.from(GpuSim.S.finBlocks.subarray(i * l.finStride, i * l.finStride + 74));
+			const got = Array.from(GpuSim.S.finBlocks.subarray(i * l.finStride, i * l.finStride + GpuSim.FIN_FIELDS));
 			assert.deepEqual(got, blocks[i], 'batched block ' + i + " is frame " + i + "'s single-step upload");
 			assert.equal(got[7], i, 'block ' + i + ' carries its frame number (field 7, the contact hash salt)');
-			for (let p = 74; p < l.finStride; p++) {
+			for (let p = GpuSim.FIN_FIELDS; p < l.finStride; p++) {
 				assert.equal(GpuSim.S.finBlocks[i * l.finStride + p], 0, 'padding word ' + p + ' of block ' + i + ' is zero');
 			}
 		}
 		// the upload covers exactly the n blocks; the tail blocks stay untouched
-		const tailView = new Float32Array(GpuSim.S.buf.frameIn.bytes, 8 * strideBytes, 74);
-		for (let i = 0; i < 74; i++) assert.equal(tailView[i], 0, 'no bytes past the nth block are uploaded');
+		const tailView = new Float32Array(GpuSim.S.buf.frameIn.bytes, 8 * strideBytes, GpuSim.FIN_FIELDS);
+		for (let i = 0; i < GpuSim.FIN_FIELDS; i++) assert.equal(tailView[i], 0, 'no bytes past the nth block are uploaded');
 
 		dev.dynamicOffsets.length = 0;
 		GpuSim.batch(s, DT, 8, -1);
@@ -318,7 +327,7 @@ function bytesOf(name) {
 		// copy - a buffer cannot be copied onto itself, and the encoder would be
 		// invalidated: see the pin below.)
 		const devView = new Float32Array(GpuSim.S.buf.frameIn.bytes);
-		for (let i = 0; i < 74; i++) {
+		for (let i = 0; i < GpuSim.FIN_FIELDS; i++) {
 			assert.equal(devView[i], GpuSim.S.finBlocks[2 * l.finStride + i],
 				'commit writes the final block back over block 0, word ' + i);
 		}
@@ -329,7 +338,7 @@ function bytesOf(name) {
 		// teeth for a self-copy regression.
 		{
 			const enc = dev.createCommandEncoder();
-			enc.copyBufferToBuffer(GpuSim.S.buf.frameIn, 2 * l.finStride * 4, GpuSim.S.buf.frameIn, 0, 74 * 4);
+			enc.copyBufferToBuffer(GpuSim.S.buf.frameIn, 2 * l.finStride * 4, GpuSim.S.buf.frameIn, 0, GpuSim.FIN_FIELDS * 4);
 			assert.throws(() => enc.finish(), /same buffer/,
 				'a same-buffer copy invalidates the encoder, like Dawn');
 		}

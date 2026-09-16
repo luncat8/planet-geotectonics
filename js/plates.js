@@ -8,10 +8,12 @@ var Plates = {
 	// Equivalent basal velocities w (design §6.3): every force except drag, expressed as the
 	// mantle speed that would push as hard. Divided by cD(Tm) = exp(Ea(1/Tm − 1)), so a cooling
 	// asthenosphere damps slab pull and ridge push into a stagnant lid with no code switch.
+	// The Friction × slider scales Ea (0.3.3): multiplied in the same order the forces kernel
+	// uses, so the default 1.0 leaves invCD bit-identical.
 	forces: function (s) {
 		var g = s.grid, p = PlateParams, R = p.radius, w = s.wEq;
 		var ocean = p.hOceanic, ridge = p.kRidge, coll = p.vColl / p.vRef;
-		var invCD = Math.exp(-p.Ea * (1 / s.Tm - 1));
+		var invCD = Math.exp(-p.Ea * p.friction * (1 / s.Tm - 1));
 		ridge *= invCD; coll *= invCD;
 		var slab = p.vSlab * invCD / p.ageSlab;
 		w.fill(0);

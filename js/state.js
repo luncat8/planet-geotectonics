@@ -169,7 +169,9 @@ State.prototype.reset = function (seed) {
 	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
 	// Tm0 is the cooling baseline: the exponential always decays from the world's own start
 	// temperature, so a hot start cools through the same curve a map start sits on today.
+	// cooling off (Adjust, 0.3.3) pins Tm at the stored value instead of recomputing it.
 	this.Tm0 = this.hotStart ? StateParams.TmHot : StateParams.Tm0;
+	this.cooling = 1;
 	this.Tm = this.Tm0; this.mantleScale = 1; this.plumeCount = 0; this.rng = 0;
 	// lastEvent starts at 0, not -Infinity: plateCells is only meaningful after the first K5
 	// pass, and the event cadence would otherwise retire every plate on the opening frame.

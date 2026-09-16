@@ -72,6 +72,11 @@ var Surface = {
 	// Erosion is taken in the order sediment, felsic crust, mafic crust. The signed production
 	// ledgers include crust that has become mobile sediment, preserving the Phase C checks while
 	// the total hFel+hMaf+hSed+mobile ledger remains exact through deposition.
+	// The intake law is quadratic in elevation around the knee zKnee (0.3.3): the old linear
+	// rate ate 2-3 km shields as fast as it capped 30 km peaks, while z·q² is continuous with
+	// the linear law at the knee and steep either side of it - ~0.08× at 2.5 km, ~2× at 13 km,
+	// ~11× at 30 km. The Erosion × slider scales the intake only; routing, deposition and
+	// placer liberation are untouched.
 	// Gather form (design §2): 15 % of columns own more than one cell, so a per-cell writer
 	// would race on the column (and depend on traversal order). Each column instead walks the
 	// cells raster can give it — its own cell and that cell's ring — and takes from its own
@@ -86,7 +91,8 @@ var Surface = {
 			for (var k = -1; k < g.ringN[cell]; k++) {
 				var c = k < 0 ? cell : g.ring[cell * 6 + k];
 				if (s.owner[c] !== i || s.z[c] <= 0) continue;
-				var want = p.kEro * s.z[c] * (1 + 2 * s.slope[c] / p.slopeRef) * dt;
+				var q = s.z[c] / p.zKnee;
+				var want = p.kEro * p.eroScale * s.z[c] * q * q * (1 + 2 * s.slope[c] / p.slopeRef) * dt;
 				var takeSed = Math.min(want, s.hSed[i]);
 				s.hSed[i] -= takeSed; want -= takeSed;
 				var takeFel = Math.min(want, s.hFel[i]);

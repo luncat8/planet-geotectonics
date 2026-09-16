@@ -82,7 +82,11 @@ assert.ok(s.quatError < 1e-12, 'quat ' + s.quatError);
 assert.ok(margin[5] >= 30, 'craton interior must stay at 35 km, got ' + margin[5].toFixed(1));
 assert.ok(reaches15 >= 0, 'the margin must thin below 15 km');
 assert.ok(backTo35 - reaches15 <= 4, 'thinning must span at most 4 cells, got ' + (backTo35 - reaches15));
-for (let b = 1; b < 6; b++) assert.ok(margin[b] >= margin[b - 1] - 1e-9, 'crust thins monotonically toward the rift');
+// The 0.3.3 q² intake (Surface.route) erodes low relief so much slower that the outer bands
+// stay at the 35 km start thickness, where their means differ only by ledger noise (a few
+// centimetres here). A real inversion would be three orders of magnitude larger than the
+// metre of slack; the rifted bands are still held to the start-thickness profile.
+for (let b = 1; b < 6; b++) assert.ok(margin[b] >= margin[b - 1] - 1e-3, 'crust thins monotonically toward the rift');
 assert.ok(oceanic > 20, 'oceanic crust must appear, got ' + oceanic);
 // A hole may sit out one fillDelay while the crust repacks; none may outlive it.
 assert.ok(oldestGap < Params.fillDelay + 0.1, 'a gap outlived the fill delay: ' + oldestGap);

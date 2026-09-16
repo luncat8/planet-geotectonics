@@ -20,7 +20,11 @@
 //      browser at its major version, OS/CPU type, and the GPU as a type plus one vendor word -
 //      a capture never carries a UA string, an adapter model or seconds;
 //   8. a final hardware drag capture names a real pan and the view gate it exercised instead
-//      of relying on an unmarked idle performance strip.
+//      of relying on an unmarked idle performance strip;
+//   9. the 0.3.3 adjustments are Adjust controls: the readouts track the sliders, the
+//      ?tm/?cool/?fric/?ero/?relief pre-fill lands on the world and its Params, the copied
+//      adj line names only what differs from the defaults, and the relief ramp recolours
+//      (never rebuilds the world or the pipeline) on both engines.
 //
 // js/ui.js runs as a classic script against tests/dom-stub.js, which is built by parsing the
 // real index.html, and a recorded fake GpuSim: the device side of the engine is
@@ -450,6 +454,34 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	// ?level=9 would throw before the page drew anything.
 	const stray = loadPage('?level=9');
 	assert.equal(stray.el('badge').textContent, 'CPU · L5', 'an unoffered ?level= is ignored');
+	stray.pump(40, 1000);
+	assert.ok(!/^adj /m.test(stray.copy()),
+		'a capture at the defaults says nothing about adjustments:\n' + stray.copy());
+
+	// The five 0.3.3 controls ride the same pre-fill, and the copied adj line is the query
+	// that reproduces the capture - the line the sliders themselves write when moved.
+	const tuned = loadPage('?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9');
+	assert.equal(tuned.el('cooling').checked, false, '?cool=0 unchecks Cooling');
+	assert.equal(tuned.el('tm').value, '1.4');
+	assert.equal(tuned.Params.friction, 1.5, '?fric= reaches the kernels');
+	assert.equal(tuned.Params.eroScale, 0.5, '?ero= too');
+	assert.equal(tuned.Params.zRange, 9000, '?relief= is kilometres on the control, metres in the ramp');
+	assert.equal(tuned.el('tm-value').textContent, '1.40', 'the readouts follow the pre-fill');
+	assert.equal(tuned.el('friction-value').textContent, '1.50');
+	assert.equal(tuned.el('ero-value').textContent, '0.50');
+	assert.equal(tuned.el('relief-value').textContent, '9.0 km');
+	tuned.pump(40, 1000);
+	assert.ok(/^adj Tm 1\.40 cooling off · friction 1\.5x · erosion 0\.5x · relief 9\.0 km$/m.test(tuned.copy()),
+		'the capture names every adjustment it ran with:\n' + tuned.copy());
+
+	// The relief slider is a recolour, not a rebuild: the CPU engine repaints the canvas on
+	// the next frame (the GPU engine's own redraw is pinned in the play section below).
+	const tunedMap = tuned.el('map'), putsBefore = tunedMap.puts;
+	tuned.el('relief').value = '3';
+	tuned.el('relief').dispatch('input');
+	assert.equal(tuned.Params.zRange, 3000, 'the ramp is metres');
+	tuned.pump(2, 3000);
+	assert.ok(tunedMap.puts > putsBefore, 'the CPU map repainted after the ramp change');
 
 	// --- pan: the view turns under a running sim, and never waits for the mouse ------------
 	// A fresh page with an untouched world; the mirror worlds built here match the page's
@@ -667,6 +699,12 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'startup', '#' + id + ' lives in the Startup group');
 	for (const id of ['dt', 'speed', 'cadence', 'run-to', 'engine', 'save', 'deposits'])
 		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'adjust', '#' + id + ' lives in the Adjust group');
+	// The five live controls of 0.3.3 are Adjust controls too: nothing in this group rebuilds
+	// the world, which is what the legend promises.
+	for (const id of ['cooling', 'tm', 'friction', 'ero', 'relief'])
+		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'adjust', '#' + id + ' lives in the Adjust group');
+	assert.equal(lEl('tm-value').textContent, '1.00', 'the slider readouts start on the control values');
+	assert.equal(lEl('relief-value').textContent, '6.5 km');
 	assert.equal(groupOf(lEl('play')), null, 'the transport buttons are outside both groups');
 
 	// The slow-on-CPU warning: L7 on the CPU flags the Resolution control, more than one
@@ -702,6 +740,19 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	livePage.pump(5, 30000);
 	const liveGpu = livePage.gpu;
 	assert.equal(liveGpu.plays.length, 1, 'one GPU batch in flight');
+	// The relief slider on the GPU engine: the next frame's world draw writes the new ramp
+	// into the draw uniform (no pipeline, no device rebuild), and the GPU engine's draw is
+	// the world texture's, not the canvas'.
+	const liveGpuRenderer = fakeRenderers[fakeRenderers.length - 1];
+	const drawsBeforeRamp = liveGpuRenderer.draws;
+	lEl('relief').value = '9';
+	lEl('relief').dispatch('input');
+	assert.equal(livePage.Params.zRange, 9000, 'the ramp is metres on the GPU engine too');
+	livePage.pump(1, 30500);
+	assert.ok(liveGpuRenderer.draws > drawsBeforeRamp, 'the GPU engine redrew the world for the new ramp');
+	lEl('relief').value = '6.5';
+	lEl('relief').dispatch('input');
+	assert.equal(livePage.Params.zRange, 6500, 'and the default is restored for the rest of the run');
 	lEl('engine').value = 'cpu';
 	lEl('engine').dispatch('change');
 	assert.equal(lEl('play').textContent, 'Pause', 'the switch does not stop the run');
@@ -808,5 +859,6 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' while the view moves, the copied report records that gate, a GPU batch handed the gate stops'
 		+ ' at its frame boundary, and paint never recolors); a fine-pointer hover switches the view mode,'
 		+ ' the controls live in Startup/Adjust groups, the slow-on-CPU warning flags L7 and L6 >1 step/frame,'
-		+ ' and an engine switch mid-run pulls the full mirror and keeps playing');
+		+ ' the Adjust sliders pre-fill from the query, report themselves in the copy header and recolor the'
+		+ ' map without a rebuild, and an engine switch mid-run pulls the full mirror and keeps playing');
 })().catch((error) => { console.error(error); process.exit(1); });

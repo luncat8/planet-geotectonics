@@ -5,12 +5,22 @@ var Params = Object.seal({
 	rGap: 0.75, rSpawn: 0.85, rContact: 0.6, donors: 3, gapPersist: 2, fillDelay: 20, sedScrape: 0.5, riftDamage: 0.6,
 	hRiftBreakup: 15000, hOceanic: 8000, hCollapse: 50000, collThickness: 1,
 	epsHi: 2000, epsLo: 1000, vRef: 50000, vMax: 200000, vSuture: 3000, tauOmega: 0.5,
-	// Phase G one-factor calibration baseline: 6.06 cm/yr at 500–1000 Myr, 18.8% continental
-	// area at 1500 Myr, bounded relief and all six ore factories populated (seed 7, L5).
-	U0: 50000, beta: 0.5, Ea: 3, vSlab: 1e6, kRidge: 5e6, vColl: 2e5, ageSlab: 70,
+	// Calibration baseline (seed 7, L5, hot start, 1500 Myr at dt 0.1), re-committed with the
+	// 0.3.3 erosion knee: 9.01 cm/yr in the middle epoch, 19.3% continental area and 10.1%
+	// cratons at the 1500 Myr acceptance epoch, 12 plates. The linear law had 9.05 / 19.1% /
+	// 9.6% on the same history; experiments/erosion-knee.js measures any candidate on it.
+	// The Adjust sliders (0.3.3) write four of these live, mid-run: friction scales Ea,
+	// eroScale scales kEro, zRange is the relief ramp, and state.cooling/Tm0 the temperature.
+	U0: 50000, beta: 0.5, Ea: 3, friction: 1, vSlab: 1e6, kRidge: 5e6, vColl: 2e5, ageSlab: 70,
 	kArc: 65, arcMafShare: 0.3, zTrench: 3000, tauDyn: 10, kFlex: 0.05, kCollapse: 0.02,
 	zPlume: 1000, tauPlume: 50, kLip: 30,
-	kEro: 0.05, slopeRef: 0.01, deltaZ: 20, kPlacer: 0.2,
+	// The knee is the height at which the q² intake meets the linear law, so it is what sets the
+	// law's whole scale: at the colour ramp's 6.5 km it ate the thickened crust and the release
+	// history fell out of acceptance 3 (14.1% continents), at 9 km it lands back on baseline.
+	kEro: 0.05, eroScale: 1, slopeRef: 0.01, zKnee: 9000, deltaZ: 20, kPlacer: 0.2,
+	// Relief ramp: |z| = zRange metres saturates land and the deep-water floor of the
+	// elevation palette symmetrically (render.js, render-gpu.js). Renderer-only.
+	zRange: 6500,
 	kDam: 5e-4, kDamT: 1e-3, kHeal: 0.005, extRef: 0.01, splitDamage: 0.6, minPlateCells: 100,
 	mergeTime: 20, vRift: 10000, splitAge: 40,
 	Tm0: 1, TmHot: 1.6, tauCool: 2500, Tfloor: 0.35, kPlume: 0.01, plumeRad: 500000,

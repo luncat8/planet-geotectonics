@@ -15,9 +15,11 @@
    Sim.raster rebuilds them, and world is recomputed here from q and body. */
 var CheckpointQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : Quat;
 var Checkpoint = {
-	MAGIC: 0x31544750, VERSION: 1, HEAD: 64, RECORD: 16, WORDS: 10,
+	MAGIC: 0x31544750, VERSION: 2, HEAD: 64, RECORD: 16, WORDS: 10,
 	F64: 1, F32: 2, I32: 3, U32: 4, U16: 5, U8: 6, I8: 7,
-	SCALARS: ['t', 'frame', 'n', 'plateCount', 'seed', 'rng', 'Tm', 'Tm0', 'hotStart', 'mantleScale',
+	// Version 2 (0.3.3) adds `cooling`; the version word is the only compatibility contract,
+	// so a v1 blob is rejected by the check in peek rather than read with a shifted table.
+	SCALARS: ['t', 'frame', 'n', 'plateCount', 'seed', 'rng', 'Tm', 'Tm0', 'hotStart', 'cooling', 'mantleScale',
 		'plumeCount', 'spawns', 'deaths', 'overlaps', 'splits', 'merges', 'lastEvent', 'gaps', 'maxClimb',
 		'histI', 'histN', 'producedFel', 'producedMaf', 'erodedFel', 'erodedMaf', 'subductedMaf',
 		'subductedSed', 'subductedArea', 'massFel', 'massMaf', 'massSed', 'massFel0', 'massMaf0', 'massSed0'],

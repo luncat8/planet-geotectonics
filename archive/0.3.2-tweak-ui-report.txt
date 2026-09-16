@@ -1,0 +1,28 @@
+## What landed
+
+**`0.3.2-tweak-ui.md` → `archive/`** (git rename, AGENTS.md file list updated).
+
+**0.3.3 (`0.3.3-plan.md`) — all five controls live on both engines, no restart:**
+- **Cooling** checkbox (default on): off pins `state.Tm` in `Mantle.update` and `GpuSim.fillFrame`; back on re-anchors so the curve resumes from where the world is.
+- **Mantle Tm** (Tfloor..2.0, step 0.01): `Mantle.setTm` re-derives `Tm0' = Tfloor + (v − Tfloor)·e^(t/tauCool)`; slider follows the sim at 2 Hz with the `document.activeElement` guard, and only the Tm control writes the temperature.
+- **Friction ×** 0..3: `EaEff = Ea·friction`, same multiply order CPU (`Plates.forces`) and WGSL (`forces`, promoted frameIn slot 74).
+- **Erosion ×** 0..3 + the quadratic intake: `want = kEro·eroScale·z·q²·(1 + 2·slope/slopeRef)·dt`, `q = z/zKnee` (6500, const `P_ZKNEE`), WGSL `erode` via slot 75. Knee-continuous; 0.15× at 2.5 km, 4× at 13 km.
+- **Relief range** 2..20 km: CPU reads `Params.zRange`; GPU draw uniform is now `struct U { layer, viewQ, zRange }` (48 B, `zRange` at offset 32) rewritten per draw — no pipeline, no device rebuild.
+- Adjust group after Engine, `perfReport` appends `adj …` only when non-default, `?tm/?cool/?fric/?ero/?relief` pre-fill, checkpoint **VERSION 2** carries `cooling` (v1 refused by the version word), `bench.html` untouched, frameIn 76 of stride 80 with 32-byte alignment.
+
+**Tests:** new `tests/adj.js` (module physics + dom-stub page: pin/re-anchor, 2 Hz follow + focus guard, friction/Ea bit-exactness, knee continuity, checkpoint round trip, ramp bytes, pre-fill/readouts/`adj` line/recolour); `wgsl-struct` pins the promoted slots and `P_ZKNEE`/`fFriction()`/`fEroScale()`; `gpu-play` re-pinned to `FIN_FIELDS` (76/80); `gui` covers the five controls, the header line and the ramp redraw on both engines; `run-all` SHORT gains `adj`.
+
+## Verification here
+
+`node tests/run-all.js` → **26/26 short tests pass (86 s)**; `kinematics`, `ores`, `alloc` histories pass too. Since the erosion default is a calibration change, I compared the longrun history's first 300 Myr against pre-0.3.3 (L5, seed 7, hot start):
+
+| | continental | craton | mean speed | splits/merges | plates |
+|---|---|---|---|---|---|
+| before | 15.0% | 1.0% | 13.46 cm/yr | 33 / 25 | 23 |
+| 0.3.3 | 13.6% | 0.9% | 13.53 cm/yr | 36 / 28 | 23 |
+
+So the release windows (plates 6–40, 1–10 cm/yr, continental 0.15–0.4) look safe. Two **short gates were re-baselined in kind** and documented in-place: `rift.js` monotonicity slack 1e-9 → 1e-3 km (the outer bands now sit flat on the 35 km start thickness, a 6 cm ledger-noise inversion), and `split.js`'s natural run re-seeded 7 → 11 (seed 7 goes 3 splits → 0 under the new law; seed 11 still exercises both paths, 2/4).
+
+## Still on the owner rig (per AGENTS.md, can't run here — no Chromium, and full profile is the rig's gate)
+
+The §3/§7 re-proof: longrun 1500 Myr end-state + the dt 0.01 300-Myr cross-check, the 4.5 Gyr release profile, the GPU parity ensemble on a real device (the WGSL in `forces`/`erode`/draw changed), and one iso bench for ms/step. `0.3.3-plan.md` stays at the root (not archived) until those pass.

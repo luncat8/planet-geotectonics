@@ -1,3 +1,4 @@
+var RenderParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 // View math is kept beside the CPU renderer so the classic page and the pointer handler
 // share the same world-to-screen convention. q maps a world direction into the displayed
 // equirectangular map; a drag rotates the displayed surface without clamping its angle.
@@ -171,7 +172,7 @@ Renderer.prototype.draw = function (layer) {
 		}
 		if (layer === 'damage') {
 			// The rift corridor: cells whose column has weakened past the split threshold glow.
-			var d = s.damage[owner], hot = d > Params.splitDamage;
+			var d = s.damage[owner], hot = d > RenderParams.splitDamage;
 			colors[b] = 30 + 225 * Math.min(1, d);
 			colors[b + 1] = 30 + (hot ? 90 : 40) * Math.min(1, d);
 			colors[b + 2] = 46;
@@ -254,13 +255,15 @@ Renderer.prototype.draw = function (layer) {
 			colors[b + 2] = hue2rgb(pp, q, h - 1 / 3) * 255;
 			continue;
 		}
+		// Relief range (0.3.3): |z| = RenderParams.zRange saturates land and the deep-water floor
+		// symmetrically, so the ramp's cap and its floor move together.
 		var z = s.z[c];
 		if (z < 0) {
-			var shallow = Math.max(0, 1 + z / 6500);
+			var shallow = Math.max(0, 1 + z / RenderParams.zRange);
 			colors[b] = 15 + 23 * shallow; colors[b + 1] = 40 + 95 * shallow; colors[b + 2] = 69 + 100 * shallow;
 			continue;
 		}
-		var high = Math.min(1, z / 6500);
+		var high = Math.min(1, z / RenderParams.zRange);
 		colors[b] = 100 + 145 * high; colors[b + 1] = 156 + 79 * high; colors[b + 2] = 112 + 113 * high;
 	}
 	this.paint();

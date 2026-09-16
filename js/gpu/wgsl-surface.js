@@ -122,6 +122,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 // Per-column erosion over the cells raster can give it, in the fixed order own cell
 // then ring: sediment first, then felsic, then mafic. What was taken stays on the cell
 // for the routing passes; the signed production ledgers book fel and maf removal.
+// The intake is quadratic in elevation around zKnee (0.3.3): z·q² is continuous with the
+// old linear law at the knee, falls ~0.08× at 2.5 km and bites ~11× at 30 km, so shields
+// survive while peaks are capped. Polynomial only, so the f32 port is exact.
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	let i = gid.x;
@@ -137,7 +140,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 		if (cellOwner(c) != i32(i)) { continue; }
 		let zc = cellZ(c);
 		if (zc <= 0.0) { continue; }
-		var want = P_KERO * zc * (1.0 + 2.0 * cellSlope(c) / P_SLOPEREF) * fDT();
+		let q = zc / P_ZKNEE;
+		var want = P_KERO * fEroScale() * zc * q * q * (1.0 + 2.0 * cellSlope(c) / P_SLOPEREF) * fDT();
 		let takeSed = min(want, hSed);
 		hSed = hSed - takeSed;
 		want = want - takeSed;

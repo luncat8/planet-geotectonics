@@ -36,7 +36,12 @@ var GpuSim = {
 	// FIN_MAX per-frame blocks; each block is padded to the device's dynamic-storage
 	// offset alignment (a bind group is bound with i * blockBytes).
 	FIN_MAX: 20,
-	FIN_FIELDS: 74,
+	// Fields 0..73 are the mantle block (t, dt, Tm, wave and plume tables) plus
+	// fA00; 74 and 75 are the two promoted Adjust sliders (0.3.3). The block pads to
+	// finStride 80, so 4 floats stay spare.
+	FIN_FRICTION: 74,
+	FIN_EROSCALE: 75,
+	FIN_FIELDS: 76,
 	// The adapter init() got, kept for the one-line capture header (Env.gpu). Null until a
 	// device has been built, and kept across inits that reuse one.
 	adapter: null,
@@ -491,7 +496,7 @@ var GpuSim = {
 		await GpuSim.uploadFrame(state, GpuParams.dt);
 	},
 
-	// Fill one 74-float block at float offset `off`. Mantle bookkeeping stays on
+	// Fill one frame block at float offset `off`. Mantle bookkeeping stays on
 	// the CPU (cheap, sequential RNG), the per-cell flow is the GPU kernel.
 	// precess and the plume respawn loop read state.t, and a batched encoder
 	// precomputes n blocks before the JS clock advances, so the simulated time
@@ -499,7 +504,9 @@ var GpuSim = {
 	fillFrame: function (state, fin, off, dt, t, frame) {
 		var p = GpuParams;
 		state.t = t;
-		state.Tm = GpuMantle.Tm(t, state.Tm0);
+		// Cooling off pins the temperature: the device is told the stored Tm through the
+		// block instead of the curve (0.3.3); nothing else in the block reads t for it.
+		if (state.cooling) state.Tm = GpuMantle.Tm(t, state.Tm0);
 		GpuMantle.precess(state);
 		for (var i = 0; i < state.plumeCount; i++) {
 			while (t >= state.plumeBirth[i] + state.plumeLife[i]) {
@@ -521,10 +528,12 @@ var GpuSim = {
 		}
 		fin[off + 72] = state.plateCount;
 		fin[off + 73] = state.grid.A0[0];
+		fin[off + GpuSim.FIN_FRICTION] = p.friction;
+		fin[off + GpuSim.FIN_EROSCALE] = p.eroScale;
 	},
 
 	// The single-frame upload (step, the parity harness, the boot raster): the
-	// first 74 floats of the same block layout a batch uses.
+	// first FIN_FIELDS floats of the same block layout a batch uses.
 	uploadFrame: function (state, dt) {
 		var S = GpuSim.S;
 		if (!S.finSingle) S.finSingle = new Float32Array(GpuSim.FIN_FIELDS);

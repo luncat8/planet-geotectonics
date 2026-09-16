@@ -12,22 +12,119 @@
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var followInput = document.getElementById('follow');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
+	var coolingInput = document.getElementById('cooling'), tmInput = document.getElementById('tm');
+	var frictionInput = document.getElementById('friction'), eroInput = document.getElementById('ero');
+	var reliefInput = document.getElementById('relief');
+	var tmValue = document.getElementById('tm-value'), frictionValue = document.getElementById('friction-value');
+	var eroValue = document.getElementById('ero-value'), reliefValue = document.getElementById('relief-value');
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var perfStrip = document.getElementById('perf-rows');
+	// --- Adjust: the live sliders (0.3.3) --------------------------------------------------
+	// Four knobs that apply mid-play on both engines with no restart: the mantle temperature
+	// and its cooling switch (state), the asthenosphere friction and the erosion scale (Params,
+	// carried to the kernels through frameIn), and the elevation ramp (the renderers only).
+	// The knobs' compiled defaults, read before any pre-fill writes them: the copy header
+	// reports only what differs from these, and Params is written in place so there is no
+	// pristine copy left by the time it is asked.
+	var ADJ_DEFAULTS = { friction: Params.friction, eroScale: Params.eroScale, zRange: Params.zRange };
+	// The readouts are rewritten at 2 Hz by the Tm follow, so they are fixed-width (tabular
+	// digits, min-width in style.css): a number that changes width would move the label.
+	function paintAdjust() {
+		tmValue.textContent = (+tmInput.value).toFixed(2);
+		frictionValue.textContent = (+frictionInput.value).toFixed(2);
+		eroValue.textContent = (+eroInput.value).toFixed(2);
+		reliefValue.textContent = (+reliefInput.value).toFixed(1) + ' km';
+	}
+	// The follow waits for the hand, not for the focus: a range input keeps focus after a drag,
+	// so gating the rewrite on `document.activeElement` left the control stuck on the value it
+	// was last touched at until the user clicked somewhere else. A touch of the control arms the
+	// hold and the strip's own ticks retire it, so a thumb under the pointer is never rewritten
+	// and an idle control is back on the sim a second later. The page's own writes - a
+	// pre-fill, a rebuild, a load - do not arm it: a fresh page follows from its first tick.
+	var TM_FOLLOW_HOLD = 2, tmFollowHold = 0;
+	function holdTmFollow() { tmFollowHold = TM_FOLLOW_HOLD; }
+	// The Tm control writes the world's temperature and re-anchors the cooling baseline so the
+	// curve leaves from the slider (Mantle.setTm); it is the only writer of either, so moving
+	// friction or the ramp cannot nudge the temperature by way of the slider's rounding.
+	function applyTm() {
+		Mantle.setTm(state, +tmInput.value);
+		paintAdjust();
+	}
+	// One direction, one writer: every path that moves the other three sliders - a pointer, a
+	// keyboard, a ?-pre-fill - lands the control's value on its consumer through here.
+	function applyAdjust() {
+		Params.friction = +frictionInput.value;
+		Params.eroScale = +eroInput.value;
+		var range = +reliefInput.value * 1000;
+		// The ramp is read per draw by both renderers; a range change is a recolour, not a
+		// view move, so it sets `dirty` (the frame loop's draw), never applyView.
+		if (range !== Params.zRange) { Params.zRange = range; dirty = true; }
+		paintAdjust();
+	}
+	// The other direction, for the paths that hand the page a world it did not set: a rebuild
+	// starts on the new world's own start temperature, and Load takes the temperature and the
+	// cooling flag from the blob. The Params knobs are global settings and carry over.
+	function syncAdjust() {
+		coolingInput.checked = state.cooling === 1;
+		tmInput.value = state.Tm.toFixed(2);
+		paintAdjust();
+	}
+	// The capture's own record of the sliders: only what differs from the defaults is
+	// printed, and the line's own query (?tm=1.2&cool=0&fric=1.4&ero=0.6&relief=9) names
+	// the settings a re-run needs.
+	function adjustReport() {
+		// The temperature and its switch are one part: "Tm 1.20 cooling off" reads as what it
+		// is - the world's temperature and whether it is still decaying. A pinned world names
+		// its temperature even when the baseline never moved (cooling was switched off
+		// mid-run), because that is the setting a re-run has to be told.
+		var parts = [], tm = [];
+		var moved = state.Tm0 !== (state.hotStart ? Params.TmHot : Params.Tm0);
+		if (moved || state.cooling !== 1) tm.push('Tm ' + state.Tm.toFixed(2));
+		if (state.cooling !== 1) tm.push('cooling off');
+		if (tm.length) parts.push(tm.join(' '));
+		if (Params.friction !== ADJ_DEFAULTS.friction) parts.push('friction ' + Params.friction + 'x');
+		if (Params.eroScale !== ADJ_DEFAULTS.eroScale) parts.push('erosion ' + Params.eroScale + 'x');
+		if (Params.zRange !== ADJ_DEFAULTS.zRange) parts.push('relief ' + (Params.zRange / 1000).toFixed(1) + ' km');
+		return parts.length ? 'adj ' + parts.join(' · ') : '';
+	}
+	// A press arms the hold as much as a move does: a thumb the pointer has taken but not yet
+	// shifted is still a hand on the control, and rewriting it then is what the follow must not do.
+	tmInput.addEventListener('input', function () { holdTmFollow(); applyTm(); });
+	tmInput.addEventListener('pointerdown', holdTmFollow);
+	frictionInput.addEventListener('input', applyAdjust);
+	eroInput.addEventListener('input', applyAdjust);
+	reliefInput.addEventListener('input', applyAdjust);
+	// Cooling off pins Tm at the stored value; turning it back on resumes the curve from
+	// wherever the world is (setTm re-anchors the baseline), so re-checking cannot teleport
+	// the temperature back onto the decay the world left behind.
+	coolingInput.addEventListener('change', function () {
+		state.cooling = coolingInput.checked ? 1 : 0;
+		if (state.cooling) Mantle.setTm(state, state.Tm);
+	});
+
 	// ?level= / ?seed= / ?engine= / ?dt= / ?steps= pre-fill the world controls, so a capture
 	// request can name the run it wants (index.html?level=7&engine=gpu) instead of describing
 	// clicks - the affordance bench.html already has, and the reason its runs are repeatable
 	// from a log line. A level the select does not offer is ignored rather than built: Grid
-	// takes 0-7, so a stray ?level=9 would throw before the page drew anything.
+	// takes 0-7, so a stray ?level=9 would throw before the page drew anything. The adjust
+	// pre-fill rides the same list: ?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9 is exactly the
+	// header line a non-default capture copies.
 	var query = new URLSearchParams(location.search);
 	function offeredLevel(level) {
 		for (var i = 0; i < levelInput.options.length; i++) {
 			if (+levelInput.options[i].value === level) return true;
 		}
 		return false;
+	}
+	// A slider value the page cannot hold is ignored, like an unoffered ?level=: the numbers
+	// land in Params and in the world's temperature, where a NaN would be unrecoverable.
+	function prefilled(name, input) {
+		var raw = query.get(name), v = +raw;
+		if (!raw || !Number.isFinite(v)) return;
+		input.value = String(v);
 	}
 	if (offeredLevel(+query.get('level'))) Params.level = +query.get('level');
 	if (query.get('seed')) Params.seed = +query.get('seed') >>> 0;
@@ -82,6 +179,16 @@
 	if (query.get('cadence')) cadenceInput.value = query.get('cadence');
 	Params.eventCadence = +cadenceInput.value;
 	if (query.get('engine')) engineInput.value = query.get('engine');
+	// The adjust pre-fill lands on the world before its first raster, so a capture request
+	// starts on the settings it named instead of on the defaults.
+	prefilled('tm', tmInput);
+	prefilled('fric', frictionInput);
+	prefilled('ero', eroInput);
+	prefilled('relief', reliefInput);
+	if (query.get('cool')) coolingInput.checked = query.get('cool') !== '0';
+	state.cooling = coolingInput.checked ? 1 : 0;
+	applyTm();
+	applyAdjust();
 	Sim.raster(state);
 	Perf.reset();
 	function paintBadge() {
@@ -154,6 +261,11 @@
 		Params.level = level;
 		grid = new Grid(level, seed).build();
 		state = new State(grid, seed, hot);
+		// A fresh world starts on its own start temperature and the Tm slider follows it; the
+		// cooling switch is the user's and carries over, as the Params knobs (friction,
+		// erosion, relief) do - they are global settings, not world state.
+		state.cooling = coolingInput.checked ? 1 : 0;
+		syncAdjust();
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
 		extractScratch = null;   // sized to the old grid.V
@@ -371,6 +483,8 @@
 			rebuildWhenIdle(head.level, head.seed, startInput.value === 'hot', function () {
 				try {
 					Checkpoint.load(state, bytes);
+					// The blob owns the temperature and the cooling flag; the sliders follow it.
+					syncAdjust();
 					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
 						+ state.t.toFixed(1) + ' Myr.';
 					if (gpu.on && gpu.ready) {
@@ -533,7 +647,7 @@
 	function perfReport() {
 		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
 		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
-		var viewGate = viewGateReport();
+		var viewGate = viewGateReport(), adjust = adjustReport();
 		return rig
 			+ '\nengine ' + engine + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
@@ -541,6 +655,7 @@
 			+ ' · cadence ' + Params.eventCadence + ' Myr'
 			+ '\n' + Perf.report(stripRows())
 			+ (viewGate ? '\n' + viewGate : '')
+			+ (adjust ? '\n' + adjust : '')
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
 	}
 	Clipboard.bind(perfStrip, perfReport, Clipboard.classAck(perfStrip));
@@ -667,6 +782,14 @@
 		if (Perf.due(now)) {
 			Perf.update(now);
 			showStrip(stripRows());
+			// The Mantle Tm slider follows the sim on the strip's own 2 Hz tick while cooling
+			// is on, and never while a hand is on the control: the hold holdTmFollow arms is
+			// retired after the rewrite check, so it covers its own ticks.
+			if (state.cooling && !tmFollowHold) {
+				tmInput.value = state.Tm.toFixed(2);
+				paintAdjust();
+			}
+			if (tmFollowHold > 0) tmFollowHold--;
 		}
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';

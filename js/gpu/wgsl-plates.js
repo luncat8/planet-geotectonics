@@ -35,7 +35,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	let owner = cellOwner(c);
 	if (owner >= 0) {
 		let i = u32(owner);
-		let invCD = exp(-P_EA * (1.0 / fTM() - 1.0));
+		// Friction × (0.3.3) scales Ea; the factors multiply in the CPU's order, so the
+		// slider at 1.0 leaves this expression bit-identical to the baked P_EA path.
+		let invCD = exp(-P_EA * fFriction() * (1.0 / fTM() - 1.0));
 		if (colHFel(i) < P_HOCEANIC) {
 			w = w - (P_KRIDGE * invCD) * cellGradZ(c);
 		}

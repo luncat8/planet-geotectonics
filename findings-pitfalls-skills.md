@@ -315,6 +315,11 @@
 	minute floating-order changes, so release gates must stay on invariants and declared
 	statistics, never column identity after thousands of frames.
 
+	the numbers above are the linear-law history. the q² intake (0.3.3) moved the release
+	statistics with it and the full-profile baseline is re-committed in js/params.js: 19.3%
+	continents at the 1500 Myr acceptance epoch and 9.01 cm/yr in the middle epoch, L5 seed 7,
+	hot start, dt 0.1. the 4.5 Gyr profile needs its own re-run on the rig before those two
+	sentences can be replaced.
 ## WebGPU parity: precision floors, not bugs
 
 	Measured on SwiftShader (Chromium 137, forceFallbackAdapter): builtin cos is only
@@ -1406,3 +1411,33 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 \tdoes), and note the cousin pitfall: the stub does not bubble, so a delegated
 \tlistener (the hover switch on the #layer fieldset) is tested by dispatching on
 \tthe group with the label as the event's `target`, not by dispatching on the label.
+
+## the erosion knee is a release calibration, not a cosmetic constant (2026-09-16)
+
+	a q² intake around a knee multiplies the old linear rate by (z/zKnee)², so the knee is the
+	law's whole scale: kEro and zKnee are one degree of freedom (kEro·z³/zKnee²) and "the same
+	rate at the knee" only holds while kEro keeps its calibrated value. Putting the knee on the
+	colour ramp's 6500 m was a render intuition rather than a calibration, and it cost the world
+	22 % of its sediment inventory, a third of its cratons (9.6 % → 6.6 %) and 5 points of
+	continental area at the 1500 Myr acceptance epoch (19.1 % → 14.1 %) - under design §10.3's
+	15-40 % band, which is exactly where that gate earns its keep. zKnee 9000 gives 19.3 %
+	continents, 10.1 % cratons and 9.01 cm/yr back, and keeps both halves of the intent: land
+	above 2 km goes 69 % → 91 % (shields spared) while land above 20 km goes 0.89 % → 0.28 %
+	(peaks capped; at 6500 m it was 0.13 %, i.e. planed). candidates:
+	experiments/erosion-knee.js, one row = the full L5 seed-7 1500 Myr history (~3 min, two
+	lanes at a time on two cores); ranking them on a short or coarse run is the mistake the
+	"calibration resolution and duration" note above already warns about.
+
+## a slider that follows the sim waits for the hand, not for the focus (2026-09-16)
+
+	the 2 Hz Mantle Tm follow skipped its rewrite while `document.activeElement` was that input.
+	a range input *keeps* focus after the drag ends, so the control sat on the user's last value
+	until they clicked somewhere else - reported from the page, invisible from the dom stub,
+	which only ever set `activeElement` the way the test wanted. Gate a follow on the
+	interaction: a `pointerdown` or an `input` arms a counter that the follow's own ticks retire
+	(two ticks here), so a thumb under the pointer is never rewritten, an idle control returns to
+	the sim by itself, and no lost `pointerup` can leave the gate shut for the rest of the
+	session. Two halves of the same rule: the page's own writes (pre-fill, rebuild, load) must
+	not arm it, or a fresh page sits out its first second; and a pin for the hold must fail in
+	both directions - "left alone while armed" catches a missing gate, "resumes while still
+	focused" catches a gate that never lets go.

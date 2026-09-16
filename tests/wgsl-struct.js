@@ -69,6 +69,12 @@ const consts = ['const V = ' + layout.V + 'u;', 'const W = ' + state.grid.lookup
 const rendererSrc = Renderer.SHADER.replace('// layout constants appended here (V, W, H, SPLIT_DAMAGE)',
 	consts.join('\n'));
 sources.push({ name: 'renderer', src: rendererSrc });
+// The relief ramp is a uniform (0.3.3), so moving it is a uniform write and not a pipeline
+// rebuild: no baked ramp may survive in the elevation branch.
+assert.ok(rendererSrc.includes('zRange: f32'), 'the draw uniform carries the relief ramp');
+assert.ok(rendererSrc.includes('max(0.0, 1.0 + z / u.zRange)'), 'the deep-water floor follows the ramp');
+assert.ok(rendererSrc.includes('min(1.0, z / u.zRange)'), 'and so does the land cap');
+assert.ok(!/\b6500\b/.test(rendererSrc), 'no baked ramp is left in the renderer');
 sources.push({ name: 'rendererBlit', src: Renderer.BLIT });
 
 for (const { name, src } of sources) {
@@ -122,6 +128,27 @@ const redRelax = +reducePrelude.match(/const RED_RELAX: u32 = RED_WPART \+ NWG10
 assert.equal(redRelax, 2, 'RED_RELAX starts after the winner partials');
 assert.ok(layout.nwg10 * layout.plateCap * redRelax + layout.plateCap <= layout.reduceF,
 	'reduceF covers RED_RELAX + plateCap');
+
+// The frameIn slot table, the JS side against the generated WGSL: the two slots 0.3.3
+// promoted (the friction and erosion sliders) are placed by GpuSim.FIN_* and read through
+// the F_* constants, so a drift would have a slider move a different number - or, worse,
+// the plume table. Only kernels that already bind frameIn may use them.
+const framePrelude = CommonWGSL.frameIn(CommonWGSL.B, layout);
+for (const [name, slot] of [['FRICTION', GpuSim.FIN_FRICTION], ['EROSCALE', GpuSim.FIN_EROSCALE]]) {
+	const m = framePrelude.match(new RegExp('const F_' + name + ': u32 = (\\d+)u;'));
+	assert.ok(m, 'wgsl-common declares F_' + name);
+	assert.equal(+m[1], slot, 'F_' + name + ' matches GpuSim.FIN_' + name);
+	assert.ok(slot < GpuSim.FIN_FIELDS, 'and is inside the block GpuSim uploads');
+	assert.ok(framePrelude.includes('return FIN[F_' + name + '];'), 'the accessor reads its own slot');
+}
+const erodeSrc = sources.find((s) => s.name === 'erode').src;
+assert.ok(erodeSrc.includes('let q = zc / P_ZKNEE;'), 'erode uses the quadratic knee');
+assert.ok(erodeSrc.includes('P_KERO * fEroScale() * zc * q * q'), 'with the slider scaling the intake');
+const forcesSrc = sources.find((s) => s.name === 'forces').src;
+assert.ok(forcesSrc.includes('exp(-P_EA * fFriction() * (1.0 / fTM() - 1.0))'),
+	'forces scales Ea with the friction slider, in the CPU expression\'s order');
+assert.ok(CommonWGSL.params(Params, layout).includes('const P_ZKNEE: f32 = ' + Params.zKnee + ';'),
+	'the knee is a calibrated const, not a slider');
 
 const zeroSrc = sources.find((s) => s.name === 'zeroFrame').src;
 for (const shape of ['t < 6u', 't < 6u + PLATECAP * 3u', 't < 6u + PLATECAP * 3u + COLCAP',

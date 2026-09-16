@@ -14,11 +14,14 @@
         refresh used to flash). The blit is its own encoder, submitted on a drained queue.
      3. the order across submits is world draw -> canvas blit -> (readback) copy, so the
         canvas and the staging buffer both hold the layer that was just drawn.
+     4. the draw uniform's layout (layer, viewQ, zRange): the relief ramp is a uniform the
+        draw writes, so moving the slider needs no pipeline or device rebuild.
    Run: node tests/gpu-readback.js */
 'use strict';
 const { assert, Grid, State } = require('./helpers.js');
 const GpuSim = require('../js/gpu/sim-gpu.js');
 const GpuRenderer = require('../js/gpu/render-gpu.js');
+const Params = require('../js/params.js');
 const { makeDevice } = require('./gpu-stub.js');
 
 // TextureUsage, not BufferUsage: COPY_SRC is 0x1 there. BufferUsage's 0x4 is
@@ -176,7 +179,26 @@ function passesByEnc(log) {
 	assert.equal(renderer.staging, staging, 'the staging buffer is reused, not reallocated');
 	assert.equal(log.filter((e) => e.op === 'createTexture').length, 0, 'a second read allocates nothing');
 
-	// 4. release: a level switch re-inits the sim arenas through GpuSim.release; the
+	// 4. the draw uniform: struct U { layer: u32, viewQ: vec4<f32>, zRange: f32 }. The relief
+	// ramp rides it (0.3.3), so a slider move is a buffer write on the next draw - no
+	// pipeline, no device rebuild. The offsets are the struct's: viewQ 16-byte aligned at 16,
+	// zRange at 32, the struct rounded to 48.
+	{
+		assert.equal(plain.uniformBytes.byteLength, 48, 'the uniform block covers the struct');
+		assert.equal(plain.viewWord.byteOffset, 16, 'viewQ sits at its alignment');
+		assert.equal(plain.zRangeWord.byteOffset, 32, 'zRange follows it');
+		const floats = new Float32Array(plain.uniformBytes);
+		const defaultRamp = floats[8];
+		assert.equal(defaultRamp, Params.zRange, 'the boot ramp is the parameter');
+		Params.zRange = 9000;
+		plain.redraw('z');
+		assert.equal(floats[8], 9000, 'a draw writes the current ramp, not a cached one');
+		Params.zRange = defaultRamp;
+		plain.redraw('z');
+		assert.equal(floats[8], defaultRamp, 'and follows it back');
+	}
+
+	// 5. release: a level switch re-inits the sim arenas through GpuSim.release; the
 	// renderer's own allocations go through its release, not a GC.
 	renderer.release();
 	assert.equal(renderer.world, null, 'release destroys the world texture');
@@ -184,5 +206,6 @@ function passesByEnc(log) {
 
 	console.log('PASS gpu-readback: the world texture carries every draw and every copy, '
 		+ 'no encoder mixes a layer draw with the canvas blit (the black-frame fix), '
-		+ 'the canvas keeps the default usage, and release frees the renderer\u2019s allocations');
+		+ 'the canvas keeps the default usage, the draw uniform carries the relief ramp, '
+		+ 'and release frees the renderer\u2019s allocations');
 })().catch((e) => { console.error((e && e.stack) || e); process.exit(1); });

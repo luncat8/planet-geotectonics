@@ -14,6 +14,15 @@ var Mantle = {
 	hMafNew: function (Tm) {
 		return 7000 * (1 + 1.5 * Math.max(0, Tm - 1));
 	},
+	// The Mantle Tm slider (0.3.3). With cooling on the world keeps cooling from this moment
+	// instead of snapping back onto the old curve, so the baseline moves to the value the
+	// curve must pass through at the current t; with cooling off the pinned temperature is
+	// the value itself. Tm0 is read by nothing else, so this is the whole control.
+	setTm: function (s, value) {
+		var p = MantleParams;
+		s.Tm0 = p.Tfloor + (value - p.Tfloor) * Math.exp(s.t / p.tauCool);
+		s.Tm = value;
+	},
 	precess: function (s) {
 		var n = MantleParams.nWave, twoPi = Math.PI * 2;
 		for (var w = 0; w < n; w++) {
@@ -82,7 +91,11 @@ var Mantle = {
 		s.plumeStr[i] = 0.4 + Mantle.rand(s) * 0.8;
 	},
 	update: function (s) {
-		var p = MantleParams, g = s.grid, speed = p.U0 * Math.pow(s.Tm = Mantle.Tm(s.t, s.Tm0), 2.5), scale = s.mantleScale * speed;
+		var p = MantleParams, g = s.grid;
+		// Cooling off pins the temperature: the stored Tm is what the world runs at, and
+		// nothing below reads t for temperature (0.3.3).
+		if (s.cooling) s.Tm = Mantle.Tm(s.t, s.Tm0);
+		var speed = p.U0 * Math.pow(s.Tm, 2.5), scale = s.mantleScale * speed;
 		var sig = p.plumeRad / p.radius, invSig = 1 / (sig * sig);
 		Mantle.precess(s);
 		for (var i = 0; i < s.plumeCount; i++) {

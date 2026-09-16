@@ -29,6 +29,7 @@ var CommonWGSL = {
 			'const P_TAUPLUME: f32 = ' + p.tauPlume + ';\n' +
 			'const P_KFLEX: f32 = ' + p.kFlex + ';\n' +
 			'const P_KERO: f32 = ' + p.kEro + ';\n' +
+			'const P_ZKNEE: f32 = ' + p.zKnee + ';\n' +
 			'const P_SLOPEREF: f32 = ' + p.slopeRef + ';\n' +
 			'const P_DELTAZ: f32 = ' + p.deltaZ + ';\n' +
 			'const P_KPLACER: f32 = ' + p.kPlacer + ';\n' +
@@ -286,6 +287,11 @@ var CommonWGSL = {
 			'const F_PLUME: u32 = 56u;\n' +
 			'const F_PLUMEN: u32 = 72u;\n' +
 			'const F_A00: u32 = 73u;\n' +
+			// Promoted by 0.3.3: the two Adjust sliders whose kernels already bind frameIn.
+			// A promoted knob costs one uniform load and leaves the default bit-identical
+			// to the baked path (× 1.0 is exact); everything else stays a P_* const.
+			'const F_FRICTION: u32 = 74u;\n' +
+			'const F_EROSCALE: u32 = 75u;\n' +
 			'fn fT() -> f32 { return FIN[0u]; }\n' +
 			'fn fDT() -> f32 { return FIN[1u]; }\n' +
 			'fn fTM() -> f32 { return FIN[2u]; }\n' +
@@ -295,7 +301,9 @@ var CommonWGSL = {
 			'fn fPlates() -> u32 { return u32(FIN[6u]); }\n' +
 			'fn fFrame() -> u32 { return u32(FIN[7u]); }\n' +
 			'fn plumeCount() -> u32 { return u32(FIN[72u]); }\n' +
-			'fn fA00() -> f32 { return FIN[F_A00]; }\n';
+			'fn fA00() -> f32 { return FIN[F_A00]; }\n' +
+			'fn fFriction() -> f32 { return FIN[F_FRICTION]; }\n' +
+			'fn fEroScale() -> f32 { return FIN[F_EROSCALE]; }\n';
 	},
 	frameOut: function (b, l) {
 		return '@group(0) @binding(' + b.frameOut + ') var<storage, read_write> FOUT: array<atomic<i32>>;\n' +

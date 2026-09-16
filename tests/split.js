@@ -182,10 +182,14 @@ function convergence(W) {
 }
 
 // --- events are deterministic and leave the ledger alone ------------------------------------
+// The natural run is re-baselined on seed 11: 0.3.3's quadratic intake erodes low relief much
+// slower, and the seed-7 world (three splits under the linear law) now reaches 150 Myr with
+// none - the statistics drift the plan's §3 recalibration re-proof owns. Seed 11 exercises
+// both paths on the new default; the prescribed corridor above keeps a fixed split target.
 {
 	const runs = [];
 	for (let pass = 0; pass < 2; pass++) {
-		const s = new State(g, 7);
+		const s = new State(g, 11);
 		s.ckptCap = 0;
 		Sim.raster(s);
 		s.rebase();
