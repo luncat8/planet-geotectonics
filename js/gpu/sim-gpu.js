@@ -499,7 +499,7 @@ var GpuSim = {
 	fillFrame: function (state, fin, off, dt, t, frame) {
 		var p = GpuParams;
 		state.t = t;
-		state.Tm = GpuMantle.Tm(t, state.Tm0);
+		state.Tm = isNaN(GpuParams.tmOverride) ? GpuMantle.Tm(t, state.Tm0) : GpuParams.tmOverride;
 		GpuMantle.precess(state);
 		for (var i = 0; i < state.plumeCount; i++) {
 			while (t >= state.plumeBirth[i] + state.plumeLife[i]) {

@@ -2,7 +2,7 @@
 	var canvas = document.getElementById('map'), gpuCanvas = document.getElementById('mapgpu');
 	var play = document.getElementById('play'), step = document.getElementById('step');
 	var dtInput = document.getElementById('dt'), speedInput = document.getElementById('speed');
-	var cadenceInput = document.getElementById('cadence');
+	var cadenceInput = document.getElementById('cadence'), tmInput = document.getElementById('tm'), tmVal = document.getElementById('tm-val');
 	var runToInput = document.getElementById('run-to'), runToStart = document.getElementById('run-to-start');
 	var seedInput = document.getElementById('seed'), layerGroup = document.getElementById('layer');
 	var currentLayer = 'plate';
@@ -204,6 +204,10 @@
 	// read Params.eventCadence per step; the span due next can be several Myr long.
 	cadenceInput.addEventListener('change', function () {
 		Params.eventCadence = +cadenceInput.value;
+	});
+	tmInput.addEventListener('input', function () {
+		Params.tmOverride = tmInput.value === '' ? NaN : +tmInput.value;
+		tmVal.textContent = tmInput.value === '' ? '' : ('Tm ' + (+tmInput.value).toFixed(2));
 	});
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
