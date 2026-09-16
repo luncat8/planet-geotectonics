@@ -1,0 +1,148 @@
+this log made while GPU has other heavy load so numbers not absolute and cant be directly compared to other
+
+
+2026-09-16 07:11 · chrome 151 · win x86_64 — ready. Choose a run above, or use ?run=ens&frames=1000&level=5&seed=7
+Tip: headless `python3 run_gpu_parity.py` prints the same log via puppeteer; `file://` needs no rig.
+[batch] frames= level=5 seed=7 …
+2026-09-16 07:11 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+batch: frames=undefined level=5 seed=7 wall=5067ms
+batch-identity: 8 frame counts, seed 7, level 5 (zero tolerance)
+  1 frames: t=0.10000000000000001 frame=1 lastEvent=0 identical
+  7 frames: t=0.69999999999999996 frame=7 lastEvent=0 identical
+  11 frames: t=1.0999999999999999 frame=11 lastEvent=0 identical
+  12 frames: t=1.2000000000000000 frame=12 lastEvent=1.0999999999999999 identical
+  20 frames: t=2.0000000000000004 frame=20 lastEvent=1.0999999999999999 identical
+  21 frames: t=2.1000000000000005 frame=21 lastEvent=1.0999999999999999 identical
+  25 frames: t=2.5000000000000009 frame=25 lastEvent=2.1000000000000005 identical
+  40 frames: t=4.0000000000000018 frame=40 lastEvent=3.1000000000000014 identical
+PASS batch encoders are bit-identical to one-frame encoders
+[result] PASS
+[log] copied 16 lines to the clipboard
+[determinism] frames=8 level=5 seed=7 …
+2026-09-16 07:11 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+determinism: frames=8 level=5 seed=7 wall=513ms
+PASS determinism: two 8-frame runs from the same upload are bit-identical
+[result] PASS
+[ensemble] frames=1000 level=5 seed=[7,8,9] …
+2026-09-16 07:13 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+ensemble: frames=1000 level=5 seed=[7,8,9] wall=63632ms
+ensemble: 1000 frames, seeds [7,8,9]
+  seed 7: worst plates 0, cols 0.88%, mean 14.0%, max 54.4%, cont 0.58pp
+    end cpu: t=100 plates=16 cols=9505 mean=5.90cm/yr cont=22.3%
+    end gpu: t=100 plates=16 cols=9469 mean=6.09cm/yr cont=22.3%
+  seed 8: worst plates 2, cols 1.17%, mean 10.6%, max 46.9%, cont 0.74pp
+    end cpu: t=100 plates=17 cols=9471 mean=5.17cm/yr cont=22.3%
+    end gpu: t=100 plates=15 cols=9440 mean=5.14cm/yr cont=22.1%
+  seed 9: worst plates 1, cols 1.05%, mean 8.6%, max 43.1%, cont 0.24pp
+    end cpu: t=100 plates=17 cols=9523 mean=5.64cm/yr cont=24.2%
+    end gpu: t=100 plates=16 cols=9563 mean=5.87cm/yr cont=24.1%
+all seeds within predeclared statistical bounds
+PASS ensemble
+[result] PASS
+[log] copied 38 lines to the clipboard
+[parity] frames=1 level=5 seed=7 …
+2026-09-16 07:13 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+parity: frames=1 level=5 seed=7 wall=332ms gpuBuild=50ms
+FIRST DIVERGENCE at frame 0:
+  low: 28 bad, first at [410] cpu=6305 gpu=9536 worstRatio=0.00
+  hSed: 2 bad, first at [2078] cpu=15.28814522260209 gpu=7.550173282623291 worstRatio=55507.68
+  oBas: 2 bad, first at [2078] cpu=0.00199907202443965 gpu=0.0009872578084468842 worstRatio=1153.38
+  z: 2 bad, first at [2078] cpu=-5725.901085243722 gpu=-5728.01123046875 worstRatio=36.86
+FAIL parity
+worst fields at last frame:
+  low: ratio=0.000 mismatches=28 at [410] cpu=6305 gpu=9536
+  world: ratio=0.013 mismatches=0
+  hFel: ratio=0.113 mismatches=0
+  hMaf: ratio=0.094 mismatches=0
+  hSed: ratio=55507.684 mismatches=2 at [2078] cpu=15.28814522260209 gpu=7.550173282623291
+  age: ratio=0.010 mismatches=0
+  zDyn: ratio=0.154 mismatches=0
+  oVms: ratio=0.011 mismatches=0
+  oBas: ratio=1153.384 mismatches=2 at [2078] cpu=0.00199907202443965 gpu=0.0009872578084468842
+  z: ratio=36.856 mismatches=2 at [2078] cpu=-5725.901085243722 gpu=-5728.01123046875
+  slope: ratio=0.116 mismatches=0
+  gradZ: ratio=0.137 mismatches=0
+  uMantle: ratio=0.055 mismatches=0
+  plumeT: ratio=0.055 mismatches=0
+  vel: ratio=0.022 mismatches=0
+  ext: ratio=0.193 mismatches=0
+  subRate: ratio=0.123 mismatches=0
+  maxSpeed: ratio=0.016 mismatches=0
+  producedFel: ratio=0.405 mismatches=0
+  erodedFel: ratio=0.048 mismatches=0
+[result] FAIL
+[log] copied 70 lines to the clipboard
+
+
+
+[boot] 2026-09-16 07:13 · chrome 151 · win x86_64
+[boot] gpu hardware nvidia · ts-query yes
+[init] GpuSim.init ok in 55 ms, tsOn=true, queries=140
+[parity] D1 boot M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 boot rhs/A0[0] rel p1 8.2e-8 p2 3.6e-7 p3 3.9e-8 p4 2.0e-7 p5 7.1e-7 p6 3.3e-7 p7 4.4e-8 p8 2.1e-7 p9 1.5e-6 p10 1.0e-7 p11 9.9e-7 p12 5.1e-7 p13 1.1e-7 p14 4.5e-7 p15 3.9e-7 p16 3.9e-7 · worst p9 1.5e-6
+[parity] D1 boot fit (omegaTarget) rel p1 2.2e-7 p2 4.3e-7 p3 9.1e-8 p4 1.9e-7 p5 3.2e-7 p6 1.3e-7 p7 1.8e-7 p8 2.5e-7 p9 1.4e-6 p10 1.1e-7 p11 4.8e-7 p12 6.8e-7 p13 1.2e-7 p14 5.4e-7 p15 3.4e-7 p16 3.9e-7 · worst p9 1.4e-6
+[parity] D1 boot omega rel p1 2.2e-7 p2 4.3e-7 p3 9.1e-8 p4 1.9e-7 p5 3.2e-7 p6 1.3e-7 p7 1.8e-7 p8 2.5e-7 p9 1.4e-6 p10 1.1e-7 p11 4.8e-7 p12 6.8e-7 p13 1.2e-7 p14 5.4e-7 p15 3.4e-7 p16 3.9e-7 · worst p9 1.4e-6
+[parity] D1 boot uMantle: worst rel 2.6e-5 (|d| 1.84e-2 m/Myr @c6214) · worst |d| 2.24e-1 m/Myr @c2056 (rel 3.8e-6)
+[parity] D1 boot wEq: worst rel 6.1e-4 (|d| 4.78e-1 m/Myr @c9542) · worst |d| 4.84e-1 m/Myr @c1684 (rel 7.9e-6)
+[parity] frame 5 dt 0.1 · n cpu=10242 gpu=10242 · plates cpu=16 gpu=16 · owner mismatch 0/10242 · |dz| max 2.2 m
+[parity] meanSpeed cpu=4.022 gpu=4.022 cm/yr · maxSpeed cpu=11.449 gpu=11.449 cm/yr
+[parity] omega relaxation: mean |omega|/|omegaTarget| cpu 0.837 gpu 0.837 over 16 plates · p1 cpu 0.943 gpu 0.943 · p2 cpu 0.691 gpu 0.691 · p3 cpu 0.871 gpu 0.871 · p4 cpu 0.863 gpu 0.863
+[parity] omega: worst |dR*w| plate 6 = 0.000 cm/yr · cpu from relaxed omega 4.022/11.449 · cpu from target omega 5.040/13.052 · gpu 4.022/11.449
+[parity] device K10: dt 0.100000 (uploaded 0.1) · alpha 0.200000 (expected 0.200000) · worst |stored - relaxed| omega 0.00e+0 rad/Myr
+[parity] D1 frame 5 M/A0[0] rel p1 2.3e-8 p2 2.6e-8 p3 5.5e-8 p4 4.8e-8 p5 1.6e-8 p6 6.4e-8 p7 3.0e-8 p8 3.5e-8 p9 4.0e-8 p10 4.1e-8 p11 4.0e-8 p12 5.5e-8 p13 4.8e-8 p14 3.3e-8 p15 5.1e-8 p16 3.8e-8 · worst p6 6.4e-8
+[parity] D1 frame 5 rhs/A0[0] rel p1 4.5e-8 p2 3.9e-7 p3 5.6e-8 p4 1.7e-7 p5 4.0e-7 p6 2.4e-7 p7 6.1e-8 p8 1.4e-7 p9 4.3e-7 p10 1.3e-7 p11 6.1e-7 p12 6.7e-8 p13 1.6e-7 p14 1.7e-7 p15 2.5e-7 p16 1.9e-7 · worst p11 6.1e-7
+[parity] D1 frame 5 fit (omegaTarget) rel p1 2.8e-7 p2 2.0e-7 p3 2.0e-7 p4 1.3e-7 p5 2.3e-7 p6 1.5e-7 p7 2.3e-7 p8 2.5e-7 p9 4.0e-7 p10 1.2e-7 p11 1.8e-7 p12 1.9e-7 p13 1.6e-7 p14 1.9e-7 p15 1.2e-7 p16 1.4e-7 · worst p9 4.0e-7
+[parity] D1 frame 5 omega rel p1 2.1e-7 p2 2.1e-7 p3 2.3e-7 p4 1.5e-7 p5 2.6e-7 p6 1.5e-7 p7 5.6e-8 p8 2.6e-7 p9 6.6e-7 p10 8.9e-8 p11 2.3e-7 p12 1.9e-7 p13 9.5e-8 p14 2.3e-7 p15 1.0e-7 p16 1.3e-7 · worst p9 6.6e-7
+[parity] D1 frame 5 uMantle: worst rel 1.3e-5 (|d| 2.76e-2 m/Myr @c9837) · worst |d| 2.12e-1 m/Myr @c2056 (rel 3.7e-6)
+[parity] D1 frame 5 wEq: worst rel 2.8e-4 (|d| 1.94e-1 m/Myr @c5166) · worst |d| 6.48e-1 m/Myr @c578 (rel 1.6e-5)
+[events] frame 20 t=2.0 Myr · plates 16 · columns 10241 · finite=true
+[ts] tsCollect 1 ms · loserRank 0.59 ledgerReduceA 0.33 winnerA 0.18 stay 0.18 subRateA 0.07
+[render] canvas 1024x512 · format bgra8unorm · row 4096 · readback 2097152 B · cpu ref 2097152 B
+[render] plate: mean|d| 0.53 max|d| 1 ch>16: 0 · 1572864 samples
+[render] type: mean|d| 0.73 max|d| 1 ch>16: 0 · 1572864 samples
+[render] z: mean|d| 0.64 max|d| 1 ch>16: 0 · 1572864 samples
+[render] damage: mean|d| 0.08 max|d| 1 ch>16: 0 · 1572864 samples
+[render] owner: mean|d| 0.00 max|d| 0 ch>16: 0 · 1572864 samples
+[render] sediment: mean|d| 0.01 max|d| 1 ch>16: 0 · 1572864 samples
+[render] speed: mean|d| 0.41 max|d| 1 ch>16: 0 · 1572864 samples
+[render] age: mean|d| 0.53 max|d| 1 ch>16: 0 · 1572864 samples
+[render] force: mean|d| 0.31 max|d| 1 ch>16: 0 · 1572864 samples
+[render] dir: mean|d| 0.89 max|d| 31 ch>16: 1706 · 1385472 samples
+[render] oVms: mean|d| 0.02 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oMaf: mean|d| 0.02 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oArc: mean|d| 0.05 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oOro: mean|d| 0.00 max|d| 0 ch>16: 0 · 1572864 samples
+[render] oBas: mean|d| 0.01 max|d| 1 ch>16: 0 · 1572864 samples
+[render] oPla: mean|d| 0.00 max|d| 0 ch>16: 0 · 1572864 samples
+[render] GPU renderer drew 16 layers; pixel-parity actually compared 16/16 (map below: dir)
+[errors] captured console/webgpu errors: 0
+[result] PASS
+[result] total wall 1201 ms
+[log] copied 43 lines to the clipboard
+
+
+HEAVY rig 2026-09-16 07:14 · chrome 151 · win x86_64 · gpu hardware nvidia
+HEAVY config level=5 seed=11 plates=4 vSuture=300 hot=1 load=60 iso=200 ts=on
+HEAVY load: overlaps/frame mean=9.78 max=36 (frame counters, 60 frames) series=[0,0,0,5,36,22,13,4,1,2,1,9,14,8,15,20,9,6,5,5,5,13,12,13,13,17,10,11,6,5,12,11,12,10,9,10,16,8,9,10,14,10,9,10,6,9,7,8,16,11,13,8,13,7,11,10,11,6,10,11]
+HEAVY iso: 200 frames wall=1167ms (5.84 ms/frame) contactBlock=0.803ms
+HEAVY kernels (ms/frame): overlaps 0.000  gaps 0.016  resolve 0.016  loserZero 0.000  loserCount 0.000  scanCA 0.000  scanCB 0.000  scanCC 0.000  loserScatter 0.016  loserRank 0.754  gather 0.000
+HEAVY loserRank=0.7537ms loserScatter=0.0164ms meanOverlaps=9.78
+
+
+
+2026-09-16 07:16 · chrome 151 · win x86_64 · gpu hardware nvidia
+engine gpu · L6 · dt 0.1 · 20 steps/frame · view z · map start · seed 7 · cadence 1 Myr
+177.0 fps  ·  step 0.00 ms  ·  frame 5.7 ms  ·  50 steps/s  ·  5.0 Myr/s
+p95 5.6 ms · max 11.1 ms
+events 3 (138.3 ms = dl 128.5 [wait 124.8] + cyc 8.6 + up 1.3)
+loserRank 9.19 subRateA 1.51 ledgerReduceA 1.30 reduceA 1.23 overlaps 0.82 winnerA 0.68 columnStep 0.43 dynamics 0.31 gather 0.21 resolve 0.21 · CPU mirror one event cycle old
+t 32.2 Myr · GPU · L6
+
+2026-09-16 07:16 · chrome 151 · win x86_64 · gpu hardware nvidia
+engine gpu · L6 · dt 0.1 · 20 steps/frame · view z · map start · seed 7 · cadence 1 Myr
+177.7 fps  ·  step 0.00 ms  ·  frame 5.8 ms  ·  9 steps/s  ·  0.9 Myr/s
+p95 5.6 ms · max 11.1 ms
+events 1 (16.5 ms = dl 8.0 [wait 5.3] + cyc 7.4 + up 1.1)
+loserRank 9.21 subRateA 1.51 ledgerReduceA 1.29 reduceA 1.27 overlaps 0.68 winnerA 0.65 columnStep 0.62 resolve 0.25 loserScatter 0.23 extension 0.22 · CPU mirror one event cycle old
+t 63.2 Myr · GPU · L6
+
