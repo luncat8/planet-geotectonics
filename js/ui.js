@@ -2,7 +2,7 @@
 	var canvas = document.getElementById('map'), gpuCanvas = document.getElementById('mapgpu');
 	var play = document.getElementById('play'), step = document.getElementById('step');
 	var dtInput = document.getElementById('dt'), speedInput = document.getElementById('speed');
-	var cadenceInput = document.getElementById('cadence'), tmInput = document.getElementById('tm'), tmVal = document.getElementById('tm-val');
+	var cadenceInput = document.getElementById('cadence'), coolingInput = document.getElementById('cooling'), tmInput = document.getElementById('tm'), tmVal = document.getElementById('tm-val');
 	var runToInput = document.getElementById('run-to'), runToStart = document.getElementById('run-to-start');
 	var seedInput = document.getElementById('seed'), layerGroup = document.getElementById('layer');
 	var currentLayer = 'plate';
@@ -204,6 +204,13 @@
 	// read Params.eventCadence per step; the span due next can be several Myr long.
 	cadenceInput.addEventListener('change', function () {
 		Params.eventCadence = +cadenceInput.value;
+	});
+	coolingInput.addEventListener('change', function () {
+		Params.coolingEnabled = coolingInput.checked;
+		if (Params.coolingEnabled) {
+			var p = Params, t = state.t, Tm = state.Tm;
+			state.Tm0 = p.Tfloor + (Tm - p.Tfloor) * Math.exp(t / p.tauCool);
+		}
 	});
 	tmInput.addEventListener('input', function () {
 		Params.tmOverride = tmInput.value === '' ? NaN : +tmInput.value;

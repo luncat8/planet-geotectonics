@@ -82,7 +82,13 @@ var Mantle = {
 		s.plumeStr[i] = 0.4 + Mantle.rand(s) * 0.8;
 	},
 	update: function (s) {
-		var p = MantleParams, g = s.grid, speed = p.U0 * Math.pow(s.Tm = (isNaN(p.tmOverride) ? Mantle.Tm(s.t, s.Tm0) : p.tmOverride), 2.5), scale = s.mantleScale * speed;
+		var p = MantleParams, g = s.grid, speed, scale;
+	if (!p.coolingEnabled) {
+		speed = p.U0 * Math.pow(s.Tm, 2.5);
+	} else {
+		speed = p.U0 * Math.pow(s.Tm = (isNaN(p.tmOverride) ? Mantle.Tm(s.t, s.Tm0) : p.tmOverride), 2.5);
+	}
+	scale = s.mantleScale * speed;
 		var sig = p.plumeRad / p.radius, invSig = 1 / (sig * sig);
 		Mantle.precess(s);
 		for (var i = 0; i < s.plumeCount; i++) {
