@@ -101,6 +101,18 @@ const RUN_IDS = ['run-1', 'run-ens', 'run-batch', 'run-det'];
 	assert.ok(/ensemble: frames=2 level=5 seed=\[7,8,9\] wall=\d+ms/.test(out()),
 		'the verdict line carries the seed list, never seed=undefined');
 
+	// 4. the batch rig reports its run count where a frame count cannot exist.
+	win.__batch = async function () {
+		return { level: 5, dt: 0.1, seed: 7, ok: true,
+			runs: [{ frames: 3, t: 0.30000000000000004, frame: 3, lastEvent: 0, bad: [] }] };
+	};
+	byId('run-batch').click();
+	await waitUntil(() => out().indexOf('PASS batch encoders') >= 0, 'the batch verdict');
+	assert.ok(/^batch: 1 frame counts, level=5 seed=7 wall=\d+ms$/m.test(out()),
+		'the batch label line names its frame counts, never frames=undefined: '
+		+ /batch: .*$/m.exec(out()));
+	assert.equal(out().indexOf('undefined'), -1, 'no undefined leaks into any label line');
+
 	console.log('PASS gpu-parity ui: live status with elapsed+phase, buttons locked while '
 		+ 'in flight, no verdict on abort, ensemble names its seeds');
 })().catch(e => { console.error(e); process.exit(1); });

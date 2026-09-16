@@ -523,6 +523,31 @@
 	markup, because dom-stub's tokenizer eats a `<` that does not open a tag (any
 	`i < n`), which no browser script tokenizer does.
 
+## concurrent GPU load poisons the milliseconds, never the verdicts — and what __run is
+
+	Closing rig trip, 2026-09-16, heavy concurrent load on the GPU: the 1000-frame
+	ensemble wall went 46.6 s → 63.6 s and every per-seed number came back bit-identical
+	to the idle capture; batch, determinism and the smoke verdicts were unchanged. There
+	is a code reason: the step path never reads the wall clock (the engine's only two
+	Date.now calls are in init, build-time), so results are pure functions of state.
+	Therefore: a busy rig may close CORRECTNESS gates (bit identity, statistical bounds,
+	zero-tolerance), but bench numbers and ratio gates must be taken idle — the loaded
+	heavy-rig capture reads loserRank 0.754 against an idle bench-world line of 0.21–0.34,
+	which supports no verdict in either direction.
+
+	__run (“Run 1 frame”, bare `node tests/gpu-parity.js`) is the divergence LOCATOR,
+	not a gate — it exact-compares int fields. Its first hardware pass (L5 seed 7, frame
+	0) named 28 `low` mismatches and one flipped chain cell with hSed/oBas/z about 2×
+	downstream. `low` is the drainage-chain index (js/surface.js), and a kernel comment
+	already states the hazard: distance/slope ties need total order (d, index) to match
+	the CPU's index-ordered bin fill; an f32 near-tie that resolves differently flips
+	which neighbour wins, and a chain flip moves where sediment lands. The smoke agrees
+	on the magnitude — `|dz| max 2.2 m` at frame 5 with every D1 table ≤ 1.5e-6 — and
+	ensemble + batch + determinism were green in the same minute. A `__run` FAIL beside
+	a green ens is a localization result, not a rig failure; re-taking it idle must give
+	the identical numbers (anything else would mean a wall-clock input crept in, which
+	is a new bug in itself).
+
 ## plate fragmentation was stranded orphan components, not split/merge balance
 
 	Symptom at 1 Gyr (L5 map start): 27 plates, median 348 cells, 58% of all cells on a

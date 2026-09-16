@@ -469,7 +469,8 @@ async function runAndLog(kind, cfg) {
 	// "?run=ens&seed=7" bookmark does not announce a seed the ensemble then ignores.
 	var seedTxt = kind === 'ens' ? '[' + (cfg.seeds || [7, 8, 9]) + ']'
 		: (cfg.seed !== undefined ? cfg.seed : 7);
-	say('[' + label + '] frames=' + (cfg.frames||'') + ' level=' + (cfg.level||5) + ' seed=' + seedTxt + ' …');
+	say('[' + label + '] ' + (cfg.frames !== undefined ? 'frames=' + cfg.frames + ' ' : '')
+		+ 'level=' + (cfg.level||5) + ' seed=' + seedTxt + ' …');
 	var phase = 'starting';
 	function render() { status(label + ' running · ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s · ' + phase); }
 	cfg.progress = function (p) { phase = p; render(); };
@@ -493,7 +494,16 @@ async function runAndLog(kind, cfg) {
 	var env = '';
 	try { env = window.__envLine ? window.__envLine() : ''; } catch(e) {}
 	if (env) say(env + ' · ' + hostLine());
-	say(label + ': frames=' + (report.frames||cfg.frames) + ' level=' + report.level + ' seed=' + (report.seeds ? '[' + report.seeds + ']' : report.seed) + ' wall=' + ms + 'ms' + (report.gpuBuildMs ? ' gpuBuild=' + report.gpuBuildMs + 'ms' : ''));
+	// One label line per kind, and never a frames=undefined: the batch rig has no single
+	// frame count, it has a list of them.
+	var head = label + ': '
+		+ (report.frames !== undefined || cfg.frames !== undefined
+			? 'frames=' + (report.frames || cfg.frames) + ' '
+			: (report.runs ? report.runs.length + ' frame counts, ' : ''))
+		+ 'level=' + report.level
+		+ ' seed=' + (report.seeds ? '[' + report.seeds + ']' : report.seed)
+		+ ' wall=' + ms + 'ms' + (report.gpuBuildMs ? ' gpuBuild=' + report.gpuBuildMs + 'ms' : '');
+	say(head);
 	if (report.error) {
 		// An aborted run has no frames to verdict — printing the PASS line after the error
 		// (firstBadFrame stays -1) produced a "PASS … [result] FAIL" log, which reads as a

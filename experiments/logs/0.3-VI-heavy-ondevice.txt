@@ -1,0 +1,11 @@
+HEAVY rig 2026-09-16 07:14 · chrome 151 · win x86_64 · gpu hardware nvidia
+HEAVY config level=5 seed=11 plates=4 vSuture=300 hot=1 load=60 iso=200 ts=on
+HEAVY load: overlaps/frame mean=9.78 max=36 (frame counters, 60 frames) series=[0,0,0,5,36,22,13,4,1,2,1,9,14,8,15,20,9,6,5,5,5,13,12,13,13,17,10,11,6,5,12,11,12,10,9,10,16,8,9,10,14,10,9,10,6,9,7,8,16,11,13,8,13,7,11,10,11,6,10,11]
+HEAVY iso: 200 frames wall=1167ms (5.84 ms/frame) contactBlock=0.803ms
+HEAVY kernels (ms/frame): overlaps 0.000  gaps 0.016  resolve 0.016  loserZero 0.000  loserCount 0.000  scanCA 0.000  scanCB 0.000  scanCC 0.000  loserScatter 0.016  loserRank 0.754  gather 0.000
+HEAVY loserRank=0.7537ms loserScatter=0.0164ms meanOverlaps=9.78
+
+NOTE (owner, 2026-09-16): taken with the GPU under other heavy load, so the
+ms columns are not comparable to the 0.3-7-4 bench-world lines (idle: loserRank
+0.21–0.34 L5). The load profile (overlaps/frame) and the kernel table shape are
+valid; the timing verdict waits for an idle re-take.
