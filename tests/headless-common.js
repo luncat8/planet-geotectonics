@@ -1,12 +1,16 @@
 // headless-common.js — shared puppeteer/chrome launcher for the three headless drivers.
-// Tries system puppeteer first, then PGT_PUPPETEER, then /tmp/rig, then helpful error.
-// Chrome binary: PGT_CHROME → puppeteer.executablePath() → @sparticuz/chromium → which(google-chrome|chromium) → /tmp/chromium.
-// PGT_LIBS sets LD_LIBRARY_PATH for the @sparticuz/chromium al2023 libs (optional).
+// Tries system puppeteer first, then PGT_PUPPETEER, then os.tmpdir()/rig (/tmp/rig on
+// POSIX, %TEMP%\rig on Windows — run_gpu_parity.py --install puts it there), then helpful error.
+// Chrome binary: PGT_CHROME → puppeteer.executablePath() → @sparticuz/chromium →
+// which/where(google-chrome|chromium) → Program Files\Google\Chrome (win) → /tmp/chromium.
+// PGT_LIBS sets LD_LIBRARY_PATH for the @sparticuz/chromium al2023 libs (POSIX only).
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const child = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
+const RIG = path.join(os.tmpdir(), 'rig');
 
 function tryRequire(id) {
 	try { return require(id); } catch (_) { return null; }
@@ -26,11 +30,11 @@ function resolvePuppeteer() {
 	// 4. bare package names (global / npm prefix on PATH, or NODE_PATH)
 	candidates.push('puppeteer-core');
 	candidates.push('puppeteer');
-	// 5. legacy /tmp/rig default from 0.3-7 rig recipe
-	candidates.push('/tmp/rig/node_modules/puppeteer-core');
-	candidates.push('/tmp/rig/node_modules/puppeteer');
+	// 5. the temp rig dir the 0.3-7 recipe and run_gpu_parity.py --install use
+	candidates.push(path.join(RIG, 'node_modules', 'puppeteer-core'));
+	candidates.push(path.join(RIG, 'node_modules', 'puppeteer'));
 	// 6. alternative prefix the recipe also used
-	candidates.push('/tmp/lib/node_modules/puppeteer-core');
+	candidates.push(path.join(os.tmpdir(), 'lib', 'node_modules', 'puppeteer-core'));
 	for (const id of candidates) {
 		const mod = tryRequire(id);
 		if (mod) {
@@ -48,8 +52,12 @@ function resolvePuppeteer() {
 resolvePuppeteer._from = null;
 
 function which(bin) {
+	// Windows has no `which` and its executables carry extensions: where.exe + '.exe'.
+	const cmd = process.platform === 'win32'
+		? 'where ' + bin + '.exe 2>nul'
+		: 'which ' + bin + ' 2>/dev/null';
 	try {
-		const out = child.execSync('which ' + bin + ' 2>/dev/null', { encoding: 'utf8' }).trim().split('\n')[0];
+		const out = child.execSync(cmd, { encoding: 'utf8' }).trim().split(/\r?\n/)[0];
 		if (out && fs.existsSync(out)) return out;
 	} catch (_) {}
 	return null;
@@ -85,24 +93,38 @@ function resolveChrome(puppeteer) {
 			if (resolved && fs.existsSync(resolved)) return resolved;
 		}
 	} catch (_) {}
-	// 3. system chrome
+	// 3. system chrome — PATH, then the standard install dirs on Windows
 	for (const bin of ['google-chrome-stable', 'google-chrome', 'chromium-browser', 'chromium', 'chrome']) {
 		const p = which(bin);
 		if (p) return p;
 	}
+	if (process.platform === 'win32') {
+		const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'],
+			process.env.LOCALAPPDATA].filter(Boolean);
+		for (const root of roots) {
+			for (const rel of [path.join('Google', 'Chrome', 'Application', 'chrome.exe'),
+				path.join('Chromium', 'Application', 'chrome.exe')]) {
+				const p = path.join(root, rel);
+				if (fs.existsSync(p)) return p;
+			}
+		}
+	}
 	// 4. legacy defaults
 	for (const p of ['/tmp/chromium', '/tmp/chrome']) if (fs.existsSync(p)) return p;
-	// 5. puppeteer cache: ~/.cache/puppeteer/chrome/*/chrome-linux64/chrome
+	// 5. puppeteer cache: ~/.cache/puppeteer/chrome/*/<platform dir> (the npm-install
+	// puppeteer default on all three OSes; the dir name is what the download picks)
 	try {
 		const home = process.env.HOME || process.env.USERPROFILE || '';
 		const cache = path.join(home, '.cache', 'puppeteer', 'chrome');
 		if (fs.existsSync(cache)) {
 			const vers = fs.readdirSync(cache).sort().reverse();
+			const leafs = [['chrome-win64', 'chrome.exe'], ['chrome-win32', 'chrome.exe'],
+				['chrome-linux64', 'chrome'], ['chrome-linux', 'chrome']];
 			for (const v of vers) {
-				const c = path.join(cache, v, 'chrome-linux64', 'chrome');
-				if (fs.existsSync(c)) return c;
-				const c2 = path.join(cache, v, 'chrome-linux', 'chrome');
-				if (fs.existsSync(c2)) return c2;
+				for (const leaf of leafs) {
+					const c = path.join(cache, v, leaf[0], leaf[1]);
+					if (fs.existsSync(c)) return c;
+				}
 			}
 		}
 	} catch (_) {}
@@ -134,12 +156,12 @@ function installHint(missingChrome) {
 	lines.push('       npm install puppeteer         # downloads a compatible chrome to ~/.cache/puppeteer');
 	lines.push('       # or, if you already have chrome: PGT_CHROME=/usr/bin/google-chrome node tests/gpu-parity.js');
 	lines.push('  2) Use the @sparticuz/chromium recipe (CI / containers):');
-	lines.push('       npm install --prefix /tmp/rig puppeteer-core @sparticuz/chromium');
-	lines.push('       node -e "require(\"/tmp/rig/node_modules/@sparticuz/chromium\").executablePath().then(p=>console.log(p))"');
+	lines.push('       npm install --prefix ' + RIG + ' puppeteer-core @sparticuz/chromium');
+	lines.push('       node -e "require(\\"' + path.join(RIG, 'node_modules', '@sparticuz/chromium') + '\\").executablePath().then(p=>console.log(p))"');
 	lines.push('  3) Point to an existing install:');
 	lines.push('       PGT_PUPPETEER=/path/to/puppeteer-core  PGT_CHROME=/path/to/chrome  node tests/gpu-parity.js');
 	lines.push('  4) Let the python helper install it:');
-	lines.push('       python3 run_gpu_parity.py --install    # runs npm install --prefix /tmp/rig puppeteer-core');
+	lines.push('       python3 run_gpu_parity.py --install    # npm install --prefix ' + RIG + ' puppeteer-core, chrome via npx');
 	lines.push('');
 	lines.push('No‑puppeteer alternative — same browser as in‑gui:');
 	lines.push('  Open tests/gpu-parity.html directly in Chrome 113+ (file:// works, no server needed),');

@@ -165,14 +165,19 @@ var GpuSim = {
 		GpuSim.release();
 		var device = opts.device;
 		if (!device) {
-			// The parity rig wants SwiftShader (opts.fallback); the app wants real hardware
-			// first and only falls back to a software adapter when none is present.
-			var adapter = await navigator.gpu.requestAdapter(
-				opts.fallback === false ? {} : { forceFallbackAdapter: true });
-			if (!adapter && opts.fallback === false) {
-				adapter = await navigator.gpu.requestAdapter({ forceFallbackAdapter: true });
+			// { fallback: true } pins SwiftShader (a deliberate software measurement);
+			// every other caller is hardware-first and takes the software adapter only
+			// when the browser refuses hardware. Never software-FIRST: a desktop Chrome
+			// without --enable-unsafe-swiftshader has no fallback adapter at all, so
+			// asking for it first died with 'no WebGPU adapter' on a machine whose
+			// hardware WebGPU was fine (owner-rig file:// run, 2026-09-16).
+			var ask = opts.fallback ? [{ forceFallbackAdapter: true }] : [{}, { forceFallbackAdapter: true }];
+			var adapter = null;
+			for (var ai = 0; ai < ask.length && !adapter; ai++) {
+				adapter = await navigator.gpu.requestAdapter(ask[ai]);
 			}
-			if (!adapter) throw new Error('no WebGPU adapter');
+			if (!adapter) throw new Error('no WebGPU adapter — chrome://gpu should show "WebGPU: Enabled"; '
+				+ 'a machine without a usable hardware GPU needs --enable-unsafe-swiftshader for the software fallback');
 			// Kept on the engine so a capture header can name the device by type without the
 			// page asking for a second adapter (Env.gpu).
 			GpuSim.adapter = adapter;

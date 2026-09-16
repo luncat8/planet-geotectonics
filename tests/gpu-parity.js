@@ -2,7 +2,7 @@
 // SwiftShader, runs window.__run and prints the report. Usage:
 //   node tests/gpu-parity.js [frames] [level] [--fields=a,b] [--seed=n] [--all]
 // Tries system puppeteer first (npm install puppeteer / puppeteer-core), then
-// PGT_PUPPETEER / PGT_CHROME env vars, then /tmp/rig — see tests/headless-common.js.
+// PGT_PUPPETEER / PGT_CHROME env vars, then the temp rig dir (os.tmpdir()/rig) — see tests/headless-common.js.
 // No puppeteer? Open tests/gpu-parity.html directly in Chrome 113+ (file:// works)
 // and click “Run ensemble” — same harness, same copy/save, no headless rig needed
 // (webgpu-smoke.html pattern). The page is served from the repo root; start it with
@@ -54,7 +54,7 @@ function serve(dir) {
 	const all = process.argv.includes('--all');
 	const stop = process.argv.includes('--keep-going') ? false : true;
 	const server = await serve(ROOT);
-	// Resolve puppeteer + chrome flexibly: system install → env overrides → /tmp/rig → helpful error.
+	// Resolve puppeteer + chrome flexibly: system install → env overrides → os.tmpdir()/rig → helpful error.
 	const hc = require('./headless-common.js');
 	let puppeteer = hc.resolvePuppeteer();
 	if (!puppeteer) {
@@ -96,9 +96,15 @@ function serve(dir) {
 		} else {
 			console.log(`batch-identity level=${report.level} seed=${report.seed} wall=${ms}ms`);
 		}
-		if (report.error) console.log('ERROR:', report.error);
+		if (report.error) {
+			// An aborted run has nothing to verdict — print the error, not the per-kind
+			// PASS/FAIL block below (and not a second copy of the error).
+			console.log('ERROR: ' + report.error);
+			console.log('aborted before any comparison');
+			process.exitCode = 1;
+			return;
+		}
 		if (ensemble) {
-			if (report.error) console.log('ERROR:', report.error);
 			console.log(`ensemble: ${report.frames} frames, seeds [${report.seeds}] (bounds: plates +-2, cols 2%, mean 20%, max 2x, cont 2pp)`);
 			for (const r of report.rows) {
 				console.log(`  seed ${r.seed}: worst plates ${r.plates.toFixed(0)}, cols ${(r.columns * 100).toFixed(2)}%, mean ${(r.meanCm * 100).toFixed(1)}%, max ${(r.maxCm * 100).toFixed(1)}%, cont ${(r.cont * 100).toFixed(2)}pp`);
@@ -115,7 +121,6 @@ function serve(dir) {
 			return;
 		}
 		if (batch) {
-			if (report.error) console.log('ERROR:', report.error);
 			console.log(`batch-identity: ${report.runs.length} frame counts, seed ${report.seed}, level ${report.level} (zero tolerance)`);
 			for (const r of report.runs) {
 				console.log(`  ${r.frames} frames: t=${r.t.toPrecision(17)} frame=${r.frame} lastEvent=${r.lastEvent} ` +
@@ -132,7 +137,6 @@ function serve(dir) {
 			return;
 		}
 		if (process.argv.includes('--determinism')) {
-			if (report.error) console.log('ERROR:', report.error);
 			if (report.ok) {
 				console.log(`determinism OK: two ${report.frames}-frame runs from the same upload are bit-identical`);
 			} else {

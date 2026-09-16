@@ -10,7 +10,8 @@
      in Chromium (puppeteer). The driver resolves puppeteer/chrome via
      tests/headless-common.js: system `npm install puppeteer` is auto-found,
      PGT_PUPPETEER / PGT_CHROME / PGT_LIBS override, `python3 run_gpu_parity.py --install`
-     installs to /tmp/rig, and `npx puppeteer browsers install chrome` works too.
+     installs to the temp rig dir (/tmp/rig, %TEMP%\rig on Windows), and `npx puppeteer
+     browsers install chrome` works too.
 
      Same browser as in-gui — no puppeteer needed (like webgpu-smoke.html):
        open this file directly in Chrome 113+ (file:// works, no server, no build),
@@ -40,7 +41,7 @@ code { background: #131a22; padding: 1px 5px; border-radius: 4px; }
 <p class="sub">Same engine as the headless rig, in your browser. <b>Run ensemble</b> is the parity gate (3 seeds × 1000 frames, statistical bounds);
 <b>Run batch</b> is the bit-identity gate (batched vs one-frame encoders, zero tolerance);
 <b>Run determinism</b> is same-upload two-run identity. Headless: <code>python3 run_gpu_parity.py</code> or <code>node tests/gpu-parity.js</code>
-(auto-finds system <code>puppeteer</code>, or <code>PGT_PUPPETEER</code>/<code>PGT_CHROME</code>, or <code>--install</code> to <code>/tmp/rig</code>). File:// works — no server needed.</p>
+(auto-finds system <code>puppeteer</code>, or <code>PGT_PUPPETEER</code>/<code>PGT_CHROME</code>, or <code>--install</code> to the temp rig dir). File:// works — no server needed.</p>
 <div class="ctl">
 <button id="run-1">Run 1 frame</button>
 <button id="run-ens">Run ensemble (1000 ×3)</button>
@@ -219,7 +220,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 			var a = new State(gridA, level), b = new State(gridB, level);
 			a.reset(seed);
 			b.reset(seed);
-			await GpuSim.init(a, {});
+			await GpuSim.init(a, { fallback: false });
 			GpuSim.raster(a);
 			await GpuSim.download(a);
 			cloneState(a, b);
@@ -265,7 +266,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 				var a = new State(gridA, level), b = new State(gridB, level);
 				a.reset(seed);
 				b.reset(seed);
-				await GpuSim.init(a, {});
+				await GpuSim.init(a, { fallback: false });
 				GpuSim.raster(a);
 				await GpuSim.download(a);
 				cloneState(a, b);
@@ -329,7 +330,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 					Sim.step(cpu, dt);
 					if ((f + 1) % every === 0) cpuS.push(sample(cpu));
 				}
-				await GpuSim.init(gpu, {});
+				await GpuSim.init(gpu, { fallback: false });
 				GpuSim.raster(gpu);
 				await GpuSim.download(gpu);
 				gpuS.push(sample(gpu));
@@ -385,7 +386,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		var cpu = new State(gridC, level), gpu = new State(gridG, level);
 		cpu.reset(seed);
 		gpu.reset(seed);
-		var S = await GpuSim.init(gpu, {});
+		var S = await GpuSim.init(gpu, { fallback: false });
 		S.builtMs = S.built;
 		GpuSim.raster(gpu);
 		await GpuSim.download(gpu);
@@ -444,7 +445,15 @@ async function runAndLog(kind, cfg) {
 	try { env = window.__envLine ? window.__envLine() : ''; } catch(e) {}
 	if (env) say(env + ' · ' + hostLine());
 	say(label + ': frames=' + (report.frames||cfg.frames) + ' level=' + report.level + ' seed=' + report.seed + ' wall=' + ms + 'ms' + (report.gpuBuildMs ? ' gpuBuild=' + report.gpuBuildMs + 'ms' : ''));
-	if (report.error) say('ERROR: ' + report.error);
+	if (report.error) {
+		// An aborted run has no frames to verdict — printing the PASS line after the error
+		// (firstBadFrame stays -1) produced a "PASS … [result] FAIL" log, which reads as a
+		// flaky harness rather than a dead adapter. The error IS the whole report.
+		say('ERROR: ' + report.error);
+		dumpErrors();
+		say('[result] FAIL — ' + label + ' aborted before any comparison (the error above is the whole report)');
+		return;
+	}
 	if (kind === 'ens') {
 		say('ensemble: ' + report.frames + ' frames, seeds [' + report.seeds + ']');
 		for (var i = 0; i < report.rows.length; i++) {
@@ -476,8 +485,14 @@ async function runAndLog(kind, cfg) {
 			interesting.slice(0,20).forEach(function(f){ say('  ' + f.name + ': ratio=' + f.worstRatio.toFixed(3) + ' mismatches=' + f.mismatches + (f.mismatches ? ' at [' + f.at + '] cpu=' + f.cpu + ' gpu=' + f.gpu : '')); });
 		}
 	}
-	if (errors.length) { say('[errors] captured console/webgpu errors: ' + errors.length); errors.forEach(function(e){ say('  ' + e.split('\n').join('\n  ')); }); }
+	dumpErrors();
 	say('[result] ' + (report.ok ? 'PASS' : 'FAIL'));
+}
+
+function dumpErrors() {
+	if (!errors.length) return;
+	say('[errors] captured console/webgpu errors: ' + errors.length);
+	errors.forEach(function(e){ say('  ' + e.split('\n').join('\n  ')); });
 }
 
 function hostLine() {

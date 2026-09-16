@@ -7,20 +7,23 @@
     have to be reachable. Resolution order (also in tests/headless-common.js):
 
       puppeteer:  PGT_PUPPETEER env  →  ./node_modules/puppeteer(-core)  →  bare
-                  `puppeteer-core` / `puppeteer` on NODE_PATH / global  →  /tmp/rig
+                  `puppeteer-core` / `puppeteer` on NODE_PATH / global  →  the temp rig
+                  dir (os.tmpdir()/rig: /tmp/rig, %TEMP%\rig on Windows)
       chrome:     PGT_CHROME / PUPPETEER_EXECUTABLE_PATH / CHROME_PATH  →  puppeteer
-                  executablePath()  →  @sparticuz/chromium  →  which google-chrome/
-                  chromium  →  /tmp/chromium  →  ~/.cache/puppeteer/chrome/…
+                  executablePath()  →  @sparticuz/chromium  →  which/where google-chrome/
+                  chromium (Program Files\Google\Chrome on Windows)  →  /tmp/chromium  →
+                  ~/.cache/puppeteer/chrome/…
 
     PGT_LIBS (the al2023 library directory, default /tmp/al2023/lib) is optional.
 
     If nothing is found and `npm` is on PATH, `python3 run_gpu_parity.py --install`
     (or just running without args when npm is present) will try
-      npm install --prefix /tmp/rig puppeteer-core
+      npm install --prefix <temp rig dir> puppeteer-core
       npx --yes puppeteer browsers install chrome
-    so the rig heals itself. With a hardware GPU the numbers are a measurement;
-    under SwiftShader they are relative-only, so on a GPU-less machine read the
-    run as a smoke, not a benchmark.
+    so the rig heals itself (on Windows the runners spawn npm.cmd/npx.cmd by full
+    path — a bare 'npm' there raises WinError 2). With a hardware GPU the numbers are
+    a measurement; under SwiftShader they are relative-only, so on a GPU-less machine
+    read the run as a smoke, not a benchmark.
 
     The console output goes to experiments/logs/gpu-parity-<2026-09-15-01-34>.log. Its first
     line is the capture header: the page's environment (date to the minute, browser, OS/CPU
@@ -37,20 +40,35 @@
         python3 run_gpu_parity.py --batch            (Phase V: batched vs one-frame
                                                       encoders, zero tolerance)
         python3 run_gpu_parity.py 8 --determinism    (same-upload two-run bit identity)
-        python3 run_gpu_parity.py --install          (install puppeteer+chrome to /tmp/rig
-                                                      and then run)
+        python3 run_gpu_parity.py --install          (install puppeteer+chrome into the
+                                                      temp rig dir, then run)
         python3 run_gpu_parity.py --check            (probe and print what was found)
 """
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_common as rc
 
 DEFAULTS = ['1000', '--ensemble']
+
+
+def rig_dir():
+    """Where --install puts the puppeteer rig: /tmp/rig on POSIX, %TEMP%\\rig on Windows.
+    tests/headless-common.js looks in the same place (os.tmpdir()/rig)."""
+    return Path(tempfile.gettempdir()) / 'rig'
+
+
+def npm_bin(name):
+    """Full path of an npm-family shim, or None. On Windows npm/npx are .cmd shims and a
+    bare name passed to subprocess dies with WinError 2 (CreateProcess auto-appends .exe
+    only, not PATHEXT) — always spawn the PATH-resolved file."""
+    return shutil.which(name)
+
 
 
 def main():
@@ -135,12 +153,13 @@ def ensure_rig(install=False):
         pass
 
     # Fallback simple checks (older tree without helper)
+    rig = rig_dir()
     pup_candidates = [
         os.environ.get('PGT_PUPPETEER'),
         str(rc.ROOT / 'node_modules' / 'puppeteer-core'),
         str(rc.ROOT / 'node_modules' / 'puppeteer'),
-        '/tmp/rig/node_modules/puppeteer-core',
-        '/tmp/rig/node_modules/puppeteer',
+        str(rig / 'node_modules' / 'puppeteer-core'),
+        str(rig / 'node_modules' / 'puppeteer'),
     ]
     # also try bare requires via node
     for cand in ['puppeteer-core', 'puppeteer']:
@@ -202,24 +221,29 @@ def ensure_rig(install=False):
 
 
 def try_install_puppeteer():
-    if not shutil.which('npm'):
+    npm = npm_bin('npm')
+    if not npm:
         return False, 'npm not on PATH — cannot auto-install. ' + install_hint()
-    print('installing puppeteer-core to /tmp/rig (npm install --prefix /tmp/rig puppeteer-core)…')
+    rig = rig_dir()
+    print('installing puppeteer-core to ' + str(rig) + ' (' + npm + ' install --prefix <rig> puppeteer-core)…')
     try:
-        subprocess.run(['npm', 'install', '--prefix', '/tmp/rig', 'puppeteer-core'], check=True)
+        subprocess.run([npm, 'install', '--prefix', str(rig), 'puppeteer-core'], check=True)
     except subprocess.CalledProcessError as e:
         return False, f'npm install puppeteer-core failed: {e}\n' + install_hint()
+    except OSError as e:
+        return False, f'npm is on PATH but could not be run ({e}) — ' + install_hint()
     # also try to get chrome
-    return try_install_chrome('/tmp/rig/node_modules/puppeteer-core', None)
+    return try_install_chrome(str(rig / 'node_modules' / 'puppeteer-core'), None)
 
 
 def try_install_chrome(pup_from, chrome_path):
     # if we have a puppeteer that can download browsers, do so
-    if shutil.which('npx'):
+    npx = npm_bin('npx')
+    if npx:
         print('installing chrome via `npx puppeteer browsers install chrome` …')
         try:
-            # prefer the puppeteer that was found, else the /tmp/rig one
-            subprocess.run(['npx', '--yes', 'puppeteer', 'browsers', 'install', 'chrome'], check=False, timeout=180)
+            # prefer the puppeteer that was found, else the temp rig one
+            subprocess.run([npx, '--yes', 'puppeteer', 'browsers', 'install', 'chrome'], check=False, timeout=180)
         except Exception as e:
             print(f'npx puppeteer browsers install failed: {e}')
     # re-probe
@@ -243,13 +267,14 @@ def try_install_chrome(pup_from, chrome_path):
 
 
 def install_hint():
+    rig = rig_dir()
     return (
         'set PGT_CHROME (browser binary), PGT_PUPPETEER (puppeteer-core install) and\n'
         'PGT_LIBS (the al2023 libraries) — findings-pitfalls-skills.md, “Headless WebGPU\n'
         'rig” — or:\n'
         '  npm install puppeteer            # system install, auto-found\n'
-        '  npm install --prefix /tmp/rig puppeteer-core && npx puppeteer browsers install chrome\n'
-        '  PGT_PUPPETEER=/path/to/puppeteer-core PGT_CHROME=/path/to/chrome python3 run_gpu_parity.py\n'
+        f'  npm install --prefix {rig} puppeteer-core && npx puppeteer browsers install chrome\n'
+        f'  PGT_PUPPETEER={rig / "node_modules" / "puppeteer-core"} PGT_CHROME=<chrome> python3 run_gpu_parity.py\n'
         'or open tests/gpu-parity.html in Chrome 113+ (file://) and click Run ensemble.'
     )
 

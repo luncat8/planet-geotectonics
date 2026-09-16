@@ -491,6 +491,31 @@
 	real hardware. tests/gpu-parity.js takes PGT_CHROME / PGT_PUPPETEER / PGT_LIBS so
 	the rig is not tied to /tmp paths.
 
+## the parity rig on Windows: .cmd shims, %TEMP%\rig, and adapter order
+
+	Owner-rig run 2026-09-16 (Chrome 151, win x86_64) exposed four rig bugs, fixed since:
+
+	(a) 'no WebGPU adapter' on a browser whose hardware WebGPU was fine: GpuSim.init
+	asked for { forceFallbackAdapter: true } FIRST by default, and a desktop Chrome
+	without --enable-unsafe-swiftshader has no fallback adapter at all — requestAdapter
+	returns null, no exception — while the hardware retry was gated on opts.fallback
+	=== false, so callers that passed {} never reached it. Rule: the software adapter is
+	a fallback, never the first request; { fallback: true } alone pins SwiftShader.
+	webgpu-smoke.html had the order right all along, only the parity default was wrong.
+	(b) An aborted run still printed its verdict: report.error was set, firstBadFrame
+	stayed -1, and the log read "ERROR: no WebGPU adapter / PASS parity OK for all
+	compared frames / [result] FAIL". A gate that says PASS and FAIL in one log stops
+	being trusted — the page and the node driver both check report.error before the
+	per-kind block now.
+	(c) WinError 2 from the python --install path: shutil.which('npm') finds npm.cmd on
+	PATH, but subprocess.run(['npm', …]) fails because CreateProcess appends .exe, not
+	PATHEXT entries — spawn the which()'d full path (same for npx.cmd), and catch
+	OSError there, not only CalledProcessError.
+	(d) /tmp/rig is not a directory on Windows and headless-common.js found only POSIX
+	chrome: the rig dir is os.tmpdir()/rig on both sides (run_gpu_parity.rig_dir and
+	hc.RIG), PATH probes use where.exe on win32, and chrome lookup adds the
+	Program Files install dirs and chrome-win64/chrome.exe of the puppeteer cache.
+
 ## plate fragmentation was stranded orphan components, not split/merge balance
 
 	Symptom at 1 Gyr (L5 map start): 27 plates, median 348 cells, 58% of all cells on a
