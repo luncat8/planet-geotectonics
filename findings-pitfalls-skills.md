@@ -1286,3 +1286,34 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	within the chunk), and bit-identical run to run. The general lesson: a GPU kernel
 	with O(plateCount) threads is a CPU kernel; the parallel dimension is the columns,
 	and the plate dimension should ride the lanes.
+
+## Headless rig: use the system puppeteer if you have it, and the parity harness is now file:// too (2026-09-16)
+
+	The py helper's “PGT_CHROME=/tmp/chromium not found” hit every new checkout because it
+	checked two hard-coded /tmp paths and ignored a system `npm install puppeteer`. Two
+	changes.  (1) `tests/headless-common.js` is the single resolver both `run_gpu_parity.py`
+	and the three node drivers (`tests/gpu-parity.js`, `experiments/gpu-bench.js`,
+	`experiments/heavy-overlap.js`) use: puppeteer is tried as
+	`PGT_PUPPETEER` → `./node_modules/puppeteer(-core)` → bare `puppeteer-core`/`puppeteer`
+	on NODE_PATH/global → `/tmp/rig`/`/tmp/lib`; chrome as `PGT_CHROME`/`PUPPETEER_EXECUTABLE_PATH`/
+	`CHROME_PATH` → `puppeteer.executablePath()` (sync or async, swallowed if the bundle has
+	no browser) → `@sparticuz/chromium` → `which google-chrome|chromium` → `/tmp/chromium`
+	→ `~/.cache/puppeteer/chrome/*/chrome-linux64/chrome`; `PGT_LIBS` only sets
+	`LD_LIBRARY_PATH` when the dir exists. `puppeteer-core`'s exports are frozen
+	(`Object.isExtensible` false), so the helper stores the provenance on itself
+	(`resolvePuppeteer._from`) instead of mutating the module. `python3 run_gpu_parity.py
+	--check` prints what was found; `--install` runs
+	`npm install --prefix /tmp/rig puppeteer-core` plus `npx puppeteer browsers install chrome`
+	so the rig heals itself when `npm` is on PATH, and every failure now prints the same
+	four options plus the no-puppeteer path.
+	(2) `tests/gpu-parity.html` now looks like `webgpu-smoke.html`: file:// works, no server,
+	no build, dark monospace, `Run 1 frame` / `Run ensemble (1000×3)` / `Run batch` /
+	`Run determinism` buttons that call the same `window.__run`/`__ens`/`__batch`/`__det`
+	the headless driver calls, plus `Save log` / `Copy log` via `js/clipboard.js`, `?run=ens`
+	auto-run, and the same `Env.line()` header. So the answer to “why puppeteer at all?
+	can we do this in the same browser as in-gui?” is: you can — open `tests/gpu-parity.html`
+	(or `bench.html`, `experiments/heavy-overlap.html`) file:// in Chrome 113+ and click Run;
+	the harness, the statistical bounds and the log are identical, puppeteer is just the
+	CI/headless automation (no human clicks, 1000×3 frames logged to `experiments/logs/`).
+	`run_gpu_parity.py` says so on every failure and `--help` documents all five vars
+	(`PGT_PUPPETEER`, `PGT_CHROME`, `PUPPETEER_EXECUTABLE_PATH`, `CHROME_PATH`, `PGT_LIBS`).

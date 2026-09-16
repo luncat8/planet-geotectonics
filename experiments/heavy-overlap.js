@@ -45,17 +45,12 @@ function serve(dir) {
 (async () => {
 	const out = arg('--out', null);
 	const server = await serve(ROOT);
-	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/rig/node_modules/puppeteer-core';
-	const chromeBin = process.env.PGT_CHROME || '/tmp/chromium';
-	const libDir = process.env.PGT_LIBS || '/tmp/al2023/lib';
-	const puppeteer = require(puppeteerDir);
-	if (libDir) process.env.LD_LIBRARY_PATH = libDir;
-	const browser = await puppeteer.launch({
-		executablePath: chromeBin,
-		args: ['--headless=new', '--no-sandbox', '--no-zygote', '--disable-gpu-sandbox',
-			'--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--in-process-gpu', '--disable-dev-shm-usage'],
-		headless: false, protocolTimeout: 1500000
-	});
+	const hc = require('../tests/headless-common.js');
+	let puppeteer = hc.resolvePuppeteer();
+	if (!puppeteer) { console.error(hc.installHint(false)); process.exit(2); }
+	const chromeBin = hc.resolveChrome(puppeteer);
+	if (!chromeBin) { console.error(hc.installHint(true)); console.error('\nResolved puppeteer from: ' + (puppeteer.__resolvedFrom || hc.resolvePuppeteer._from || 'unknown')); process.exit(2); }
+	const browser = await puppeteer.launch(hc.launchOptions(puppeteer, chromeBin));
 	const lines = [];
 	try {
 		const page = await browser.newPage();

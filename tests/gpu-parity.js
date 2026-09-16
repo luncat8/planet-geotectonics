@@ -1,7 +1,11 @@
 // gpu-parity.js (node driver): boots the harness page in headless Chromium with
 // SwiftShader, runs window.__run and prints the report. Usage:
 //   node tests/gpu-parity.js [frames] [level] [--fields=a,b] [--seed=n] [--all]
-// The page is served from the repo root; start it with
+// Tries system puppeteer first (npm install puppeteer / puppeteer-core), then
+// PGT_PUPPETEER / PGT_CHROME env vars, then /tmp/rig — see tests/headless-common.js.
+// No puppeteer? Open tests/gpu-parity.html directly in Chrome 113+ (file:// works)
+// and click “Run ensemble” — same harness, same copy/save, no headless rig needed
+// (webgpu-smoke.html pattern). The page is served from the repo root; start it with
 //   python3 -m http.server 8123 &
 const fs = require('fs');
 const path = require('path');
@@ -50,19 +54,20 @@ function serve(dir) {
 	const all = process.argv.includes('--all');
 	const stop = process.argv.includes('--keep-going') ? false : true;
 	const server = await serve(ROOT);
-	// Tooling locations are overridable so the rig is not tied to one machine; the defaults
-	// match the @sparticuz/chromium extraction (chromium + al2023 libs + swiftshader in /tmp).
-	const puppeteerDir = process.env.PGT_PUPPETEER || '/tmp/rig/node_modules/puppeteer-core';
-	const chromeBin = process.env.PGT_CHROME || '/tmp/chromium';
-	const libDir = process.env.PGT_LIBS || '/tmp/al2023/lib';
-	const puppeteer = require(puppeteerDir);
-	if (libDir) process.env.LD_LIBRARY_PATH = libDir;
-	const browser = await puppeteer.launch({
-		executablePath: chromeBin,
-		args: ['--headless=new', '--no-sandbox', '--no-zygote', '--disable-gpu-sandbox',
-			'--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--in-process-gpu', '--disable-dev-shm-usage'],
-		headless: false, protocolTimeout: 1500000
-	});
+	// Resolve puppeteer + chrome flexibly: system install → env overrides → /tmp/rig → helpful error.
+	const hc = require('./headless-common.js');
+	let puppeteer = hc.resolvePuppeteer();
+	if (!puppeteer) {
+		console.error(hc.installHint(false));
+		process.exit(2);
+	}
+	const chromeBin = hc.resolveChrome(puppeteer);
+	if (!chromeBin) {
+		console.error(hc.installHint(true));
+		console.error('\nResolved puppeteer from: ' + (puppeteer.__resolvedFrom || hc.resolvePuppeteer._from || 'unknown'));
+		process.exit(2);
+	}
+	const browser = await puppeteer.launch(hc.launchOptions(puppeteer, chromeBin));
 	try {
 		const page = await browser.newPage();
 		page.on('console', m => { const t = m.text(); if (!t.startsWith('Download the React')) console.log('[page]', t); });

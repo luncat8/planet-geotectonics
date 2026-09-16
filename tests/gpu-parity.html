@@ -1,17 +1,53 @@
 <!DOCTYPE html>
 <!-- gpu-parity.html - GPU parity harness (plan H2, Phase V). Loads the CPU kernels and the
      GPU port side by side, runs identical worlds from the same seed and reports the
-     first divergence plus per-field max errors. Four headless rigs, picked by
+     first divergence plus per-field max errors. Four rigs, picked by
      tests/gpu-parity.js: window.__run (CPU vs GPU field tolerances), __ens (three-seed
      statistical ensemble), __det (same-upload two-run bit determinism), __batch (Phase V:
-     batched encoders vs one-frame encoders, zero tolerance). Open directly in a browser
-     and call the rigs from the console for interactive runs. -->
+     batched encoders vs one-frame encoders, zero tolerance).
+
+     Headless: `python3 run_gpu_parity.py` or `node tests/gpu-parity.js` boots this page
+     in Chromium (puppeteer). The driver resolves puppeteer/chrome via
+     tests/headless-common.js: system `npm install puppeteer` is auto-found,
+     PGT_PUPPETEER / PGT_CHROME / PGT_LIBS override, `python3 run_gpu_parity.py --install`
+     installs to /tmp/rig, and `npx puppeteer browsers install chrome` works too.
+
+     Same browser as in-gui — no puppeteer needed (like webgpu-smoke.html):
+       open this file directly in Chrome 113+ (file:// works, no server, no build),
+       click “Run ensemble” etc., then “Copy log” / “Save log”. The harness is identical;
+       puppeteer is only for CI/automation. bench.html and experiments/heavy-overlap.html
+       work the same way (file:// → Run → Copy).
+-->
 <html>
 <head>
 <meta charset="utf-8">
-<title>GPU parity</title>
+<title>GPU parity · planet-geotectonics</title>
+<style>
+body { font: 13px/1.5 ui-monospace, Consolas, monospace; background: #10141d; color: #cdd6e4; margin: 16px; }
+h1 { font-size: 15px; margin: 0 0 4px; }
+p.sub { color: #9fb0c0; max-width: 80ch; margin: 0 0 10px; }
+.ctl { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+button { background: #1d6fe0; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; font-weight: 600; cursor: pointer; }
+button:disabled { background: #34414f; cursor: default; }
+button.sec { background: #243041; }
+pre#out { white-space: pre-wrap; word-break: break-word; background: #0b0e15; border: 1px solid #263043; padding: 10px; max-height: 60vh; overflow: auto; }
+.ok { color: #7fd6a4; } .bad { color: #e07070; }
+code { background: #131a22; padding: 1px 5px; border-radius: 4px; }
+</style>
 </head>
 <body>
+<h1>GPU parity · planet-geotectonics</h1>
+<p class="sub">Same engine as the headless rig, in your browser. <b>Run ensemble</b> is the parity gate (3 seeds × 1000 frames, statistical bounds);
+<b>Run batch</b> is the bit-identity gate (batched vs one-frame encoders, zero tolerance);
+<b>Run determinism</b> is same-upload two-run identity. Headless: <code>python3 run_gpu_parity.py</code> or <code>node tests/gpu-parity.js</code>
+(auto-finds system <code>puppeteer</code>, or <code>PGT_PUPPETEER</code>/<code>PGT_CHROME</code>, or <code>--install</code> to <code>/tmp/rig</code>). File:// works — no server needed.</p>
+<div class="ctl">
+<button id="run-1">Run 1 frame</button>
+<button id="run-ens">Run ensemble (1000 ×3)</button>
+<button id="run-batch">Run batch</button>
+<button id="run-det">Run determinism</button>
+<button id="save" class="sec">Save log</button><button id="copy" class="sec">Copy log</button>
+</div>
 <pre id="out">booting…</pre>
 <script src="../js/env.js"></script>
 <script src="../js/geodesics.js"></script>
@@ -41,10 +77,27 @@
 <script src="../js/gpu/wgsl-surface.js"></script>
 <script src="../js/gpu/wgsl-diag.js"></script>
 <script src="../js/gpu/sim-gpu.js"></script>
+<script src="../js/clipboard.js"></script>
 <script>
 'use strict';
 var OUT = document.getElementById('out');
-function say(line) { OUT.textContent += '\n' + line; }
+var LOG = [];
+var errors = [];
+function say(line) {
+	LOG.push(line);
+	OUT.textContent = LOG.join('\n');
+	OUT.scrollTop = OUT.scrollHeight;
+	// also console.log for headless driver (it listens for page console)
+	console.log(line);
+}
+var consoleError = console.error;
+console.error = function () {
+	var line = Array.prototype.map.call(arguments, function (a) { return a && a.stack ? a.stack : String(a); }).join(' ');
+	errors.push(line);
+	return consoleError.apply(console, arguments);
+};
+window.addEventListener('error', function (e) { errors.push('pageerror: ' + e.message); });
+window.addEventListener('unhandledrejection', function (e) { errors.push('unhandledrejection: ' + (e.reason && e.reason.stack || e.reason)); });
 
 // Field descriptors: name, kind ('int' exact | 'float' tolerance), length, getters.
 function fields(cpu, gpu) {
@@ -118,8 +171,6 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		var n, stride = 1;
 		if (d.kind === 'float3') stride = 3;
 		if (d.kind === 'float4') stride = 4;
-		// float3/float4 descriptors carry a flat length in ELEMENT units (cells or
-		// columns); multiply by stride so the whole packed array is compared.
 		if (d.len === 'cap') n = Math.min(cpu.n, gpu.n) * stride;
 		else if (d.len === 'plates') n = Math.min(cpu.plateCount, gpu.plateCount) * stride;
 		else if (d.len) n = d.len * stride;
@@ -135,8 +186,6 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 			} else {
 				if (x !== x || y !== y) { if (x !== x && y !== y) continue; count++; worstAt = i; firstA = x; firstB = y; continue; }
 				var err = Math.abs(x - y);
-				// Velocity-family fields carry f32 noise relative to the field scale (vRef),
-				// so their tolerance is normalized: the plan's abs 1e-6 + rel 1e-5 in normalized units.
 				var tol = (absTol + relTol * Math.abs(x)) * (d.scale || 1);
 				if (d.name === 'distance') tol = 1 / 128;
 				if (err > tol) {
@@ -151,11 +200,6 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 	return out;
 }
 
-// The GPU packs state to f32 (columns, cells, plates) and fixed point (distance, gapTime,
-// ledgers), so tolerances are chosen per family, not per test: 1e-5 relative plus a small
-// absolute floor; integers must match exactly away from thresholds.
-	// Deep-copy a state's own data (typed arrays and scalars, not the shared grid) so a
-	// second run can start from bit-identical uploads.
 	function cloneState(src, dst) {
 		for (var k in src) {
 			if (!Object.prototype.hasOwnProperty.call(src, k)) continue;
@@ -165,8 +209,6 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		}
 	}
 
-	// Same-device determinism: two runs from the same uploaded state must agree exactly,
-	// field by field, with zero tolerance (the H acceptance bullet above ensemble stats).
 	window.__det = async function (cfg) {
 		cfg = cfg || {};
 		var level = cfg.level || 5, frames = cfg.frames !== undefined ? cfg.frames : 8, dt = cfg.dt || 0.1;
@@ -211,16 +253,6 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		return report;
 	};
 
-	// Phase V same-device bit-identity: n single-frame step() calls (one encoder per
-	// frame, frameIn block 0) vs one play() call (one encoder per round-trip segment,
-	// frameIn rebound at a dynamic block offset per frame). The dispatch lists, inputs
-	// and round-trip order are the same by construction, so every field in the final
-	// mirror must agree with zero tolerance - a missed frame advance, a shifted event
-	// cycle or a wrong offset shows up here. Lengths are chosen to cross every segment
-	// shape: 1 frame, a mid-segment stop, the frame just before a cycle, the due frame,
-	// a single cycle, and multiple cycles. (The FIN_MAX encoder cap cannot be reached
-	// through play at dt 0.1 / cadence 1 Myr, where segments top out at 11 frames; it
-	// is pinned in tests/gpu-play.js.)
 	window.__batch = async function (cfg) {
 		cfg = cfg || {};
 		var level = cfg.level || 5, dt = cfg.dt || 0.1, seed = cfg.seed !== undefined ? cfg.seed : 7;
@@ -237,14 +269,11 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 				GpuSim.raster(a);
 				await GpuSim.download(a);
 				cloneState(a, b);
-				// Reference: one encoder per frame, the step() path with diagnostics on.
 				await GpuSim.uploadState(a);
 				for (var f = 0; f < frames; f++) {
 					await GpuSim.step(a, dt, Events, Checkpoint, Params);
 				}
 				await GpuSim.download(a);
-				// Batched: the app's play path, K11 on the final frame so the post-run
-				// download folds identical diagnostic counters.
 				await GpuSim.uploadState(b);
 				await GpuSim.play(b, dt, frames, null, { diagLast: true });
 				await GpuSim.download(b);
@@ -269,24 +298,11 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		return report;
 	};
 
-	// Ensemble statistics (the H Done bullet): CPU vs GPU over many frames per seed,
-	// comparing epoch statistics with predeclared bounds, never per-column identity.
-	// Bounds: plates within +-2, alive columns within 2%, mean/max speed within 15%,
-	// continental share (hFel > 20 km) within 0.02 absolute.
 	window.__ens = async function (cfg) {
 		cfg = cfg || {};
 		var level = cfg.level || 5, frames = cfg.frames !== undefined ? cfg.frames : 1000;
 		var dt = cfg.dt || 0.1, every = cfg.every || 10;
 		var seeds = cfg.seeds || [7, 8, 9];
-		// Bounds: plates within +-2, alive columns within 2%, mean speed within 20%, max
-		// speed within a factor 2, continental share within 2pp. Mean/max are velocity
-		// aggregates: per-cell velocity parity is only promised to (1e-6 + 1e-5|x|)*vRef
-		// (~50% relative at speed scale), so the max over ~10k cells may legitimately
-		// differ by half at isolated epochs - it is reported as a guard against runaway
-		// plates, not as a distributional test. Continental share is a threshold statistic
-		// (hFel > 20 km); under continuous f32 noise it drifts up to ~1.5pp per 100 Myr,
-		// while the CPU's own dt comparison showed ~0.2pp per 500 Myr. The distributional
-		// gates are plates, columns and mean speed.
 		var BOUNDS = { plates: 2, columns: 0.02, meanCm: 0.20, maxCm: 1.00, cont: 0.02 };
 		var report = { frames: frames, level: level, seeds: seeds, ok: true, rows: [], violations: [] };
 		function sample(s) {
@@ -375,7 +391,6 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		await GpuSim.download(gpu);
 		Sim.raster(cpu);
 		if (frames === 0) {
-			// Boot-only compare: the raster path (move/bin/scan/raster/elevation).
 			report.last = compare(cpu, gpu, names, absTol, relTol, -1);
 			report.ok = report.last.every(function (r) { return r.mismatches === 0; });
 			if (!report.ok) report.bad = report.last.filter(function (r) { return r.mismatches > 0; });
@@ -404,15 +419,122 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 	return report;
 };
 
-// The driver prints this as the capture's first line: the same short environment header the
-// other rigs carry (js/env.js), plus the GPU as a type and one vendor word. Read after a run,
-// because the adapter only exists once the harness has built a device.
 window.__envLine = function () {
 	return Env.line() + (GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
 };
 
+function formatReport(r, ms, env) {
+	var out = [];
+	if (env) out.push(env);
+	return out;
+}
+
+async function runAndLog(kind, cfg) {
+	cfg = cfg || {};
+	var t0 = Date.now();
+	var label = ({ run: 'parity', ens: 'ensemble', batch: 'batch', det: 'determinism' }[kind] || kind);
+	say('[' + label + '] frames=' + (cfg.frames||'') + ' level=' + (cfg.level||5) + ' seed=' + (cfg.seed||7) + ' …');
+	var fn = { run: window.__run, ens: window.__ens, batch: window.__batch, det: window.__det }[kind];
+	if (!fn) { say('unknown run kind ' + kind); return; }
+	// If WebGPU not available, say so (file:// without WebGPU will land here)
+	if (!navigator.gpu) { say('navigator.gpu missing — open in Chrome 113+/Firefox 141+ with WebGPU'); return; }
+	var report = await fn(cfg);
+	var ms = Date.now() - t0;
+	var env = '';
+	try { env = window.__envLine ? window.__envLine() : ''; } catch(e) {}
+	if (env) say(env + ' · ' + hostLine());
+	say(label + ': frames=' + (report.frames||cfg.frames) + ' level=' + report.level + ' seed=' + report.seed + ' wall=' + ms + 'ms' + (report.gpuBuildMs ? ' gpuBuild=' + report.gpuBuildMs + 'ms' : ''));
+	if (report.error) say('ERROR: ' + report.error);
+	if (kind === 'ens') {
+		say('ensemble: ' + report.frames + ' frames, seeds [' + report.seeds + ']');
+		for (var i = 0; i < report.rows.length; i++) {
+			var r = report.rows[i];
+			say('  seed ' + r.seed + ': worst plates ' + r.plates.toFixed(0) + ', cols ' + (r.columns*100).toFixed(2) + '%, mean ' + (r.meanCm*100).toFixed(1) + '%, max ' + (r.maxCm*100).toFixed(1) + '%, cont ' + (r.cont*100).toFixed(2) + 'pp');
+			say('    end cpu: t=' + r.end.t.toFixed(0) + ' plates=' + r.end.plates + ' cols=' + r.end.columns + ' mean=' + r.end.meanCm.toFixed(2) + 'cm/yr cont=' + (r.end.cont*100).toFixed(1) + '%');
+			say('    end gpu: t=' + r.endGpu.t.toFixed(0) + ' plates=' + r.endGpu.plates + ' cols=' + r.endGpu.columns + ' mean=' + r.endGpu.meanCm.toFixed(2) + 'cm/yr cont=' + (r.endGpu.cont*100).toFixed(1) + '%');
+		}
+		if (report.violations.length) { say('BOUND VIOLATIONS:'); report.violations.slice(0,30).forEach(function(v){ say('  '+v); }); }
+		else say('all seeds within predeclared statistical bounds');
+		say(report.ok ? 'PASS ensemble' : 'FAIL ensemble');
+	} else if (kind === 'batch') {
+		say('batch-identity: ' + report.runs.length + ' frame counts, seed ' + report.seed + ', level ' + report.level + ' (zero tolerance)');
+		report.runs.forEach(function(r){ say('  ' + r.frames + ' frames: t=' + r.t.toPrecision(17) + ' frame=' + r.frame + ' lastEvent=' + r.lastEvent + ' ' + (r.bad.length ? 'MISMATCH ' + r.bad.map(function(f){return f.name;}).slice(0,8).join(',') : 'identical')); });
+		if (report.ok) say('PASS batch encoders are bit-identical to one-frame encoders');
+		else { say('BATCH DIVERGENCE at ' + report.firstBadFrames + ' frames:'); (report.bad||[]).forEach(function(b){ say('  ' + b.name + ': ' + b.mismatches + ' bad, first at [' + b.at + '] single=' + b.cpu + ' batch=' + b.gpu); }); say('FAIL batch'); }
+	} else if (kind === 'det') {
+		if (report.ok) say('PASS determinism: two ' + report.frames + '-frame runs from the same upload are bit-identical');
+		else { say('FAIL determinism:'); (report.bad||[]).forEach(function(b){ say('  ' + b.name + ': ' + b.mismatches + ' bad, first at [' + b.at + '] a=' + b.cpu + ' b=' + b.gpu); }); }
+	} else {
+		if (report.firstBadFrame >= 0) {
+			say('FIRST DIVERGENCE at frame ' + report.firstBadFrame + ':');
+			report.bad.forEach(function(b){ say('  ' + b.name + ': ' + b.mismatches + ' bad, first at [' + b.at + '] cpu=' + b.cpu + ' gpu=' + b.gpu + ' worstRatio=' + b.worstRatio.toFixed(2)); });
+			say('FAIL parity');
+		} else say('PASS parity OK for all compared frames');
+		var interesting = (report.last||[]).filter(function(f){ return f.worstRatio > 0.01 || f.mismatches > 0; });
+		if (interesting.length) {
+			say('worst fields at last frame:');
+			interesting.slice(0,20).forEach(function(f){ say('  ' + f.name + ': ratio=' + f.worstRatio.toFixed(3) + ' mismatches=' + f.mismatches + (f.mismatches ? ' at [' + f.at + '] cpu=' + f.cpu + ' gpu=' + f.gpu : '')); });
+		}
+	}
+	if (errors.length) { say('[errors] captured console/webgpu errors: ' + errors.length); errors.forEach(function(e){ say('  ' + e.split('\n').join('\n  ')); }); }
+	say('[result] ' + (report.ok ? 'PASS' : 'FAIL'));
+}
+
+function hostLine() {
+	var os = 'linux', arch = 'x86_64';
+	try {
+		var ua = navigator.userAgent || '';
+		var plat = navigator.platform || '';
+		var text = ua + ' ' + plat;
+		if (/Windows|Win32|Win64/.test(text)) os = 'win';
+		else if (/Macintosh|Mac/.test(text)) os = 'mac';
+		else if (/Linux|X11|CrOS/.test(text)) os = 'linux';
+		arch = /aarch64|arm64|ARM64/.test(text) ? 'arm64' : 'x86_64';
+		if (os === 'mac') return 'node ? · ' + os; // in-browser line, node part filled by driver
+	} catch(e) {}
+	return 'browser · ' + os + ' ' + arch;
+}
+
 window.__ready = true;
-say('ready');
+say(Env.line() + ' — ready. Choose a run above, or use ?run=ens&frames=1000&level=5&seed=7');
+say('Tip: headless `python3 run_gpu_parity.py` prints the same log via puppeteer; `file://` needs no rig.');
+
+// Buttons — same harness the headless driver calls
+document.getElementById('run-1').addEventListener('click', function(){ runAndLog('run', { frames: 1, level: 5, seed: 7 }); });
+document.getElementById('run-ens').addEventListener('click', function(){ runAndLog('ens', { frames: 1000, level: 5, seeds: [7,8,9] }); });
+document.getElementById('run-batch').addEventListener('click', function(){ runAndLog('batch', { level: 5, seed: 7 }); });
+document.getElementById('run-det').addEventListener('click', function(){ runAndLog('det', { frames: 8, level: 5, seed: 7 }); });
+
+// ?run=ens&frames=200 auto-run for bookmarkable captures
+try {
+	var q = new URLSearchParams(location.search);
+	var kind = q.get('run');
+	if (kind) {
+		var cfg = {
+			frames: q.get('frames') ? parseInt(q.get('frames'),10) : undefined,
+			level: q.get('level') ? parseInt(q.get('level'),10) : undefined,
+			seed: q.get('seed') ? parseInt(q.get('seed'),10) : undefined,
+			seeds: q.get('seeds') ? q.get('seeds').split(',').map(Number) : undefined
+		};
+		var map = { '1': 'run', 'run': 'run', 'ens': 'ens', 'ensemble': 'ens', 'batch': 'batch', 'det': 'det', 'determinism': 'det' };
+		var k = map[kind] || kind;
+		setTimeout(function(){ runAndLog(k, cfg); }, 300);
+	}
+} catch(e) {}
+
+// Save / Copy — same pattern as webgpu-smoke.html (LOG is the deliverable)
+document.getElementById('save').addEventListener('click', function () {
+	var name = 'gpu-parity-' + Env.fileStamp() + '.log';
+	var link = document.createElement('a');
+	link.href = URL.createObjectURL(new Blob([LOG.join('\n')], { type: 'text/plain' }));
+	link.download = name;
+	link.click();
+	URL.revokeObjectURL(link.href);
+});
+Clipboard.bind(document.getElementById('copy'), function () {
+	say('[log] copied ' + LOG.length + ' lines to the clipboard');
+	return LOG.join('\n');
+});
 </script>
 </body>
 </html>
