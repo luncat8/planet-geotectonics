@@ -18,7 +18,9 @@
 //      view-only frame repaints without recolouring;
 //   7. the copied report opens with the one-line environment header (js/env.js): minute stamp,
 //      browser at its major version, OS/CPU type, and the GPU as a type plus one vendor word -
-//      a capture never carries a UA string, an adapter model or seconds.
+//      a capture never carries a UA string, an adapter model or seconds;
+//   8. a final hardware drag capture names a real pan and the view gate it exercised instead
+//      of relying on an unmarked idle performance strip.
 //
 // js/ui.js runs as a classic script against tests/dom-stub.js, which is built by parsing the
 // real index.html, and a recorded fake GpuSim: the device side of the engine is
@@ -545,6 +547,9 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	map.dispatch('pointerup', { pointerId: 3, currentTarget: map });
 	panPage.pump(1);
 	assert.equal(tOf(), 0.7, 'and it keeps stepping after the release');
+	const cpuDragReport = panPage.copy();
+	assert.match(cpuDragReport, /view gate: 2 drags · 3 moves · 280 px · closed 2x · deferred 6 rAF · re-opened 2x/,
+		'the copied capture proves an actual pan exercised the CPU gate: ' + cpuDragReport);
 	pEl('play').click();
 
 	// The view outlives the world: a rebuild must not reset the camera.
@@ -599,6 +604,9 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	gpuMap.dispatch('pointermove', { pointerId: 4, clientX: 340, clientY: 150, currentTarget: gpuMap });
 	assert.equal(resumed.hold(), true, 'and closed the moment the view moves, before any frame has counted it');
 	gpuMap.dispatch('pointerup', { pointerId: 4, currentTarget: gpuMap });
+	const gpuDragReport = panPage.copy();
+	assert.match(gpuDragReport, /view gate: 1 drag · 2 moves · 140 px · closed 1x · deferred 3 rAF · re-opened 1x/,
+		'the copied capture proves the GPU gate deferred the moving view then reopened: ' + gpuDragReport);
 	const fakeGpuRenderer = fakeRenderers[fakeRenderers.length - 1];
 	assert.ok(fakeGpuRenderer.views.length > 1, 'the dragged view was applied to the GPU renderer');
 	const viewBoot = fakeGpuRenderer.views[0], viewLast = fakeGpuRenderer.views[fakeGpuRenderer.views.length - 1];
@@ -693,5 +701,6 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ page.Perf.SLOTS + ' slots in place and is the copy control, the bench can measure every setting the page offers,'
 		+ ' and a pan turns the view under a running sim (probe agrees with the paint, the dead zone keeps the click,'
 		+ ' the sim never waits for the mouse, the view outlives a rebuild, both engines defer a step'
-		+ ' while the view moves and a GPU batch handed the gate stops at its frame boundary, paint never recolors)');
+		+ ' while the view moves, the copied report records that gate, a GPU batch handed the gate stops'
+		+ ' at its frame boundary, and paint never recolors)');
 })().catch((error) => { console.error(error); process.exit(1); });

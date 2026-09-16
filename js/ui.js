@@ -46,7 +46,22 @@
 	// mid-drag. Three frames is ~50 ms at 60 Hz: too short to feel like a resume delay, wide
 	// enough to span a move stream at a third of the frame rate.
 	var VIEW_HOLD_FRAMES = 3;
-	var pan = { target: null, pointerId: null, active: false, moved: false, suppressClick: false };
+	var pan = { target: null, pointerId: null, active: false, moved: false, counted: false, suppressClick: false };
+	// The final on-device drag capture needs to prove that a real pan exercised the step
+	// gate, not merely report an idle strip. These scalars are reset with the world/engine
+	// and cost no allocation in the rAF path.
+	var viewStats = { drags: 0, moves: 0, pixels: 0, closes: 0, deferred: 0, reopens: 0, gated: false };
+	function resetViewStats() {
+		viewStats.drags = 0; viewStats.moves = 0; viewStats.pixels = 0;
+		viewStats.closes = 0; viewStats.deferred = 0; viewStats.reopens = 0; viewStats.gated = false;
+	}
+	function viewGateReport() {
+		if (!viewStats.drags) return '';
+		return 'view gate: ' + viewStats.drags + ' drag' + (viewStats.drags === 1 ? '' : 's')
+			+ ' · ' + viewStats.moves + ' moves · ' + Math.round(viewStats.pixels) + ' px'
+			+ ' · closed ' + viewStats.closes + 'x · deferred ' + viewStats.deferred + ' rAF'
+			+ ' · re-opened ' + viewStats.reopens + 'x';
+	}
 	// Frames the GPU play path has actually submitted since the last rAF: the strip counts
 	// real work, not the frames that were requested while a round trip held the queue.
 	var ran = 0;
@@ -132,6 +147,7 @@
 		paintGrid();
 		probe.textContent = 'Click the map to inspect a column; drag it to pan.';
 		Perf.reset();
+		resetViewStats();
 		bootEngine(function () {
 			dirty = true;
 			if (after) after();
@@ -197,6 +213,7 @@
 	engineInput.addEventListener('change', function () {
 		setPlaying(false); runTarget = Infinity;
 		Perf.reset();
+		resetViewStats();
 		whenGpuIdle(function () { bootEngine(function () { dirty = true; }); });
 	});
 	// Fast-forward escape hatch: rebuild the plate table only every 5/10 Myr instead
@@ -378,7 +395,7 @@
 		if (pan.active) endPan(event);
 		var target = event.currentTarget, rect = mapRect(target);
 		if (!rect.width || !rect.height) return;
-		pan.target = target; pan.rect = rect; pan.pointerId = event.pointerId; pan.active = true; pan.moved = false;
+		pan.target = target; pan.rect = rect; pan.pointerId = event.pointerId; pan.active = true; pan.moved = false; pan.counted = false;
 		pan.startX = event.clientX; pan.startY = event.clientY;
 		pan.lastX = event.clientX; pan.lastY = event.clientY;
 		pointerDirection(event, target, viewPointer, rect);
@@ -405,7 +422,12 @@
 			viewPointer[0] = next[0]; viewPointer[1] = next[1]; viewPointer[2] = next[2];
 		}
 		pan.lastX = event.clientX; pan.lastY = event.clientY;
-		if (changed) applyView();
+		if (changed) {
+			if (!pan.counted) { pan.counted = true; viewStats.drags++; }
+			viewStats.moves++;
+			viewStats.pixels += Math.hypot(dx, dy);
+			applyView();
+		}
 		if (event.preventDefault) event.preventDefault();
 	}
 	function endPan(event) {
@@ -466,12 +488,14 @@
 	function perfReport() {
 		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
 		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
+		var viewGate = viewGateReport();
 		return rig
 			+ '\nengine ' + engine + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
 			+ ' · cadence ' + Params.eventCadence + ' Myr'
 			+ '\n' + Perf.report(stripRows())
+			+ (viewGate ? '\n' + viewGate : '')
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
 	}
 	Clipboard.bind(perfStrip, perfReport, Clipboard.classAck(perfStrip));
@@ -500,7 +524,15 @@
 		// span.
 		if (viewMoved) viewHold = VIEW_HOLD_FRAMES;
 		else if (viewHold > 0) viewHold--;
-		if (playing && !viewLive()) {
+		var gateClosed = viewLive();
+		if (!playing) viewStats.gated = false;
+		else if (gateClosed) {
+			viewStats.deferred++;
+			if (!viewStats.gated) { viewStats.gated = true; viewStats.closes++; }
+		} else if (viewStats.gated) {
+			viewStats.gated = false; viewStats.reopens++;
+		}
+		if (playing && !gateClosed) {
 			steps = +speedInput.value;
 			if (runTarget < Infinity) steps = Math.min(steps, Math.max(0, Math.ceil((runTarget - state.t) / dt - 1e-9)));
 			if (steps > 0) {
