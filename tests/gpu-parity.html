@@ -32,6 +32,7 @@ button { background: #1d6fe0; color: #fff; border: 0; border-radius: 6px; paddin
 button:disabled { background: #34414f; cursor: default; }
 button.sec { background: #243041; }
 pre#out { white-space: pre-wrap; word-break: break-word; background: #0b0e15; border: 1px solid #263043; padding: 10px; max-height: 60vh; overflow: auto; }
+#status { display: none; margin: 8px 0; padding: 6px 10px; border: 1px solid #3a4a61; border-radius: 6px; background: #131c29; color: #ffd479; font-weight: 600; }
 .ok { color: #7fd6a4; } .bad { color: #e07070; }
 code { background: #131a22; padding: 1px 5px; border-radius: 4px; }
 </style>
@@ -49,6 +50,7 @@ code { background: #131a22; padding: 1px 5px; border-radius: 4px; }
 <button id="run-det">Run determinism</button>
 <button id="save" class="sec">Save log</button><button id="copy" class="sec">Copy log</button>
 </div>
+<div id="status"></div>
 <pre id="out">booting…</pre>
 <script src="../js/env.js"></script>
 <script src="../js/geodesics.js"></script>
@@ -228,6 +230,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 			for (var r = 0; r < 2; r++) {
 				var s = r === 0 ? a : b;
 				await GpuSim.uploadState(s);
+				if (cfg.progress) cfg.progress('run ' + (r + 1) + '/2 · ' + frames + ' frames');
 				for (var f = 0; f < frames; f++) {
 					GpuSim.frame(s, dt);
 					s.frame++; s.t += dt;
@@ -262,6 +265,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		try {
 			for (var li = 0; li < lengths.length; li++) {
 				var frames = lengths[li];
+				if (cfg.progress) cfg.progress('frame count ' + frames + ' (' + (li + 1) + '/' + lengths.length + ')');
 				var gridA = new Grid(level).build(), gridB = new Grid(level).build();
 				var a = new State(gridA, level), b = new State(gridB, level);
 				a.reset(seed);
@@ -319,6 +323,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 		try {
 			for (var si = 0; si < seeds.length; si++) {
 				var seed = seeds[si];
+				if (cfg.progress) cfg.progress('seed ' + seed + ' (' + (si + 1) + '/' + seeds.length + ')');
 				var gridC = new Grid(level).build(), gridG = new Grid(level).build();
 				var cpu = new State(gridC, level), gpu = new State(gridG, level);
 				cpu.reset(seed);
@@ -328,6 +333,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 				cpuS.push(sample(cpu));
 				for (var f = 0; f < frames; f++) {
 					Sim.step(cpu, dt);
+					if (cfg.progress && f % 200 === 0) cfg.progress('seed ' + seed + ' · cpu ' + f + '/' + frames);
 					if ((f + 1) % every === 0) cpuS.push(sample(cpu));
 				}
 				await GpuSim.init(gpu, { fallback: false });
@@ -335,6 +341,7 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 				await GpuSim.download(gpu);
 				gpuS.push(sample(gpu));
 				for (var f2 = 0; f2 < frames; f2++) {
+					if (cfg.progress && f2 % 200 === 0) cfg.progress('seed ' + seed + ' · gpu ' + f2 + '/' + frames);
 					await GpuSim.step(gpu, dt, Events, Checkpoint, Params);
 					if ((f2 + 1) % every === 0) {
 						await GpuSim.download(gpu);
@@ -397,7 +404,9 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 			if (!report.ok) report.bad = report.last.filter(function (r) { return r.mismatches > 0; });
 			return report;
 		}
+		if (cfg.progress) cfg.progress('rasters mirrored, stepping');
 		for (var f = 0; f < frames; f++) {
+			if (cfg.progress && f % 100 === 0) cfg.progress('frame ' + f + '/' + frames);
 			Sim.step(cpu, dt);
 			await GpuSim.step(gpu, dt, Events, Checkpoint, Params);
 			await GpuSim.download(gpu);
@@ -430,21 +439,61 @@ function formatReport(r, ms, env) {
 	return out;
 }
 
+// A run is pure compute: the ensemble is ~50 s (0.3 owner-rig, 46.5 s measured) with
+// no output between the start line and the results, which reads as a hang — and the
+// buttons stayed live, so a second click starts an overlapping run. The status line
+// below is the live proof of work (elapsed + phase), and the run buttons lock until it ends.
+var busy = false;
+var RUN_IDS = ['run-1', 'run-ens', 'run-batch', 'run-det'];
+
+function lockButtons(on) {
+	for (var i = 0; i < RUN_IDS.length; i++) document.getElementById(RUN_IDS[i]).disabled = !on;
+}
+
+function status(text) {
+	var el = document.getElementById('status');
+	el.textContent = text || '';
+	el.style.display = text ? 'block' : 'none';
+}
+
 async function runAndLog(kind, cfg) {
 	cfg = cfg || {};
-	var t0 = Date.now();
+	if (busy) { say('[' + kind + '] ignored — a run is already in flight (see the status line)'); return; }
 	var label = ({ run: 'parity', ens: 'ensemble', batch: 'batch', det: 'determinism' }[kind] || kind);
-	say('[' + label + '] frames=' + (cfg.frames||'') + ' level=' + (cfg.level||5) + ' seed=' + (cfg.seed||7) + ' …');
 	var fn = { run: window.__run, ens: window.__ens, batch: window.__batch, det: window.__det }[kind];
 	if (!fn) { say('unknown run kind ' + kind); return; }
 	// If WebGPU not available, say so (file:// without WebGPU will land here)
 	if (!navigator.gpu) { say('navigator.gpu missing — open in Chrome 113+/Firefox 141+ with WebGPU'); return; }
-	var report = await fn(cfg);
+	var t0 = Date.now();
+	// The runners pick up these same defaults internally; name them in the start line so a
+	// "?run=ens&seed=7" bookmark does not announce a seed the ensemble then ignores.
+	var seedTxt = kind === 'ens' ? '[' + (cfg.seeds || [7, 8, 9]) + ']'
+		: (cfg.seed !== undefined ? cfg.seed : 7);
+	say('[' + label + '] frames=' + (cfg.frames||'') + ' level=' + (cfg.level||5) + ' seed=' + seedTxt + ' …');
+	var phase = 'starting';
+	function render() { status(label + ' running · ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s · ' + phase); }
+	cfg.progress = function (p) { phase = p; render(); };
+	busy = true;
+	lockButtons(false);
+	render();
+	var tick = setInterval(render, 500);
+	var report;
+	try {
+		report = await fn(cfg);
+	} catch (e) {
+		// a throw the runner did not catch must still unlock the page
+		report = { ok: false, error: String(e && e.stack || e), frames: cfg.frames, level: cfg.level || 5, seed: cfg.seed, seeds: cfg.seeds };
+	} finally {
+		clearInterval(tick);
+		busy = false;
+		lockButtons(true);
+		status('');
+	}
 	var ms = Date.now() - t0;
 	var env = '';
 	try { env = window.__envLine ? window.__envLine() : ''; } catch(e) {}
 	if (env) say(env + ' · ' + hostLine());
-	say(label + ': frames=' + (report.frames||cfg.frames) + ' level=' + report.level + ' seed=' + report.seed + ' wall=' + ms + 'ms' + (report.gpuBuildMs ? ' gpuBuild=' + report.gpuBuildMs + 'ms' : ''));
+	say(label + ': frames=' + (report.frames||cfg.frames) + ' level=' + report.level + ' seed=' + (report.seeds ? '[' + report.seeds + ']' : report.seed) + ' wall=' + ms + 'ms' + (report.gpuBuildMs ? ' gpuBuild=' + report.gpuBuildMs + 'ms' : ''));
 	if (report.error) {
 		// An aborted run has no frames to verdict — printing the PASS line after the error
 		// (firstBadFrame stays -1) produced a "PASS … [result] FAIL" log, which reads as a

@@ -92,7 +92,7 @@ function serve(dir) {
 		const env = await page.evaluate('window.__envLine ? window.__envLine() : ""').catch(() => '');
 		if (env) console.log(env + ' · ' + hostLine());
 		if (!batch) {
-			console.log(`frames=${report.frames} level=${report.level} seed=${report.seed} wall=${ms}ms gpuBuild=${report.gpuBuildMs}ms`);
+			console.log(`frames=${report.frames} level=${report.level} seed=${report.seeds ? '[' + report.seeds + ']' : report.seed} wall=${ms}ms gpuBuild=${report.gpuBuildMs}ms`);
 		} else {
 			console.log(`batch-identity level=${report.level} seed=${report.seed} wall=${ms}ms`);
 		}

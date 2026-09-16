@@ -17,7 +17,7 @@ const HISTORIES = ['kinematics', 'ores', 'alloc', 'longrun'];
 const SHORT = ['browser-scripts', 'gui', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces',
 	'determinism', 'raster', 'conveyor', 'rift', 'isostasy', 'erosion', 'collapse', 'split',
 	'checkpoint', 'view-dir', 'perf', 'clipboard', 'wgsl-struct', 'gpu-play', 'gpu-readback',
-	'gpu-d1diff'];
+	'gpu-d1diff', 'gpu-parity-ui'];
 const names = full ? SHORT.concat(HISTORIES) : SHORT;
 console.log('profile ' + (full ? 'full' : 'short') + ': ' + names.length + ' tests'
 	+ (full ? '' : ' (--full adds ' + HISTORIES.join(', ') + ')'));

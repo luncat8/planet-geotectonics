@@ -515,6 +515,13 @@
 	chrome: the rig dir is os.tmpdir()/rig on both sides (run_gpu_parity.rig_dir and
 	hc.RIG), PATH probes use where.exe on win32, and chrome lookup adds the
 	Program Files install dirs and chrome-win64/chrome.exe of the puppeteer cache.
+	(e) A silent 46 s run reads as a hang — the PASS capture above nearly went untrusted
+	for that reason. gpu-parity.html now locks the run buttons while one is in flight,
+	answers a second click, and keeps a #status line ticking elapsed seconds plus the
+	runner's phase (cfg.progress, called at seed/frame-count boundaries). Pinned by
+	tests/gpu-parity-ui.js on dom-stub — note it takes the inline SCRIPT from the raw
+	markup, because dom-stub's tokenizer eats a `<` that does not open a tag (any
+	`i < n`), which no browser script tokenizer does.
 
 ## plate fragmentation was stranded orphan components, not split/merge balance
 
