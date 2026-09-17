@@ -138,10 +138,11 @@ var Surface = {
 				var c4 = k3 < 0 ? cell2 : g.ring[cell2 * 6 + k3];
 				if (s.owner[c4] !== i2) continue;
 				var stay2 = s.stay[c4], stayFel2 = s.stayFel[c4], stayPla2 = s.stayPla[c4];
-				// The accommodation cap: a column takes sediment only up to sedMax; what it
-				// refuses bypasses to the mantle ledger, booked once on arrival. The ore
-				// doses below use what actually lands.
-				var room = p.sedMax - s.hSed[i2];
+				// The accommodation limit is the collapse regime: a column takes sediment
+				// only while its total thickness is under hCollapse; what it refuses
+				// underthrusts with the slab (the ledger). The ore doses below use what
+				// actually lands.
+				var room = p.hCollapse - s.hFel[i2] - s.hSed[i2];
 				if (stay2 > room) {
 					s.subductedSed += (stay2 - (room > 0 ? room : 0)) * s.A0ref;
 					stay2 = room > 0 ? room : 0;
@@ -161,12 +162,13 @@ var Surface = {
 				}
 				s.mobile[c4] = 0; s.mobileFel[c4] = 0; s.mobilePla[c4] = 0;
 			}
-			// Legacy piles (a checkpoint from before the cap) relax in one frame: everything
-			// above the accommodation limit books to the mantle ledger, so an old world
-			// heals on the first step instead of carrying the artifact forever.
-			if (s.hSed[i2] > p.sedMax) {
-				s.subductedSed += (s.hSed[i2] - p.sedMax) * s.A0ref;
-				s.hSed[i2] = p.sedMax;
+			// Legacy piles (a checkpoint from before the limit) relax in one frame:
+			// everything above the collapse regime books to the mantle ledger, so an old
+			// world heals on the first step instead of carrying the artifact forever.
+			var cap = p.hCollapse - s.hFel[i2];
+			if (s.hSed[i2] > cap) {
+				s.subductedSed += (s.hSed[i2] - (cap > 0 ? cap : 0)) * s.A0ref;
+				s.hSed[i2] = cap > 0 ? cap : 0;
 			}
 		}
 	},

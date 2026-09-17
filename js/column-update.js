@@ -14,28 +14,39 @@ var ColumnUpdate = {
 	// equals the per-edge accumulation without any writer touching another column. Mass is
 	// still conserved exactly: paired terms are identical floats with opposite sign.
 	collapse: function (s, dt) {
-		var p = ColumnParams, g = s.grid, delta = s.collapseDelta;
+		var p = ColumnParams, g = s.grid, delta = s.collapseDelta, deltaS = s.collapseDeltaSed;
 		var k = p.kCollapse * dt;
 		for (var i = 0; i < s.n; i++) {
 			if (!s.alive[i]) continue;
 			var cell = s.cell[i];
-			if (cell < 0) { delta[i] = 0; continue; }
-			var d = 0, fel = s.hFel[i];
+			if (cell < 0) { delta[i] = 0; deltaS[i] = 0; continue; }
+			var d = 0, fel = s.hFel[i], dS = 0, sed = s.hSed[i], tot = fel + sed;
 			for (var q = -1; q < g.ringN[cell]; q++) {
 				var c = q < 0 ? cell : g.ring[cell * 6 + q];
 				if (s.owner[c] !== i) continue;
 				for (var e = 0; e < g.ringN[c]; e++) {
 					var j = g.ring[c * 6 + e], oj = s.owner[j];
 					if (oj < 0 || oj === i) continue;
-					if (Math.max(fel, s.hFel[oj]) <= p.hCollapse) continue;
-					d += (s.hFel[oj] - fel) * g.collapseWeight[c * 6 + e];
+					// Felsic spreads above the collapse regime; sediment spreads under the
+					// same regime test taken on the total column - a thick blanket flows
+					// off an over-thick margin onto its neighbours. Each material keeps its
+					// own paired identical-opposite exchange, so both are conserved exactly.
+					var w = g.collapseWeight[c * 6 + e];
+					if (Math.max(fel, s.hFel[oj]) > p.hCollapse) {
+						d += (s.hFel[oj] - fel) * w;
+					}
+					if (Math.max(tot, s.hFel[oj] + s.hSed[oj]) > p.hCollapse) {
+						dS += (s.hSed[oj] - sed) * w;
+					}
 				}
 			}
 			delta[i] = k * d;
+			deltaS[i] = k * dS;
 		}
 		for (var i2 = 0; i2 < s.n; i2++) {
 			if (!s.alive[i2]) continue;
 			s.hFel[i2] = Math.max(0, s.hFel[i2] + delta[i2]);
+			s.hSed[i2] = Math.max(0, s.hSed[i2] + deltaS[i2]);
 		}
 	},
 	// Cells within one ring of a continent–continent convergent or a continental transform

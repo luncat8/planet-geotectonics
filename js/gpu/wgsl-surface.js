@@ -235,10 +235,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 		let stay = cellStay(c);
 		let stayFel = cellStayFel(c);
 		let stayPla = cellStayPla(c);
-		// The accommodation cap (the CPU deposit's closure, pass for pass): past P_SEDMAX
-		// the excess bypasses to the mantle ledger, booked once on arrival; the ore doses
-		// use what actually lands.
-		let land = min(stay, max(P_SEDMAX - hSed, 0.0));
+		// The accommodation limit (the CPU deposit's closure, pass for pass): a column
+		// takes sediment only while its total thickness is under the collapse regime; the
+		// excess underthrusts with the slab (the ledger). The ore doses use what lands.
+		let land = min(stay, max(P_HCOLLAPSE - colHFel(i) - hSed, 0.0));
 		if (stay > land) { addLedger(5u, i, (stay - land) * A0REF); }
 		hSed = hSed + land;
 		if (land > 0.0 && cellZ(c) < P_ZBASIN) {
@@ -249,6 +249,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 		}
 		CELLF[c * 8u + 3u] = vec4<f32>(0.0, 0.0, 0.0, cellExt(c));
 	}
+	// Legacy piles relax in one frame (the CPU deposit's clamp): everything above the
+	// collapse regime books to the ledger and clamps, so an old world heals at once.
+	let sedCap = max(P_HCOLLAPSE - colHFel(i), 0.0);
+	if (hSed > sedCap) { addLedger(5u, i, (hSed - sedCap) * A0REF); hSed = sedCap; }
 	COLF[i * 6u + 2u].y = hSed;
 	COLF[i * 6u + 4u].y = oBas;
 	COLF[i * 6u + 4u].z = oPla;

@@ -13,11 +13,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	let i = gid.x;
 	if (i >= aliveN() || colAlive(i) == 0) { return; }
 	var delta = 0.0;
+	var deltaS = 0.0;
 	let cell = colCell(i);
 	if (cell >= 0) {
 		let k = P_KCOLLAPSE * fDT();
 		var d = 0.0;
+		var dS = 0.0;
 		let fel = colHFel(i);
+		let sed = colHSed(i);
+		let tot = fel + sed;
 		for (var q = 0u; q <= ringN(u32(cell)); q = q + 1u) {
 			var c = u32(cell);
 			if (q > 0u) { c = u32(ringAt(u32(cell) * 6u + q - 1u)); }
@@ -27,13 +31,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 				let j = u32(ringAt(edge));
 				let oj = cellOwner(j);
 				if (oj < 0 || oj == i32(i)) { continue; }
-				if (max(fel, colHFel(u32(oj))) <= P_HCOLLAPSE) { continue; }
-				d = d + (colHFel(u32(oj)) - fel) * collapseW(edge);
+				// Felsic spreads above the collapse regime; sediment spreads under the same
+				// regime test on the total column. Per-material paired exchange, so both are
+				// conserved exactly (the CPU collapse, pass for pass).
+				let w = collapseW(edge);
+				if (max(fel, colHFel(u32(oj))) > P_HCOLLAPSE) {
+					d = d + (colHFel(u32(oj)) - fel) * w;
+				}
+				if (max(tot, colHFel(u32(oj)) + colHSed(u32(oj))) > P_HCOLLAPSE) {
+					dS = dS + (colHSed(u32(oj)) - sed) * w;
+				}
 			}
 		}
 		delta = k * d;
+		deltaS = k * dS;
 	}
 	COLF[i * 6u + 5u].y = delta;
+	COLF[i * 6u + 5u].z = deltaS;
 }
 `
 },
@@ -45,6 +59,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	let i = gid.x;
 	if (i >= aliveN() || colAlive(i) == 0) { return; }
 	setColHFel(i, max(0.0, colHFel(i) + colCollapse(i)));
+	setColHSed(i, max(0.0, colHSed(i) + colCollapseSed(i)));
 }
 `
 },

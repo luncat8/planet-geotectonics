@@ -31,6 +31,7 @@ function State(grid, seed, hot) {
 	this.zDyn = new Float64Array(this.colCap);
 	this.zDynNext = new Float64Array(this.colCap);
 	this.collapseDelta = new Float64Array(this.colCap);
+	this.collapseDeltaSed = new Float64Array(this.colCap);
 	this.alive = new Uint8Array(this.colCap);
 	this.plate = new Uint16Array(this.colCap);
 	this.cell = new Int32Array(this.colCap);
@@ -203,7 +204,7 @@ State.prototype.reset = function (seed) {
 	this.hFel.fill(0); this.hMaf.fill(0); this.hSed.fill(0); this.age.fill(0);
 	this.fert.fill(0); this.oVms.fill(0); this.oMaf.fill(0);
 	this.oArc.fill(0); this.oOro.fill(0); this.oBas.fill(0); this.oPla.fill(0);
-	this.damage.fill(0); this.zDyn.fill(0); this.zDynNext.fill(0); this.collapseDelta.fill(0); this.alive.fill(0);
+	this.damage.fill(0); this.zDyn.fill(0); this.zDynNext.fill(0); this.collapseDelta.fill(0); this.collapseDeltaSed.fill(0); this.alive.fill(0);
 	this.plate.fill(0); this.cell.fill(-1); this.consumedBy.fill(-1);
 	this.loserList.fill(-1); this.loserStart.fill(0); this.loserCursor.fill(0);
 	this.q.fill(0); this.omega.fill(0); this.omegaTarget.fill(0);

@@ -31,11 +31,14 @@ var Plates = {
 				if (otherOwner < 0 || s.edgeType[e] !== PlateEdges.CONVERGENT) continue;
 				var pol = s.polarity[e], push;
 				if (pol === 2) {
-					// Thick continental crust must build a stronger normal barrier. Without this
-					// factor a collision keeps consuming columns until the contact pass wins.
+					// A thick column must build a stronger normal barrier - crust plus its
+					// sediment blanket, so a sediment-loaded margin goes hard and collisions
+					// stop stacking onto it (the 0.5.0 runaway fix). Without this factor a
+					// collision keeps consuming columns until the contact pass wins.
 					var closing = -s.relN[e];
 					if (closing <= 0) continue;
-					var thick = 1 + p.collThickness * Math.max(0, Math.max(s.hFel[owner], s.hFel[otherOwner]) - ocean) / p.hCollapse;
+					var thick = 1 + p.collThickness * Math.max(0,
+						Math.max(s.hFel[owner] + s.hSed[owner], s.hFel[otherOwner] + s.hSed[otherOwner]) - ocean) / p.hCollapse;
 					push = -coll * Math.min(4, thick) * closing;
 				} else if (pol === -1) {
 					push = slab * Math.min(p.ageSlab, s.age[owner]);

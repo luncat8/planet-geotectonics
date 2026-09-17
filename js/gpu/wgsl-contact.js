@@ -324,11 +324,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 		if (hFel >= P_HOCEANIC && colHFel(l) >= P_HOCEANIC) {
 			// Continental collision: crust is preserved, the mafic root delaminates.
 			hFel = hFel + colHFel(l);
-			// The receiving half of the deposition cap (CPU Contact.receiveSed): the winner
-			// takes only up to P_SEDMAX and the refused sediment books to the ledger.
+			// The receiving half of the accommodation limit (CPU Contact.receiveSed): the
+			// winner takes only while its total is under the collapse regime; the refused
+			// sediment books to the ledger. The index is w - this kernel's column.
 			let sedTakeC = colHSed(l);
-			let sedKeepC = min(sedTakeC, max(P_SEDMAX - hSed, 0.0));
-			if (sedTakeC > sedKeepC) { addLedger(5u, i, (sedTakeC - sedKeepC) * A0REF); }
+			let sedKeepC = min(sedTakeC, max(P_HCOLLAPSE - hFel - hSed, 0.0));
+			if (sedTakeC > sedKeepC) { addLedger(5u, w, (sedTakeC - sedKeepC) * A0REF); }
 			hSed = hSed + sedKeepC;
 			addLedger(4u, l, colHMaf(l) * A0REF);
 			if (colAge(l) > age) { age = colAge(l); }
@@ -343,8 +344,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 			// and is booked as that plate's arc feed (design §8 recycling enrichment).
 			hFel = hFel + colHFel(l);
 			let sedTakeO = P_SEDSCRAPE * colHSed(l);
-			let sedKeepO = min(sedTakeO, max(P_SEDMAX - hSed, 0.0));
-			if (sedTakeO > sedKeepO) { addLedger(5u, i, (sedTakeO - sedKeepO) * A0REF); }
+			let sedKeepO = min(sedTakeO, max(P_HCOLLAPSE - hFel - hSed, 0.0));
+			if (sedTakeO > sedKeepO) { addLedger(5u, w, (sedTakeO - sedKeepO) * A0REF); }
 			hSed = hSed + sedKeepO;
 			addLedger(5u, l, (1.0 - P_SEDSCRAPE) * colHSed(l) * A0REF);
 			addLedger(4u, l, colHMaf(l) * A0REF);

@@ -377,11 +377,13 @@ var Contact = {
 			s.hSed[i] -= lossSed;
 		}
 	},
-	// The receiving half of the deposition cap (Params.sedMax): a winner takes sediment
-	// only up to the cap, and what it refuses books straight to the mantle ledger - the
-	// point where piles concentrate is the collision, so this is where the closure bites.
+	// The receiving half of the accommodation limit: a winner takes sediment only while
+	// its total thickness is under the collapse regime, and what it refuses books straight
+	// to the mantle ledger - the point where piles concentrate is the collision, so this
+	// is where the closure bites. The barrier term in plates.js meanwhile sees the thick
+	// margin as strong, so the collision itself stops consuming onto it.
 	receiveSed: function (s, w, amount, A0) {
-		var room = ContactParams.sedMax - s.hSed[w];
+		var room = ContactParams.hCollapse - s.hFel[w] - s.hSed[w];
 		if (amount <= room) return amount;
 		var keep = room > 0 ? room : 0;
 		s.subductedSed += (amount - keep) * A0;

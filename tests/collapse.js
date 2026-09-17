@@ -16,4 +16,21 @@ for (let i = 0; i < s.n; i++) if (s.alive[i] && s.hFel[i] > peak) peak = s.hFel[
 console.log({ plateauCells: Array.from(s.hFel).filter((x, i) => i < s.n && x > 50000).length, peakKm: peak / 1000, massError: after - before });
 assert.ok(peak < 70000, 'plateau did not collapse: ' + peak);
 assert.ok(Math.abs(after - before) / before < 1e-12, 'collapse mass ' + (after - before));
-console.log('PASS collapse: thick plateau spreads symmetrically and conserves felsic mass');
+// Sediment joins the collapse (0.5.0): where the total column is over the regime, the
+// blanket flows to thinner neighbours - felsic untouched (its own guard stays shut), each
+// material exactly conserved.
+{
+	const hi = Array.from(g.pos).reduce((a, p, i) => p[2] > g.pos[a * 3 + 2] ? i : a, 0);
+	const ring = Array.from({ length: g.ringN[hi] }, (_, k) => g.ring[hi * 6 + k]);
+	const at = ring[0];
+	s.hFel[hi] = 35000; s.hSed[hi] = 30000;      // total 65 km: over the regime
+	for (const n of ring) { s.hFel[n] = 35000; s.hSed[n] = 0; }   // room everywhere around
+	const sum = (f) => ring.reduce((a, n) => a + f(n), f(hi));
+	const fel0 = sum((c) => s.hFel[c]), sed0 = sum((c) => s.hSed[c]);
+	ColumnUpdate.collapse(s, 0.1);
+	assert.ok(s.hSed[hi] < 30000 && s.hSed[at] > 0, 'the blanket flows to the thin neighbours');
+	assert.equal(sum((c) => s.hFel[c]), fel0, 'felsic is untouched while its own guard is shut');
+	assert.ok(Math.abs(sum((c) => s.hSed[c]) - sed0) < 1e-9, 'sediment is conserved exactly');
+}
+console.log('PASS collapse: thick plateau spreads symmetrically and conserves felsic mass,'
+	+ ' sediment joins the flow under the total-column regime test');

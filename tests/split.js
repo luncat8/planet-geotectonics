@@ -183,10 +183,11 @@ function convergence(W) {
 
 // --- events are deterministic and leave the ledger alone ------------------------------------
 // The natural run is re-baselined on seed 23 / 200 Myr: the 0.4.0 owner-remap fix removed the
-// spurious damage that used to make plates rift early, and the 0.5.0 sediment cap (sedMax)
-// removed the kilometres-high artifact piles that fed the damage field after it - on the
-// capped field seed 4 no longer splits within 390 Myr, seed 23 first merges at 18 Myr and
-// first splits at 125 Myr, so 200 Myr exercises both paths with margin. The statistics
+// spurious damage that used to make plates rift early, and the 0.5.0 sediment limit
+// (thickness counts in the collision barrier and in collapse, so artifact piles stopped
+// feeding the damage field) first split seed 4 at 167 Myr and seed 23 at 97 Myr - the
+// strength feedback restored the natural rift cadence in every probed seed - with seed 23
+// first merging at 18 Myr, so 200 Myr exercises both paths with margin. The statistics
 // themselves are the 0.4.0 recalibration's business; the prescribed corridor above keeps a
 // fixed split target either way.
 {

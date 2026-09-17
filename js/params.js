@@ -18,12 +18,12 @@ var Params = Object.seal({
 	// law's whole scale: at the colour ramp's 6.5 km it ate the thickened crust and the release
 	// history fell out of acceptance 3 (14.1% continents), at 9 km it lands back on baseline.
 	kEro: 0.05, eroScale: 1, slopeRef: 0.01, zKnee: 9000, deltaZ: 20, kPlacer: 0.2,
-	// Deposition cap (0.5.0 rig find): sediment had no return path once its carrier is
-	// continental, so a late-time world piled single columns into thousands of km - the
-	// 3D view exposed what the 6.5 km colour ramp hid. Past ~20 km (the real-world basin
-	// maximum) the excess bypasses to the mantle ledger at deposit and collision, the
-	// same booking as the subduction scrape.
-	sedMax: 20000,
+	// Sediment (0.5.0 rig find) counts as thickness everywhere felsic does: it rides in
+	// the collision barrier and in gravitational collapse, and a column accepts it only
+	// up to the collapse regime (hCollapse of total thickness) - the excess bypasses to
+	// the mantle ledger at deposit and collision, the same booking as the scrape. No
+	// free constant: the limit IS the collapse threshold, and a thick blanket makes the
+	// margin strong, so collisions naturally stop stacking onto it.
 	// Relief ramp: |z| = zRange metres saturates land and the deep-water floor of the
 	// elevation palette symmetrically (render.js, render-gpu.js). Renderer-only.
 	zRange: 6500,

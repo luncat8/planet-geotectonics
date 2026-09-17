@@ -53,7 +53,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 				// Thick continental crust builds a stronger normal barrier.
 				let closing = -edgeRelN(e);
 				if (closing <= 0.0) { continue; }
-				let thick = 1.0 + P_COLLTHICK * max(0.0, max(colHFel(i), colHFel(u32(jo))) - P_HOCEANIC) / P_HCOLLAPSE;
+				let thick = 1.0 + P_COLLTHICK * max(0.0, max(colHFel(i) + colHSed(i), colHFel(u32(jo)) + colHSed(u32(jo))) - P_HOCEANIC) / P_HCOLLAPSE;
 				push = -coll * min(4.0, thick) * closing;
 			} else if (pol == -1) {
 				push = slab * min(P_AGESLAB, colAge(i));
