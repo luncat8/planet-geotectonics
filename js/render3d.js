@@ -37,14 +37,19 @@ Render3D.TS_NAMES = ['gather', 'land', 'water', 'rim'];
 // 0x8 STORAGE+COPY_DST disambiguated by namespace, 0x10 INDEX/RENDER_ATTACHMENT,
 // 0x20 VERTEX, 0x40 UNIFORM, 0x80 STORAGE.
 
+// Injection markers, single-sourced: the templates embed them (interpolated) and
+// gatherCode/renderCode replace by them, so the two can never drift apart again.
+Render3D.M_GATHER = '// layout constants appended here (W, H, LW, LH, GAP_Z)';
+Render3D.M_Z = '// z binding + read appended here (CELLF | CELLZ)';
+Render3D.M_RENDER = '// layout constants appended here (W, H, R_INV, Z_FLOOR, Z_RIM)';
+
 /* The gather: one thread per height texel, the 2D shader's sourceCell convention (lookup
    row 0 = south, no flip anywhere). The one engine difference - where z comes from - is
    injected at the marker: cellF (vec4 grid, z at [c*8].w) or the CPU upload (plain f32). */
 Render3D.GATHER = `@group(0) @binding(0) var<storage, read> LOOK: array<f32>;
-@group(0) @binding(1) var<storage, read> ZSRC: array<f32>;
 @group(0) @binding(2) var HEIGHT: texture_storage_2d<r32float, write>;
-// layout constants appended here (W, H, LW, LH, GAP_Z)
-// z read appended here (CELLF | CELLZ)
+${Render3D.M_GATHER}
+${Render3D.M_Z}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -61,8 +66,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 Render3D.cellFRead = 'fn zAt(c: u32) -> f32 { return CELLF[c * 8u].w; }';
 Render3D.cellZRead = 'fn zAt(c: u32) -> f32 { return ZSRC[c]; }';
-Render3D.cellFBinding = 'var<storage, read> CELLF: array<vec4<f32>>;';
-Render3D.cellZBinding = 'var<storage, read> ZSRC: array<f32>;';
+Render3D.cellFBinding = '@group(0) @binding(1) var<storage, read> CELLF: array<vec4<f32>>;';
+Render3D.cellZBinding = '@group(0) @binding(1) var<storage, read> ZSRC: array<f32>;';
 
 /* The draw module: three thin vertex entries (land / water / rim) over the shared
    helpers, one fragment entry per pass. Every height read - the vertex displacement and
@@ -71,7 +76,7 @@ Render3D.cellZBinding = 'var<storage, read> ZSRC: array<f32>;';
 Render3D.RENDER = `struct U { vp: mat4x4<f32>, eye: vec4<f32>, knob: vec4<f32> };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var HEIGHT: texture_2d<f32>;
-// layout constants appended here (W, H, R_INV, Z_FLOOR, Z_RIM)
+${Render3D.M_RENDER}
 
 const LIGHT = vec3<f32>(0.5497513, 0.2998646, -0.7796479);
 const SKY = vec3<f32>(0.35, 0.52, 0.78);
@@ -207,13 +212,13 @@ Render3D.renderConsts = function (w, h) {
 Render3D.gatherCode = function (zSource, w, h, lw, lh) {
 	var cellF = zSource !== 'cellZ';
 	return Render3D.GATHER
-		.replace('// layout constants appended here (W, H, LW, LH, GAP_Z)', Render3D.gatherConsts(w, h, lw, lh))
-		.replace('// z read appended here (CELLF | CELLZ)',
+		.replace(Render3D.M_GATHER, Render3D.gatherConsts(w, h, lw, lh))
+		.replace(Render3D.M_Z,
 			(cellF ? Render3D.cellFBinding : Render3D.cellZBinding) + '\n' +
 			(cellF ? Render3D.cellFRead : Render3D.cellZRead));
 };
 Render3D.renderCode = function (w, h) {
-	return Render3D.RENDER.replace('// layout constants appended here (W, H, R_INV, Z_FLOOR, Z_RIM)',
+	return Render3D.RENDER.replace(Render3D.M_RENDER,
 		Render3D.renderConsts(w, h));
 };
 

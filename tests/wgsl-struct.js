@@ -86,6 +86,23 @@ sources.push({ name: 'render3d', src: Render3D.renderCode(2048, 1024) });
 for (const { name, src } of sources) {
 	// Strip comments so words/braces inside them count neither as definitions nor references.
 	const bare = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\/\/[^\n]*/g, ' ');
+	// Every module-scope resource declaration carries @group and @binding (WGSL parse
+	// error otherwise - the bug that black-screened the 3D view on real Chrome), and no
+	// name is declared twice (the marker-drift way to reach the same black screen).
+	// Module-scope decls are unindented in this codebase; fn bodies are tab-indented.
+	for (const line of bare.split('\n')) {
+		if (!/^var[<(]/.test(line) || /^var<workgroup/.test(line)) continue;
+		assert.ok(line.includes('@group') && line.includes('@binding'),
+			name + ': resource var without binding: ' + line.trim());
+	}
+	// Names from module-scope decls only: unindented (attributes and all); fn-local vars
+	// are tab-indented and must not count, or every kernel fails here.
+	const declNames = [];
+	for (const m of bare.matchAll(/^(?:@\w+\([^)]*\)\s+)*var(?:<[^>]*>)?\s+([A-Za-z_][A-Za-z0-9_]*)/gm)) {
+		declNames.push(m[1]);
+	}
+	assert.equal(new Set(declNames).size, declNames.length,
+		name + ': duplicate resource declaration');
 	assert.equal((bare.match(/{/g) || []).length, (bare.match(/}/g) || []).length, name + ' brace balance');
 	assert.equal((bare.match(/\(/g) || []).length, (bare.match(/\)/g) || []).length, name + ' paren balance');
 	// Entry point: every kernel module is a compute shader (scan uses scanA/scanB/scanC as
