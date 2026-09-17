@@ -12,10 +12,11 @@
 		<section class="map-panel" aria-label="Planet map">
 			<div class="map-top">
 				<fieldset id="layer" class="view-modes"><legend>View mode</legend>
-					<label><input type="radio" name="layer" value="plate" checked>Plate identity</label><label><input type="radio" name="layer" value="type">Boundary: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</label><label><input type="radio" name="layer" value="z">Elevation</label><label><input type="radio" name="layer" value="damage">Rift damage</label><label><input type="radio" name="layer" value="owner">Column coverage</label><label><input type="radio" name="layer" value="sediment">Sediment</label><label><input type="radio" name="layer" value="speed">Plate speed</label><label><input type="radio" name="layer" value="dir">Motion amount + direction</label><label><input type="radio" name="layer" value="age">Crust age</label><label><input type="radio" name="layer" value="force">Force amount</label><label><input type="radio" name="layer" value="forceDir">Force amount + direction</label><label><input type="radio" name="layer" value="oVms">Ore · VMS</label><label><input type="radio" name="layer" value="oMaf">Ore · mafic</label><label><input type="radio" name="layer" value="oArc">Ore · arc</label><label><input type="radio" name="layer" value="oOro">Ore · orogenic</label><label><input type="radio" name="layer" value="oBas">Ore · basin</label><label><input type="radio" name="layer" value="oPla">Ore · placer</label>
+					<label title="3D planet: displaced terrain, translucent sea; drag orbits, wheel zooms"><input id="v3d" type="checkbox">3D view</label><label><input type="radio" name="layer" value="plate" checked>Plate identity</label><label><input type="radio" name="layer" value="type">Boundary: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</label><label><input type="radio" name="layer" value="z">Elevation</label><label><input type="radio" name="layer" value="damage">Rift damage</label><label><input type="radio" name="layer" value="owner">Column coverage</label><label><input type="radio" name="layer" value="sediment">Sediment</label><label><input type="radio" name="layer" value="speed">Plate speed</label><label><input type="radio" name="layer" value="dir">Motion amount + direction</label><label><input type="radio" name="layer" value="age">Crust age</label><label><input type="radio" name="layer" value="force">Force amount</label><label><input type="radio" name="layer" value="forceDir">Force amount + direction</label><label><input type="radio" name="layer" value="oVms">Ore · VMS</label><label><input type="radio" name="layer" value="oMaf">Ore · mafic</label><label><input type="radio" name="layer" value="oArc">Ore · arc</label><label><input type="radio" name="layer" value="oOro">Ore · orogenic</label><label><input type="radio" name="layer" value="oBas">Ore · basin</label><label><input type="radio" name="layer" value="oPla">Ore · placer</label>
 				</fieldset></div>
 			<canvas id="map" aria-label="Equirectangular map of moving plates; drag to pan">Canvas support is required.</canvas>
 			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU); drag to pan"></canvas>
+			<canvas id="map3d" width="2048" height="1024" hidden aria-label="3D planet view; drag to orbit, wheel to zoom"></canvas>
 			<div class="perf" id="perf"><div class="rows" id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report" title="Click to copy the performance report"><span>performance counter idle</span></div></div>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
@@ -33,6 +34,8 @@
 				<label>Relief range<input id="relief" type="range" min="2" max="20" step="0.5" value="6.5"><span class="value" id="relief-value">6.5 km</span></label>
 				<label title="Level: the slider sets the display sea level directly">Sea level<input id="sea" type="range" min="-10" max="5" step="0.1" value="0"><span class="value" id="sea-value">+0.0 km</span></label>
 				<label title="Volume: conserved water as a multiple of the sea-0 volume; the level is solved">Water ×<input id="sea-vol" type="range" min="0" max="4" step="0.05" value="1"><span class="value" id="sea-vol-value">1.00×</span></label>
+				<label title="3D: vertical exaggeration of the relief">Displacement ×<input id="disp" type="range" min="1" max="40" step="0.5" value="10"><span class="value" id="disp-value">10.0×</span></label>
+				<label title="3D: icosphere subdivision; the mesh is level-independent">3D detail<select id="k3d"><option value="6">k6 · 41k vertices</option><option value="7">k7 · 164k</option><option value="8" selected>k8 · 655k</option><option value="9">k9 · 2.6M</option></select></label>
 				<button id="save">Save world</button><button id="deposits">Deposits JSON</button>
 			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
@@ -76,6 +79,7 @@
 	<script src="js/gpu/wgsl-diag.js"></script>
 	<script src="js/gpu/sim-gpu.js"></script>
 	<script src="js/gpu/render-gpu.js"></script>
+	<script src="js/render3d.js"></script>
 	<script src="js/render.js"></script>
 	<script src="js/ui.js"></script>
 </body>

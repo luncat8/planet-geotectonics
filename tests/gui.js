@@ -211,11 +211,35 @@ FakeReader.prototype.readAsArrayBuffer = function (file) {
 	setTimeout(function () { self.result = file.bytes.buffer; if (self.onload) self.onload(); }, 0);
 };
 
+// The 3D session (0.5.0), recorded the same way: what it was inited with, what the frame
+// loop asked of it, and what it released. The constants the page's orbit handler reads
+// ride along, so a drag test exercises the real clamps.
+const fakeR3ds = [];
+function FakeRender3D(canvas) {
+	this.canvas = canvas; this.exag = 10; this.target = { fake: true };
+	this.inits = []; this.orbits = []; this.appends = 0; this.redraws = 0;
+	this.presents = 0; this.releases = 0; this.tsText = '';
+	fakeR3ds.push(this);
+}
+FakeRender3D.PITCH_MAX = 89.5 * Math.PI / 180;
+FakeRender3D.DIST_MIN = 1.5; FakeRender3D.DIST_MAX = 10;
+FakeRender3D.prototype.init = function (opts) {
+	this.opts = opts; this.inits.push(opts);
+	this.vCount = 10 * Math.pow(4, opts.k) + 2;
+	return this;
+};
+FakeRender3D.prototype.setOrbit = function (yaw, pitch, dist) { this.orbits.push([yaw, pitch, dist]); };
+FakeRender3D.prototype.append = function () { this.appends++; };
+FakeRender3D.prototype.redraw = function () { this.redraws++; };
+FakeRender3D.prototype.presentWhenDrained = function () { this.presents++; };
+FakeRender3D.prototype.release = function () { this.releases++; this.target = null; };
+FakeRender3D.prototype.tsLine = function () { return this.tsText; };
+
 function loadPage(search) {
 	const api = makeDom(indexHtml);
 	api.location.search = search || '';
 	const gpu = fakeGpu();
-	installGlobals(api, { GpuSim: gpu, GpuRenderer: FakeRenderer, FileReader: FakeReader });
+	installGlobals(api, { GpuSim: gpu, GpuRenderer: FakeRenderer, Render3D: FakeRender3D, FileReader: FakeReader });
 	for (const file of MODULES) {
 		vm.runInThisContext(read('js/' + file + '.js'), { filename: 'js/' + file + '.js' });
 	}
@@ -941,6 +965,105 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	}
 	assert.ok(maxErr < 3e-6, 'atan2Fast max error ' + maxErr + ' rad');
 
+	// --- the 3D view (0.5.0): default-off, no-adapter path, the on/off canvas swap --------
+	{
+		// Default off: no session, no device, and the map slot is the 2D map's.
+		const offPage = loadPage('');
+		assert.equal(offPage.el('map3d').hidden, true, 'the 3D canvas ships hidden');
+		assert.equal(fakeR3ds.length, 0, 'no 3D session exists at boot');
+		assert.equal(offPage.gpu.inits.length, 0, 'and no device was touched');
+		assert.equal(offPage.el('disp-value').textContent, '10.0×', 'the displacement readout paints its default');
+		assert.equal(offPage.el('k3d').value, '8', 'the detail select ships on k8');
+
+		// ?v3d=1 with no WebGPU at all: the toggle lands disabled with the reason.
+		const dryPage = loadPage('?v3d=1&disp=12&k3d=5');
+		assert.equal(dryPage.el('v3d').disabled, true, 'no WebGPU: the toggle is disabled');
+		assert.match(dryPage.el('probe').textContent, /WebGPU is not available/, 'and the probe says why');
+		assert.equal(dryPage.el('disp').value, '12', '?disp= pre-fills the slider');
+		assert.equal(dryPage.el('k3d').value, '8', 'an unoffered ?k3d= is ignored, the select stays on its default');
+		assert.equal(fakeR3ds.length, 0, 'and no session was attempted');
+
+		// On: the CPU engine path boots a render-only device and swaps the canvases.
+		const page3 = loadPage('?k3d=7');
+		page3.api.navigator.gpu = {
+			requestAdapter: () => Promise.resolve({ requestDevice: () => Promise.resolve({ of: 'render-only' }) })
+		};
+		assert.equal(page3.el('k3d').value, '7', '?k3d=7 pre-fills the offered detail');
+		const v3 = page3.el('v3d');
+		v3.checked = true;
+		v3.dispatch('change');
+		await page3.tick();
+		const r3 = fakeR3ds[fakeR3ds.length - 1];
+		assert.ok(r3, 'the toggle boots a 3D session');
+		assert.equal(r3.opts.zSource, 'cellZ', 'the CPU engine session uploads z per frame');
+		assert.equal(r3.opts.k, 7, 'the session builds the prefilled detail');
+		assert.equal(page3.el('map3d').hidden, false, 'the 3D canvas takes the map slot');
+		assert.equal(page3.el('map').hidden && page3.el('mapgpu').hidden, true, 'the 2D canvases hide');
+		assert.ok(page3.el('layer').classes.includes('off'), 'the layer buttons grey out (the 3D is the look)');
+		assert.match(page3.el('probe').textContent, /3D on · k7 · 163,842 vertices/, 'the probe names the session');
+		const pumpsBefore = r3.redraws;
+		page3.pump(4, 9000);
+		assert.ok(r3.redraws > pumpsBefore, 'a dirty frame redraws the 3D');
+		const idleBefore = r3.redraws;
+		page3.pump(4, 9100);
+		assert.equal(r3.redraws, idleBefore, 'an idle paused frame redraws nothing');
+
+		// The orbit: a drag turns the camera (uniform bytes), never the 2D view quaternion.
+		const m3d = page3.el('map3d');
+		m3d.dispatch('pointerdown', { pointerId: 1, clientX: 100, clientY: 100, button: 0 });
+		m3d.dispatch('pointermove', { pointerId: 1, clientX: 130, clientY: 90 });
+		assert.equal(r3.orbits.length, 1, 'the drag wrote one orbit');
+		assert.ok(r3.orbits[0][0] < 0.65, 'dragging right yaws the camera');
+		const gateBefore = page3.gpu.plays.length;
+		page3.pump(2, 9200);
+		assert.ok(r3.redraws > idleBefore, 'the orbit dirties the frame');
+		assert.equal(page3.gpu.plays.length, gateBefore, 'and none of this is a sim-gate event (paused page)');
+
+		// The wheel zoom clamps to the session's distance window.
+		m3d.dispatch('wheel', { deltaY: -1200, preventDefault: () => {} });
+		assert.ok(r3.orbits[r3.orbits.length - 1][2] < r3.orbits[0][2], 'wheel in, closer');
+		for (let i = 0; i < 30; i++) m3d.dispatch('wheel', { deltaY: -1200, preventDefault: () => {} });
+		assert.equal(r3.orbits[r3.orbits.length - 1][2], 1.5, 'the distance clamps at the inner stop');
+
+		// The knobs are live: displacement rides the session, the header names the non-defaults.
+		page3.el('disp').value = '12';
+		page3.el('disp').dispatch('input');
+		assert.equal(r3.exag, 12, 'the displacement slider reaches the session live');
+		page3.pump(2, 9300);
+		const report3 = page3.copy();
+		await page3.tick();
+		assert.ok(worldLine(report3).includes(' · 3d on · disp 12x · k7'), 'the header names the 3D view and knobs: '
+			+ worldLine(report3));
+
+		// The strip's 3D row carries the session's own line, in its reserved slot.
+		r3.tsText = '3d gather 0.31 · land 1.20 · water 0.55 · rim 0.08 ms';
+		page3.pump(40, 9400);
+		assert.equal(page3.strip.children.length, page3.Perf.SLOTS, 'the strip grew to the V3D slot');
+		assert.equal(page3.strip.children[page3.Perf.SLOT.V3D].textContent, r3.tsText, 'the 3D row is the session line');
+		r3.tsText = '';
+		page3.pump(40, 10100);
+		assert.equal(page3.strip.children[page3.Perf.SLOT.V3D].textContent, '', 'and empty again when silent');
+
+		// A detail change rebuilds the session, never the world.
+		const rasters = page3.gpu.rasters;
+		const states = r3.opts;
+		page3.el('k3d').value = '9';
+		page3.el('k3d').dispatch('change');
+		await page3.tick();
+		assert.equal(fakeR3ds.length, 2, 'the detail change built exactly one new session');
+		assert.ok(r3.releases >= 1, 'the old session was released, not abandoned');
+		assert.equal(page3.gpu.rasters, rasters, 'no world rebuild happened under it');
+		assert.equal(fakeR3ds[1].opts.k, 9, 'the new session is the k9 one');
+
+		// Off again: everything swaps back and the session is released.
+		v3.checked = false;
+		v3.dispatch('change');
+		assert.equal(page3.el('map3d').hidden, true, 'the 3D canvas hides');
+		assert.equal(page3.el('map').hidden, false, 'the 2D map is back');
+		assert.ok(!page3.el('layer').classes.includes('off'), 'the layer buttons are live again');
+		assert.equal(fakeR3ds[1].releases, 1, 'the session released its allocations');
+	}
+
 	console.log('PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
 		+ page.Perf.SLOTS + ' slots in place and is the copy control, the bench can measure every setting the page offers,'
@@ -953,5 +1076,9 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' map without a rebuild, an engine switch mid-run pulls the full mirror and keeps playing,'
 		+ ' and the sea controls are two sliders enabled by last touch - the level drag recolours,'
 		+ ' the volume drag solves the level, the pre-fill and the header name the active control,'
-		+ ' and the probe follows Params.sea');
+		+ ' and the probe follows Params.sea; the 3D view ships off (no session, no device), the'
+		+ ' no-adapter path disables the toggle with the reason, ?v3d/?disp/?k3d pre-fill, the'
+		+ ' on path swaps the canvases and greys the layers, the orbit and wheel move only the'
+		+ ' camera, the knobs apply live, the header and the strip\'s V3D slot name the session,'
+		+ ' a detail change rebuilds the session without a world rebuild, and off restores the map');
 })().catch((error) => { console.error(error); process.exit(1); });

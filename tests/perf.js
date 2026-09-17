@@ -32,7 +32,7 @@ console.log((fps >= TARGET ? 'PASS' : 'NOTE') + ' perf: ' + fps.toFixed(1) + ' f
 // slot that shifts position is the reflow bug the reservation fixes.
 Perf.reset();
 assert.equal(Perf.rows.length, Perf.SLOTS, 'reset leaves one empty row per slot');
-assert.deepEqual(Perf.SLOT, { TEXT: 0, DIST: 1, EVENTS: 2, CKPT: 3, KERNELS: 4 }, 'slot order');
+assert.deepEqual(Perf.SLOT, { TEXT: 0, DIST: 1, EVENTS: 2, CKPT: 3, KERNELS: 4, V3D: 5 }, 'slot order');
 let now = 0;
 for (let i = 0; i < 40; i++) { now += 5.6; Perf.frame(now, 1, 0.1); }
 Perf.event(31.7, 26.2, 2.0, 0.3, 25.5);
@@ -49,7 +49,10 @@ assert.ok(/^p95 \d+\.\d ms · max \d+\.\d ms$/.test(Perf.rows[Perf.SLOT.DIST]),
 assert.equal(Perf.rows[Perf.SLOT.EVENTS], 'events 1 (31.7 ms = dl 26.2 [wait 25.5] + cyc 2.0 + up 0.3)');
 assert.equal(Perf.rows[Perf.SLOT.CKPT], 'ckpt 4.2 ms');
 assert.equal(Perf.rows[Perf.SLOT.KERNELS], 'contact 2.00');
-assert.equal(Perf.report(), Perf.rows.join('\n'), 'report() is the rows, newline joined');
+// report() drops the empty reserved slots (the V3D row is '' with the view off), so the
+// copy is the non-empty rows joined - a paste never carries a blank line for a quiet slot.
+assert.equal(Perf.report(), Perf.rows.filter(function (r) { return r; }).join('\n'),
+	'report() is the non-empty rows, newline joined');
 
 // A window with no transfer keeps the slots where they are: the kernel row must not slide up
 // into the events slot, which is what moved the strip's contents (and its height) at 2 Hz.
@@ -58,6 +61,15 @@ assert.equal(Perf.rows[Perf.SLOT.EVENTS], '', 'no event this window: the slot is
 assert.equal(Perf.rows[Perf.SLOT.CKPT], '', 'no checkpoint this window');
 assert.equal(Perf.rows[Perf.SLOT.KERNELS], '', 'no kernel over the floor this window');
 assert.equal(Perf.rows.length, Perf.SLOTS, 'still one row per slot');
+// The 3D row is the page's own line (0.5.0): '' until the view is on, then whatever
+// its timestamp ring reported on this tick.
+assert.equal(Perf.rows[Perf.SLOT.V3D], '', 'the 3D slot ships empty');
+Perf.v3dText = '3d gather 0.31 · land 1.20 · water 0.55 · rim 0.08 ms';
+Perf.update(now + 500);
+assert.equal(Perf.rows[Perf.SLOT.V3D], Perf.v3dText, 'the page fills the 3D slot on the tick');
+Perf.v3dText = '';
+Perf.update(now + 500);
+assert.equal(Perf.rows[Perf.SLOT.V3D], '', 'and the row empties again with the view off');
 assert.equal(Perf.report(), Perf.rows[Perf.SLOT.TEXT] + '\n' + Perf.rows[Perf.SLOT.DIST],
 	'report() drops the reserved-but-empty slots: ' + JSON.stringify(Perf.report()));
 Perf.reset();

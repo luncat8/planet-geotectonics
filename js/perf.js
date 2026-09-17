@@ -23,9 +23,12 @@ var Perf = {
 	// disappears - an event window, a checkpoint, the CPU engine's two empty transfer slots -
 	// neither shifts the rows below it nor changes the strip's height, and style.css reserves
 	// one line track per slot. Slot positions are the contract; report() drops the empties.
-	SLOT: { TEXT: 0, DIST: 1, EVENTS: 2, CKPT: 3, KERNELS: 4 },
-	SLOTS: 5,
+	SLOT: { TEXT: 0, DIST: 1, EVENTS: 2, CKPT: 3, KERNELS: 4, V3D: 5 },
+	SLOTS: 6,
 	rows: [],
+	// The 3D view's pass times (0.5.0), a line the page builds on this tick from its own
+	// timestamp ring; '' when the 3D is off or the adapter lacks timestamp-query.
+	v3dText: '',
 	gaps: new Float64Array(512), gapT: new Float64Array(512), gapI: 0, gapSort: new Float64Array(512),
 	// Event round trip wall times, split into the three phases that make it up
 	// (download / cycle / upload) so a hitch is attributable, plus the checkpoint push.
@@ -128,6 +131,7 @@ var Perf = {
 		Perf.rows[S.EVENTS] = events;
 		Perf.rows[S.CKPT] = ckpt;
 		Perf.rows[S.KERNELS] = line;
+		Perf.rows[S.V3D] = Perf.v3dText;
 	},
 	// The block the strip puts on the clipboard: one line per part that has
 	// something to say, so a paste into a log or a chat keeps the parts separable instead of

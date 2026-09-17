@@ -41,7 +41,7 @@ const WGSL_BUILTINS = ('abs acos all any asarray asin asbool asf16 asf32 asi32 a
 	'atomicOr atomicStore atomicSub atomicXor bitcast bool f16 f32 i32 u32 mat2x2 mat2x3 mat2x4 mat3x2 mat3x3 ' +
 	'mat3x4 mat4x2 mat4x3 mat4x4 ptr textureSample textureSampleLevel textureLoad textureDimensions ' +
 	'textureNumLayers textureNumLevels textureNumSamples vec2 vec3 vec4 workgroupBarrier storageBarrier ' +
-	'dpdx dpdy fwidth ' +
+	'dpdx dpdy fwidth textureStore textureSampleLevel ' +
 	'for if return while switch case default let var const fn struct group binding builtin location workgroup_size ' +
 	'compute fragment vertex input output').split(/\s+/);
 for (const name in MODULES) {
@@ -76,6 +76,12 @@ assert.ok(rendererSrc.includes('max(0.0, 1.0 + z / u.zRange)'), 'the deep-water 
 assert.ok(rendererSrc.includes('min(1.0, z / u.zRange)'), 'and so does the land cap');
 assert.ok(!/\b6500\b/.test(rendererSrc), 'no baked ramp is left in the renderer');
 sources.push({ name: 'rendererBlit', src: Renderer.BLIT });
+// The 3D view (0.5.0): the gather in both z-source variants (the one engine difference)
+// and the draw module, built through the same code the renderer init runs.
+const Render3D = require('../js/render3d.js');
+sources.push({ name: 'render3dGatherCellF', src: Render3D.gatherCode('cellF', Render3D.TW, Render3D.TH, 1024, 512) });
+sources.push({ name: 'render3dGatherCellZ', src: Render3D.gatherCode('cellZ', Render3D.TW, Render3D.TH, 1024, 512) });
+sources.push({ name: 'render3d', src: Render3D.renderCode(2048, 1024) });
 
 for (const { name, src } of sources) {
 	// Strip comments so words/braces inside them count neither as definitions nor references.
@@ -155,4 +161,32 @@ for (const shape of ['t < 6u', 't < 6u + PLATECAP * 3u', 't < 6u + PLATECAP * 3u
 	't < 6u + PLATECAP * 3u + COLCAP + PLATECAP', '7u * COLCAP']) {
 	assert.ok(zeroSrc.includes(shape), 'zeroFrame still branches on ' + shape);
 }
+// The 3D module's own contracts, pinned against the generated sources: the engine
+// difference is exactly the z read, the constants are baked where they are constants and
+// nowhere else (exag, sea and the relief ramp ride the uniform), and the fragment ramps
+// are the same four-line formula the 2D renderers were pinned to.
+const gatherF = sources.find((s) => s.name === 'render3dGatherCellF').src;
+const gatherZ = sources.find((s) => s.name === 'render3dGatherCellZ').src;
+assert.ok(gatherF.includes('CELLF[c * 8u].w') && !gatherF.includes('ZSRC[c]'),
+	'the cellF gather reads the sim z at its vec4 slot');
+assert.ok(gatherZ.includes('return ZSRC[c];') && !gatherZ.includes('CELLF'),
+	'the cellZ gather reads the plain f32 upload, and nothing else differs structurally');
+for (const g of [gatherF, gatherZ]) {
+	assert.ok(g.includes('const GAP_Z = -1e9;') && g.includes('if (z != z) { z = GAP_Z; }'),
+		'a NaN gap lands on the marker, not a hole');
+	assert.ok(g.includes('@workgroup_size(8, 8)'), 'one thread per texel, 8x8 groups');
+}
+const r3dSrc = sources.find((s) => s.name === 'render3d').src;
+assert.ok(r3dSrc.includes('const R_INV'), 'the radius inverse is baked from Params');
+assert.ok(r3dSrc.includes('const Z_FLOOR') && r3dSrc.includes('max(heightAt(uv), Z_FLOOR)'),
+	'the displacement floor clamps below at the gap-pit bound');
+assert.ok(r3dSrc.includes('1.0 + Z_RIM * u.knob.x * R_INV'),
+	'the rim shell scales with exag, so no peak can pierce it');
+assert.ok(!/\b6500\b/.test(r3dSrc) && r3dSrc.includes('u.knob.z'),
+	'no baked relief range: the 3D ramp rides the uniform like the 2D one');
+assert.ok(r3dSrc.includes('15.0 + 23.0 * s') && r3dSrc.includes('100.0 + 145.0 * hi'),
+	'the 3D ramp is the 2D relief ramp, sea-relative, verbatim');
+assert.ok(!/textureSample\b/.test(r3dSrc),
+	'r32float is unfilterable: every height read is a textureLoad tap, no sampler in the group');
+
 console.log('PASS wgsl-struct: ' + checks + ' kernel sources balanced, entry-pointed, constants defined');

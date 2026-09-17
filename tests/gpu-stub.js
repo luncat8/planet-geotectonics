@@ -51,22 +51,39 @@ function makeDevice() {
 	var dynamicOffsets = [];
 	var bindGroups = [];
 	var bindGroupLayouts = [];
-	return {
+	// The render side (0.5.0's render3d, the blit rigs): descriptors recorded in call
+	// order, no execution. computePasses/renderPasses carry their descriptors so a test
+	// can pin what ran in which encoder against what.
+	var computePasses = [];
+	var renderPasses = [];
+	var device = {
 		counts: function () { return { writes: writes, submits: submits }; },
 		dynamicOffsets: dynamicOffsets,
 		bindGroups: bindGroups,
 		bindGroupLayouts: bindGroupLayouts,
+		computePasses: computePasses,
+		renderPasses: renderPasses,
 		limits: { maxStorageBuffersPerShaderStage: 16, minStorageBufferOffsetAlignment: 32 },
 		features: new Set(),
 		lost: new Promise(function () {}),
 		queue: queue,
 		createBuffer: function (d) { return new FakeBuffer(d.size, d.usage); },
+		createTexture: function (d) {
+			var t = { size: d.size.slice(), format: d.format, usage: d.usage, destroyed: false,
+				createView: function () { return { of: t }; } };
+			t.destroy = function () { t.destroyed = true; };
+			return t;
+		},
+		createSampler: function () { return { of: 'sampler' }; },
 		createQuerySet: function () { throw new Error('stub: no timestamp-query'); },
 		createShaderModule: function () { return { getCompilationInfo: function () { return Promise.resolve({ messages: [] }); } }; },
 		createBindGroupLayout: function (d) { bindGroupLayouts.push(d); return d || {}; },
 		createBindGroup: function (d) { bindGroups.push(d); return d || {}; },
 		createPipelineLayout: function () { return {}; },
 		createComputePipeline: function () { return {}; },
+		// layout: 'auto' means the pipeline is the layout's source, so it must answer
+		// getBindGroupLayout like the real one does.
+		createRenderPipeline: function (d) { return { descriptor: d, getBindGroupLayout: function () { return {}; } }; },
 		createCommandEncoder: function () {
 			// Strict where Dawn is strict: a buffer copied onto itself is rejected and
 			// the WHOLE encoder is invalidated (the submit then runs nothing and
@@ -83,13 +100,25 @@ function makeDevice() {
 					}
 					new Uint8Array(dst.bytes).set(new Uint8Array(src.bytes, srcOff, size), dstOff);
 				},
+				resolveQuerySet: function () {},
+				copyTextureToBuffer: function (src, dst, size) {
+					// Recorded so the readback rigs can pin what was copied from where.
+					this.copies = (this.copies || 0) + 1;
+				},
 				// Dispatches are accepted and dropped: the stub runs the scheduling, not WGSL.
-				beginComputePass: function () {
+				beginComputePass: function (d) {
+					computePasses.push(d || {});
 					return { setPipeline: function () {},
 						setBindGroup: function (slot, group, offsets) {
 							if (offsets && offsets.length) Array.prototype.push.apply(dynamicOffsets, offsets);
 						},
 						dispatchWorkgroups: function () {}, end: function () {} };
+				},
+				beginRenderPass: function (d) {
+					renderPasses.push(d || {});
+					return { setPipeline: function () {}, setBindGroup: function () {},
+						setIndexBuffer: function () {}, setVertexBuffer: function () {},
+						draw: function () {}, drawIndexed: function () {}, end: function () {} };
 				},
 				finish: function () {
 					if (invalid) throw new Error('stub: encoder invalid (' + invalid +
@@ -99,6 +128,7 @@ function makeDevice() {
 			};
 		}
 	};
+	return device;
 }
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { makeDevice: makeDevice };

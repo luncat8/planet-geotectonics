@@ -77,5 +77,7 @@ h2 { color: #d4dfdf; text-transform: uppercase; font-weight: 500; }
 .view-modes legend { float: left; padding: 6px 8px 0 0; color: #d4dfdf; }
 .view-modes label { display: inline-flex; flex-direction: row; align-items: center; gap: 4px; padding: 4px 0; cursor: pointer; white-space: nowrap; text-transform: none; letter-spacing: 0; }
 .view-modes input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: #9bdfba; }
+/* The 3D view greyed the layer buttons out (ui.js): the 3D is the elevation-and-water look. */
+.view-modes.off label:not(:first-child) { opacity: .45; }
 .boundary-key { padding: 5px 0; white-space: nowrap; color: #b7c5ca; }
 @media (max-width: 800px) { .map-top { grid-template-columns: 1fr; } #grid-info { padding: 0 0 4px; } .boundary-key { white-space: normal; } }

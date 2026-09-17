@@ -65,6 +65,12 @@ Open `index.html` directly in a browser.
   (see `0.1.5-final-design.md` §7.3).
 - CPU release tooling: a reproducible one-factor calibration sweep at both calibration frame steps,
   an optional 4.5 Gyr release test, and a browser run-to-time control (4500 Myr by default).
+- 3D planet view (0.5.0): the elevation-and-water look on a displaced icosphere - terrain
+  deforms the silhouette - with a translucent sea shell at the display level, an orbit/zoom
+  camera and a Displacement x slider, drawn from the same segment-final heights as the 2D map
+  on both engines (a render-only WebGPU device when the sim is on the CPU). One height texture
+  per frame from a gather pass; the mesh never rebuilds. Off by default;
+  `?v3d=1&disp=12&k3d=8` prefills it.
 - WebGPU engine (Phase H): the same kernel graph runs on the device (engine select in the
   controls). The map renders straight from the GPU buffers in a fragment shader, so playing
   never reads the state back; the CPU mirror is only pulled in for plate events (one cycle

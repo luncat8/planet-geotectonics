@@ -19,6 +19,9 @@
 	var tmValue = document.getElementById('tm-value'), frictionValue = document.getElementById('friction-value');
 	var eroValue = document.getElementById('ero-value'), reliefValue = document.getElementById('relief-value');
 	var seaValue = document.getElementById('sea-value'), seaVolValue = document.getElementById('sea-vol-value');
+	var v3dInput = document.getElementById('v3d'), map3d = document.getElementById('map3d');
+	var dispInput = document.getElementById('disp'), k3dInput = document.getElementById('k3d');
+	var dispValue = document.getElementById('disp-value');
 	// Sea controls (0.3.5): two sliders, one active - the last one touched takes the level
 	// and greys the other. The level slider writes Params.sea directly (a recolour on both
 	// engines); the volume slider names a conserved quantity (x of the sea-0 volume V0) and
@@ -110,6 +113,115 @@
 	function armSeaVolume() { waterActive = 'volume'; waterArmed = true; paintAdjust(); }
 	seaInput.addEventListener('input', applySeaLevel);
 	seaVolInput.addEventListener('input', armSeaVolume);
+
+	// --- 3D view (0.5.0) -------------------------------------------------------------------
+	// A WebGPU render of the same world the map shows: an icosphere displaced by the
+	// segment-final heights, a sea shell at Params.sea, one light. The session borrows
+	// the GPU engine's device (the gather binds cellF) or boots a render-only one and
+	// takes state.z per frame (cellZ upload); either way the sim is untouched. Orbit and
+	// zoom are uniform writes, so unlike the 2D view they never defer a sim step.
+	var v3d = { on: false, busy: false, r3d: null }, v3dToken = 0;
+	var v3dDisp = 10, v3dK = 8, v3dYaw = 0.65, v3dPitch = 0.42, v3dDist = 3;
+	var V3D_KS = [6, 7, 8, 9];
+	function paintV3d() { dispValue.textContent = v3dDisp.toFixed(1) + '×'; }
+	function applyDisp() {
+		v3dDisp = +dispInput.value;
+		if (v3d.r3d) v3d.r3d.exag = v3dDisp;
+		paintV3d();
+		if (v3d.on) dirty = true;
+	}
+	function applyK3d() {
+		var k = +k3dInput.value;
+		// An unoffered k (a stray ?k3d= or a cleared select) lands back on the default.
+		if (V3D_KS.indexOf(k) < 0) { k3dInput.value = '8'; k = 8; }
+		v3dK = k;
+		if (v3d.on) { releaseV3d(); setV3d(true); }   // a one-time mesh rebuild, not a world rebuild
+	}
+	function releaseV3d() {
+		if (v3d.r3d) { v3d.r3d.release(); v3d.r3d = null; }
+		v3d.on = false;
+		map3d.hidden = true;
+		// The engine's own canvas takes the map slot back (bootEngine keeps it that way).
+		(gpu.on && gpu.ready ? gpuCanvas : canvas).hidden = false;
+		layerGroup.classList.remove('off');
+	}
+	// The boot itself, minus the user-path gates: the engine (and its device) is final
+	// when this runs. `token` voids a boot that a toggle-off or a re-init overtook.
+	function bootV3dNow(done) {
+		var token = ++v3dToken;
+		v3d.busy = true;
+		var r3d = new Render3D(map3d);
+		var gpuMode = gpu.on && gpu.ready;
+		var opts = gpuMode
+			? { device: GpuSim.S.device, k: v3dK, look: GpuSim.S.buf.lookup, V: grid.V, zSource: 'cellF', cellF: GpuSim.S.buf.cellF, lw: grid.lookupW, lh: grid.lookupH }
+			: { device: null, k: v3dK, look: grid.lookup, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH };
+		var finish = function (error) {
+			if (token !== v3dToken) { if (!error && r3d.target) r3d.release(); return; }
+			v3d.busy = false;
+			if (error) {
+				v3dInput.checked = false;
+				probe.textContent = '3D view failed (' + error.message + '); the 2D map stays.';
+				dirty = true;
+			} else {
+				r3d.exag = v3dDisp;
+				v3d.r3d = r3d; v3d.on = true;
+				map3d.hidden = false; canvas.hidden = true; gpuCanvas.hidden = true;
+				layerGroup.classList.add('off');
+				probe.textContent = '3D on · k' + v3dK + ' · ' + r3d.vCount.toLocaleString() + ' vertices · drag orbits, wheel zooms.';
+			}
+			if (token === v3dToken) done(error);
+		};
+		if (opts.device) {
+			try { r3d.init(opts); } catch (error) { finish(error); return; }
+			finish(null);
+			return;
+		}
+		// CPU engine: the render-only device the sim never needed. Default limits hold
+		// (the fattest mesh is 94 MB of buffers); no feature asks beyond the base set.
+		navigator.gpu.requestAdapter().then(function (adapter) {
+			if (!adapter) { finish(new Error('no WebGPU adapter')); return; }
+			adapter.requestDevice().then(function (device) {
+				if (token !== v3dToken) { finish(new Error('superseded')); return; }
+				opts.device = device;
+				try { r3d.init(opts); } catch (error) { finish(error); return; }
+				finish(null);
+			}, finish);
+		}, finish);
+	}
+	function setV3d(on) {
+		if (v3d.busy) { v3dInput.checked = v3d.on; return; }
+		if (!on) { releaseV3d(); dirty = true; return; }
+		if (!navigator.gpu) {
+			v3dInput.checked = false; v3dInput.disabled = true;
+			probe.textContent = 'WebGPU is not available in this browser; the 3D view needs it.';
+			return;
+		}
+		if (switching) {
+			v3dInput.checked = false;
+			probe.textContent = 'Wait for the engine switch, then try the 3D view again.';
+			return;
+		}
+		// An in-flight GPU transfer may be sizing buffers this boot would borrow.
+		whenGpuIdle(function () { bootV3dNow(function () { dirty = true; }); });
+	}
+	// Called from bootEngine's completion: the engine settled on some device, so a 3D
+	// that was on (or was prefilled on) re-inits against the new world. Release first -
+	// a level switch resizes cellZ and a GPU switch swaps the very device under the
+	// gather's bind group (the 0.3.4 leak lesson).
+	function rebootV3d() {
+		var want = v3dInput.checked || v3d.on;
+		releaseV3d();
+		if (!want) return;
+		if (!navigator.gpu) {
+			v3dInput.checked = false; v3dInput.disabled = true;
+			probe.textContent = 'WebGPU is not available in this browser; the 3D view needs it.';
+			return;
+		}
+		bootV3dNow(function () { dirty = true; });
+	}
+	v3dInput.addEventListener('change', function () { setV3d(v3dInput.checked); });
+	dispInput.addEventListener('input', applyDisp);
+	k3dInput.addEventListener('change', applyK3d);
 
 	function syncAdjust() {
 		coolingInput.checked = state.cooling === 1;
@@ -235,6 +347,14 @@
 	prefilled('fric', frictionInput);
 	prefilled('ero', eroInput);
 	prefilled('relief', reliefInput);
+	prefilled('disp', dispInput);
+	// The detail select takes only the k values it offers (an unoffered ?k3d= is ignored,
+	// as always) - the generic prefill would leave a refused select on its first option.
+	var k3dAsked = +query.get('k3d');
+	if (V3D_KS.indexOf(k3dAsked) >= 0) k3dInput.value = String(k3dAsked);
+	v3dDisp = +dispInput.value; v3dK = +k3dInput.value;
+	if (query.get('v3d') === '1') v3dInput.checked = true;
+	paintV3d();
 	// ?seavol= makes the volume slider the active control; ?sea= keeps the level one, and
 	// wins the tie when both are given. Either first paint is the same coast: the defaults
 	// agree (level 0 = 1.00x).
@@ -348,7 +468,7 @@
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
 	// and at the event cadence inside GpuSim.play, so no per-frame readback happens.
 	function bootEngine(done) {
-		var doneSlow = function () { paintSlow(); done(); };
+		var doneSlow = function () { paintSlow(); rebootV3d(); done(); };
 		if (engineInput.value === 'gpu') {
 			if (!navigator.gpu) {
 				engineInput.value = 'cpu';
@@ -437,6 +557,7 @@
 				.then(function () {
 					return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
 						if (!(gpu.on && gpu.ready)) return;
+						if (v3d.on) { v3d.r3d.redraw(); v3d.r3d.presentWhenDrained(); return; }
 						gpuRenderer.redraw(layerValue());
 						return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
 							if (gpu.on && gpu.ready) gpuRenderer.present();
@@ -679,6 +800,44 @@
 	}
 	bindPan(canvas);
 	bindPan(gpuCanvas);
+	// The 3D orbit: the same 4 px dead zone as the 2D drag, but yaw/pitch on the camera
+	// instead of the surface quaternion, and deliberately no view-gate bump - an orbit is
+	// a uniform write, so the sim never defers for it on either engine.
+	var V3D_TURN = 0.005;
+	var orbit = { active: false, id: null, lastX: 0, lastY: 0, moved: false };
+	map3d.addEventListener('pointerdown', function (event) {
+		if (event.button !== undefined && event.button !== 0) return;
+		orbit.active = true; orbit.id = event.pointerId;
+		orbit.lastX = event.clientX; orbit.lastY = event.clientY; orbit.moved = false;
+		if (map3d.setPointerCapture && event.pointerId !== undefined) map3d.setPointerCapture(event.pointerId);
+		if (event.preventDefault) event.preventDefault();
+	});
+	map3d.addEventListener('pointermove', function (event) {
+		if (!orbit.active || (event.pointerId !== undefined && event.pointerId !== orbit.id)) return;
+		if (!orbit.moved && Math.abs(event.clientX - orbit.lastX) < DRAG_PX && Math.abs(event.clientY - orbit.lastY) < DRAG_PX) return;
+		v3dYaw -= (event.clientX - orbit.lastX) * V3D_TURN;
+		v3dPitch = Math.max(-Render3D.PITCH_MAX, Math.min(Render3D.PITCH_MAX, v3dPitch + (event.clientY - orbit.lastY) * V3D_TURN));
+		orbit.lastX = event.clientX; orbit.lastY = event.clientY;
+		orbit.moved = true;
+		if (v3d.r3d) v3d.r3d.setOrbit(v3dYaw, v3dPitch, v3dDist);
+		if (v3d.on) dirty = true;
+		if (event.preventDefault) event.preventDefault();
+	});
+	function endOrbit(event) {
+		if (!orbit.active || (event && event.pointerId !== undefined && event.pointerId !== orbit.id)) return;
+		orbit.active = false; orbit.id = null; orbit.moved = false;
+	}
+	map3d.addEventListener('pointerup', endOrbit);
+	map3d.addEventListener('pointercancel', endOrbit);
+	map3d.addEventListener('wheel', function (event) {
+		if (!v3d.on) return;
+		if (event.preventDefault) event.preventDefault();
+		v3dDist *= event.deltaY > 0 ? 1.12 : 1 / 1.12;
+		if (v3dDist < Render3D.DIST_MIN) v3dDist = Render3D.DIST_MIN;
+		if (v3dDist > Render3D.DIST_MAX) v3dDist = Render3D.DIST_MAX;
+		if (v3d.r3d) v3d.r3d.setOrbit(v3dYaw, v3dPitch, v3dDist);
+		dirty = true;
+	});
 	// The perf strip is one row per part of the report (Perf.rows), plus the kernel line:
 	// on the GPU engine that is the device's own timestamp table, on the CPU engine the
 	// per-kernel JS laps Perf already folded in. Rows are rebuilt at 2 Hz, never per frame.
@@ -708,11 +867,19 @@
 		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
 		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
 		var viewGate = viewGateReport(), adjust = adjustReport();
+		// The 3D is a view setting, so it names itself only when it differs from the
+		// default (off); its knobs follow the adj line's convention.
+		var v3dLine = '';
+		if (v3d.on) {
+			v3dLine = ' · 3d on';
+			if (v3dDisp !== 10) v3dLine += ' · disp ' + v3dDisp + 'x';
+			if (v3dK !== 8) v3dLine += ' · k' + v3dK;
+		}
 		return rig
 			+ '\nengine ' + engine + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
-			+ ' · cadence ' + Params.eventCadence + ' Myr'
+			+ ' · cadence ' + Params.eventCadence + ' Myr' + v3dLine
 			+ '\n' + Perf.report(stripRows())
 			+ (viewGate ? '\n' + viewGate : '')
 			+ (adjust ? '\n' + adjust : '')
@@ -767,29 +934,36 @@
 						// K11 is on demand: the status line refreshes on the 150 ms tick,
 						// so ask for one diagnostic frame per tick instead of every frame.
 						if (now - lastUpdate > 150) GpuSim.wantDiag();
-						// The play encoder still carries the world draw (GpuRenderer.appendTo),
-						// which keeps the render path and the event-boundary semantics of
-						// GpuSim.play intact. The VISIBLE canvas is not touched here: once the
-						// segment has finished, redraw the latest buffers on their own tiny
-						// world pass and only then blit to the canvas. That order is what keeps
-						// L7 from staying black under continuous play - a present queued on the
-						// same drain as the next heavy segment lands behind that segment again.
-						var renderTail = function (enc) {
-							mergedThisFrame = true;
-							gpuRenderer.appendTo(enc, layerValue());
-						};
-						gpu.busy = true;
-						gpu.pending = GpuSim.play(state, dt, steps, viewLive, { render: renderTail })
-							.then(function (done) {
+					// The play encoder still carries the visible draw - the 2D world pass or,
+					// with the 3D view on, the 3D's gather + land/water/rim (0.5.0) - which
+					// keeps the render path and the event-boundary semantics of GpuSim.play
+					// intact. The VISIBLE canvas is not touched here: once the segment has
+					// finished, redraw the latest buffers on their own tiny pass and only
+					// then blit to the canvas. That order is what keeps L7 from staying
+					// black under continuous play - a present queued on the same drain as
+					// the next heavy segment lands behind that segment again.
+					var renderTail = function (enc) {
+						mergedThisFrame = true;
+						if (v3d.on) v3d.r3d.append(enc);
+						else gpuRenderer.appendTo(enc, layerValue());
+					};
+					gpu.busy = true;
+					gpu.pending = GpuSim.play(state, dt, steps, viewLive, { render: renderTail })
+						.then(function (done) {
+							return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
+								if (!(gpu.on && gpu.ready)) return done;
+								if (v3d.on) {
+									v3d.r3d.redraw();
+									v3d.r3d.presentWhenDrained();
+									return done;
+								}
+								gpuRenderer.redraw(layerValue());
 								return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
-									if (!(gpu.on && gpu.ready)) return done;
-									gpuRenderer.redraw(layerValue());
-									return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
-										if (gpu.on && gpu.ready) gpuRenderer.present();
-										return done;
-									});
+									if (gpu.on && gpu.ready) gpuRenderer.present();
+									return done;
 								});
-							}).then(function (done) {
+							});
+						}).then(function (done) {
 								gpu.busy = false; ran += done;
 								// The redraw above used the current buffers, layer and view, so the
 								// visible frame is current even if the user changed the view or layer
@@ -819,7 +993,18 @@
 	// triangle either way). On the GPU engine the canvas always shows the world texture,
 	// and the blit onto it rides a drained queue (presentWhenDrained) - never a pass
 	// inside the heavy segment encoder, which would present black on heavy settings.
-	if (gpu.on && gpu.ready) {
+	// The 3D view owns the frame when it is on: the same redraw + drained-blit shape, on
+	// the sim device (cellF gather) or its own (cellZ upload packed here); the orbit and
+	// the knobs only move bytes, and a CPU play frame redraws every rAF like the 2D.
+	if (v3d.on) {
+		if (mergedThisFrame) {
+			dirty = false; shownVersion = viewVersion;
+		} else if (dirty || viewMoved || (playing && !(gpu.on && gpu.ready))) {
+			v3d.r3d.redraw(state);
+			v3d.r3d.presentWhenDrained();
+			dirty = false; shownVersion = viewVersion;
+		}
+	} else if (gpu.on && gpu.ready) {
 		if (mergedThisFrame) {
 			// The play path already owns this rAF's world draw; the visible frame is
 			// refreshed when that batch finishes (see the play promise above), so a
@@ -844,6 +1029,7 @@
 	}
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
+			Perf.v3dText = v3d.on && v3d.r3d ? v3d.r3d.tsLine() : '';
 			Perf.update(now);
 			showStrip(stripRows());
 			if (waterActive === 'volume' && waterDirty) solveWater();
@@ -869,8 +1055,11 @@
 	paintSlow();
 	mountStrip();
 	// The page's own default is the CPU engine, whose world is already rastered; a prefilled
-	// ?engine=gpu has to boot the device before a frame tries to draw from it.
+	// ?engine=gpu has to boot the device before a frame tries to draw from it. A prefilled
+	// ?v3d=1 rides the engine boot's completion on the GPU path (bootEngine's hook); on
+	// the CPU path the render-only device boots here.
 	if (engineInput.value === 'gpu') bootEngine(function () { dirty = true; });
+	else rebootV3d();
 	if (/[?&]bench=1/.test(location.search)) {
 		// The benchmark lives in its own page (bench.html — the climate-repo GUI
 		// pattern): redirect, preserving the level/dt/steps query overrides.

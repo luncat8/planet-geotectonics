@@ -57,6 +57,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <script src="js/gpu/wgsl-diag.js"></script>
 <script src="js/gpu/sim-gpu.js"></script>
 <script src="js/gpu/render-gpu.js"></script>
+<script src="js/render3d.js"></script>
 <script src="js/gpu/d1diff.js"></script>
 <script src="js/clipboard.js"></script>
 <script>
@@ -388,6 +389,82 @@ function captureLine(adapter, fallback) {
 		+ comparedLayers + '/' + layers.length
 		+ (comparedLayers === layers.length ? ' (map below: dir)'
 			: ' - ' + (layers.length - comparedLayers) + ' compared nothing (readback failures above)'));
+
+	// Phase 6: the 3D planet view (0.5.0). A 512x256 canvas at k = 6 on the sim device,
+	// both z sources: the gather binding the GPU run's cellF, then the CPU state through
+	// the cellZ upload. The pixel asserts are coarse on purpose: the planet is bounded
+	// (centre drawn, corner clear), displacement widens the silhouette (the draft's hard
+	// requirement), and the 0.3.5 sea level moves the coast through the shared ramp.
+	var pixelsDiffer = function (a, b) {
+		var n = 0;
+		for (var i = 0; i < a.length; i += 4) {
+			if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 4) n++;
+		}
+		return n;
+	};
+	var nonBackgroundBox = function (px, w, h, row) {
+		var lo = w, hi = 0;
+		for (var y = 0; y < h; y++) {
+			for (var x = 0; x < w; x++) {
+				var o = y * row + x * 4;
+				if (Math.abs(px[o] - 20) + Math.abs(px[o + 1] - 26) + Math.abs(px[o + 2] - 39) > 8) {
+					if (x < lo) lo = x;
+					if (x > hi) hi = x;
+				}
+			}
+		}
+		return hi > lo ? hi - lo : 0;
+	};
+	try {
+		var m3d = document.getElementById('map3d');
+		var r3 = new Render3D(m3d).init({ device: device, k: 6, look: cpu.grid.lookup, V: V,
+			zSource: 'cellF', cellF: S.buf.cellF, lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
+		r3.initReadback();
+		var sea0 = Params.sea;
+		Params.sea = 0;
+		r3.exag = 1;
+		r3.redraw(null);
+		await device.queue.onSubmittedWorkDone();
+		var p3a = await r3.readPixels();
+		var cx = (128 * r3.readRow) + 256 * 4, cnr = (2 * r3.readRow) + 2 * 4;
+		var centreDrawn = Math.abs(p3a[cx] - 20) + Math.abs(p3a[cx + 1] - 26) + Math.abs(p3a[cx + 2] - 39) > 8;
+		var cornerClear = Math.abs(p3a[cnr] - 20) + Math.abs(p3a[cnr + 1] - 26) + Math.abs(p3a[cnr + 2] - 39) <= 2;
+		if (!centreDrawn) fail('3d: the planet centre is the background clear');
+		if (!cornerClear) fail('3d: the corner is drawn - the silhouette is unbounded');
+		var box1 = nonBackgroundBox(p3a, 512, 256, r3.readRow);
+		r3.exag = 40;
+		r3.redraw(null);
+		await device.queue.onSubmittedWorkDone();
+		var p3b = await r3.readPixels();
+		var box40 = nonBackgroundBox(p3b, 512, 256, r3.readRow);
+		note('3d', 'silhouette width: disp 1x ' + box1 + ' px · disp 40x ' + box40 + ' px');
+		if (box40 <= box1) fail('3d: disp 40x did not widen the silhouette beyond disp 1x ('
+			+ box40 + ' <= ' + box1 + ')');
+		r3.exag = 10;
+		Params.sea = -2000;
+		r3.redraw(null);
+		await device.queue.onSubmittedWorkDone();
+		var p3c = await r3.readPixels();
+		var coastal = pixelsDiffer(p3a, p3c);
+		note('3d', 'sea -2 km vs 0: ' + coastal + ' pixels differ');
+		if (coastal <= 0) fail('3d: the display sea level does not move the coast');
+		Params.sea = sea0;
+		note('3d', r3.tsLine() || 'no 3d timing (timestamp-query off)');
+		r3.release();
+		// The CPU-engine mode: same device, but z packed from the CPU state per frame.
+		var r3z = new Render3D(m3d).init({ device: device, k: 6, look: cpu.grid.lookup, V: V,
+			zSource: 'cellZ', lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
+		r3z.redraw(cpu);
+		await device.queue.onSubmittedWorkDone();
+		var p3d = await r3z.readPixels();
+		if (!(Math.abs(p3d[cx] - 20) + Math.abs(p3d[cx + 1] - 26) + Math.abs(p3d[cx + 2] - 39) > 8)) {
+			fail('3d: the cellZ path drew nothing');
+		}
+		note('3d', 'cellZ upload path drew the CPU state');
+		r3z.release();
+	} catch (e) {
+		fail('3d phase threw: ' + ((e && e.stack) || e));
+	}
 
 	finish();
 	function finish() {
