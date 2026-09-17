@@ -182,17 +182,17 @@ function convergence(W) {
 }
 
 // --- events are deterministic and leave the ledger alone ------------------------------------
-// The natural run is re-baselined on seed 4 / 200 Myr: the 0.4.0 owner-remap fix (the column
-// compaction used to leave cell -> column pointing one cycle behind, so the corridor test read
-// a neighbouring column's damage) removed the spurious damage that used to make plates rift
-// early. On the fixed field the seed-11 world reaches 150 Myr with no split at all, seed 4
-// first splits at 72 Myr and first merges at 171 Myr, so 200 Myr exercises both paths inside
-// the test's time budget. The statistics themselves are the 0.4.0 recalibration's business;
-// the prescribed corridor above keeps a fixed split target either way.
+// The natural run is re-baselined on seed 23 / 200 Myr: the 0.4.0 owner-remap fix removed the
+// spurious damage that used to make plates rift early, and the 0.5.0 sediment cap (sedMax)
+// removed the kilometres-high artifact piles that fed the damage field after it - on the
+// capped field seed 4 no longer splits within 390 Myr, seed 23 first merges at 18 Myr and
+// first splits at 125 Myr, so 200 Myr exercises both paths with margin. The statistics
+// themselves are the 0.4.0 recalibration's business; the prescribed corridor above keeps a
+// fixed split target either way.
 {
 	const runs = [];
 	for (let pass = 0; pass < 2; pass++) {
-		const s = new State(g, 4);
+		const s = new State(g, 23);
 		s.ckptCap = 0;
 		Sim.raster(s);
 		s.rebase();

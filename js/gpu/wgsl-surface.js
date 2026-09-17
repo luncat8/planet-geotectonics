@@ -215,7 +215,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `
 },
 {
-	name: 'deposit', groups: ['gridI', 'colF', 'colI', 'cellF', 'cellI', 'frameIn', 'frameOut'],
+	name: 'deposit', groups: ['gridI', 'colF', 'colI', 'cellF', 'cellI', 'frameIn', 'frameOut', 'reduce'],
 	code: `
 // Deposit pulls the stayed load of each owned cell into its column, in the same fixed
 // candidate order erosion used. Basin and placer potentials dose from what lands.
@@ -235,8 +235,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 		let stay = cellStay(c);
 		let stayFel = cellStayFel(c);
 		let stayPla = cellStayPla(c);
-		hSed = hSed + stay;
-		if (stay > 0.0 && cellZ(c) < P_ZBASIN) {
+		// The accommodation cap (the CPU deposit's closure, pass for pass): past P_SEDMAX
+		// the excess bypasses to the mantle ledger, booked once on arrival; the ore doses
+		// use what actually lands.
+		let land = min(stay, max(P_SEDMAX - hSed, 0.0));
+		if (stay > land) { addLedger(5u, i, (stay - land) * A0REF); }
+		hSed = hSed + land;
+		if (land > 0.0 && cellZ(c) < P_ZBASIN) {
 			oBas = oBas + (1.0 - oBas) * min(1.0, P_KB * stayFel * colFert(i));
 			if (stayPla > 0.0) {
 				oPla = oPla + (1.0 - oPla) * min(1.0, P_KB * stayPla * colFert(i));

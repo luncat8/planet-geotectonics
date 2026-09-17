@@ -30,4 +30,25 @@ for (let c = 0; c < g.V; c++) {
 	if (low >= 0 && s.z[c] > s.z[low] + 20 && s.low[low] >= 0 && s.z[low] > s.z[s.low[low]] + 20) checker++;
 }
 assert.ok(checker === 0, 'two-cell routing oscillation ' + checker);
-console.log('PASS erosion: cone mass reaches basin, total crust plus mobile conserved, routing settles');
+// The accommodation cap (0.5.0): a column refuses sediment past Params.sedMax and the
+// refused load books straight to the mantle ledger - the runaway-pile closure. Without it
+// a late-time continental world piles single columns into thousands of km (probed at
+// 3768 km on the rig), because sediment riding buoyant crust never subducts.
+{
+	const Params = require('../js/params.js');
+	s.subductedSed = 0;
+	for (let c = 0; c < g.V; c++) {
+		s.hFel[c] = 35000; s.hMaf[c] = 0; s.hSed[c] = 0; s.age[c] = 500;
+		s.mobile[c] = 0; s.mobileFel[c] = 0; s.mobilePla[c] = 0;
+	}
+	s.hFel[cone] = 70000;
+	s.hFel[basin] = 0; s.hMaf[basin] = 7000; s.age[basin] = 80;
+	s.hSed[basin] = Params.sedMax - 1;   // one metre of accommodation left
+	Surface.elevation(s);
+	Surface.route(s, 0.1);
+	assert.equal(s.hSed[basin], Params.sedMax, 'the basin column stops at the cap exactly');
+	assert.ok(s.subductedSed > 0, 'the refused sediment booked to the mantle ledger: ' + s.subductedSed);
+	assert.ok(s.hFel[cone] < 70000, 'the cone still eroded into the full basin');
+}
+console.log('PASS erosion: cone mass reaches basin, total crust plus mobile conserved, routing settles,'
+	+ ' deposition stops at the sediment cap with the excess booked to the mantle');

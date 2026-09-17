@@ -324,7 +324,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 		if (hFel >= P_HOCEANIC && colHFel(l) >= P_HOCEANIC) {
 			// Continental collision: crust is preserved, the mafic root delaminates.
 			hFel = hFel + colHFel(l);
-			hSed = hSed + colHSed(l);
+			// The receiving half of the deposition cap (CPU Contact.receiveSed): the winner
+			// takes only up to P_SEDMAX and the refused sediment books to the ledger.
+			let sedTakeC = colHSed(l);
+			let sedKeepC = min(sedTakeC, max(P_SEDMAX - hSed, 0.0));
+			if (sedTakeC > sedKeepC) { addLedger(5u, i, (sedTakeC - sedKeepC) * A0REF); }
+			hSed = hSed + sedKeepC;
 			addLedger(4u, l, colHMaf(l) * A0REF);
 			if (colAge(l) > age) { age = colAge(l); }
 			oVms = 0.5 * (oVms + colOVms(l));
@@ -337,7 +342,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 			// Felsic crust accretes onto the overriding plate; the rest goes down the trench
 			// and is booked as that plate's arc feed (design §8 recycling enrichment).
 			hFel = hFel + colHFel(l);
-			hSed = hSed + P_SEDSCRAPE * colHSed(l);
+			let sedTakeO = P_SEDSCRAPE * colHSed(l);
+			let sedKeepO = min(sedTakeO, max(P_SEDMAX - hSed, 0.0));
+			if (sedTakeO > sedKeepO) { addLedger(5u, i, (sedTakeO - sedKeepO) * A0REF); }
+			hSed = hSed + sedKeepO;
 			addLedger(5u, l, (1.0 - P_SEDSCRAPE) * colHSed(l) * A0REF);
 			addLedger(4u, l, colHMaf(l) * A0REF);
 			addLedger(6u, l, A0REF);

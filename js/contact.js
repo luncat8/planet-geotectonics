@@ -210,7 +210,7 @@ var Contact = {
 					// Continental collision: crust is preserved, the older lithosphere survives,
 					// and the loser's mafic root delaminates into the mantle.
 					s.hFel[w] += s.hFel[l];
-					s.hSed[w] += s.hSed[l];
+					s.hSed[w] += Contact.receiveSed(s, w, s.hSed[l], A0);
 					s.subductedMaf += s.hMaf[l] * A0;
 					if (s.age[l] > s.age[w]) s.age[w] = s.age[l];
 					Contact.meanOre(s, w, l);
@@ -218,7 +218,7 @@ var Contact = {
 					// Felsic crust is too buoyant to subduct: it accretes onto the overriding
 					// plate, which keeps Σ hFel sourced only by arc production.
 					s.hFel[w] += s.hFel[l];
-					s.hSed[w] += p.sedScrape * s.hSed[l];
+					s.hSed[w] += Contact.receiveSed(s, w, p.sedScrape * s.hSed[l], A0);
 					s.subductedSed += (1 - p.sedScrape) * s.hSed[l] * A0;
 					s.subductedMaf += s.hMaf[l] * A0;
 					s.subductedArea += A0;
@@ -376,6 +376,16 @@ var Contact = {
 			s.hFel[i] -= lossFel;
 			s.hSed[i] -= lossSed;
 		}
+	},
+	// The receiving half of the deposition cap (Params.sedMax): a winner takes sediment
+	// only up to the cap, and what it refuses books straight to the mantle ledger - the
+	// point where piles concentrate is the collision, so this is where the closure bites.
+	receiveSed: function (s, w, amount, A0) {
+		var room = ContactParams.sedMax - s.hSed[w];
+		if (amount <= room) return amount;
+		var keep = room > 0 ? room : 0;
+		s.subductedSed += (amount - keep) * A0;
+		return keep;
 	},
 	apply: function (s, dt) {
 		Contact.resolve(s);

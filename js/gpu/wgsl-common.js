@@ -32,6 +32,7 @@ var CommonWGSL = {
 			'const P_ZKNEE: f32 = ' + p.zKnee + ';\n' +
 			'const P_SLOPEREF: f32 = ' + p.slopeRef + ';\n' +
 			'const P_DELTAZ: f32 = ' + p.deltaZ + ';\n' +
+			'const P_SEDMAX: f32 = ' + p.sedMax + ';\n' +
 			'const P_KPLACER: f32 = ' + p.kPlacer + ';\n' +
 			'const P_ZBASIN: f32 = ' + p.zBasin + ';\n' +
 			'const P_HBAS: f32 = ' + p.hBas + ';\n' +

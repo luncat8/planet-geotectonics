@@ -138,6 +138,14 @@ var Surface = {
 				var c4 = k3 < 0 ? cell2 : g.ring[cell2 * 6 + k3];
 				if (s.owner[c4] !== i2) continue;
 				var stay2 = s.stay[c4], stayFel2 = s.stayFel[c4], stayPla2 = s.stayPla[c4];
+				// The accommodation cap: a column takes sediment only up to sedMax; what it
+				// refuses bypasses to the mantle ledger, booked once on arrival. The ore
+				// doses below use what actually lands.
+				var room = p.sedMax - s.hSed[i2];
+				if (stay2 > room) {
+					s.subductedSed += (stay2 - (room > 0 ? room : 0)) * s.A0ref;
+					stay2 = room > 0 ? room : 0;
+				}
 				s.hSed[i2] += stay2;
 				// Basin and placer potentials from what actually lands here, only in a
 				// submerged or low cell; mFel is the non-mafic share of the deposit.
