@@ -340,7 +340,10 @@ function compare(cpu, gpu, names, absTol, relTol, at) {
 					// pacing changes no result.
 					if (f % 200 === 199) await yieldTick();
 				}
-				await GpuSim.init(gpu, { fallback: false });
+				// The first seed's init is the cold WGSL build; later inits rebuild on a warm
+				// driver cache, so only seed 0's number is comparable with __run's gpuBuild.
+				var S = await GpuSim.init(gpu, { fallback: false });
+				if (si === 0) report.gpuBuildMs = S.built;
 				GpuSim.raster(gpu);
 				await GpuSim.download(gpu);
 				gpuS.push(sample(gpu));

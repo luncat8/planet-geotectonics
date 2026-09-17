@@ -308,18 +308,21 @@
 ## CPU release history
 
 	The L5 seed-7 release profile reaches 4500 Myr at dt 0.1 with finite state, exact ledgers,
-	21 plates, 13.5% continental columns, 4.9% cratons and 1.27 cm/yr mean speed at Tm 0.56.
-	At the 1500 Myr acceptance epoch it has 18.8% continents; the 500-1000 Myr mean is 6.06
-	cm/yr. The dt 0.01 history at 500 Myr remains statistical rather than pointwise: 30 vs 32
-	plates, 19.9 vs 20.1% continents, and 7.15 vs 5.87 cm/yr. Exact trajectories diverge from
+	7 plates, 25.3% continental columns, 15.7% cratons and 0.94 cm/yr mean speed at Tm 0.56.
+	At the 1500 Myr acceptance epoch it has 19.3% continents; the 500-1000 Myr mean is 9.01
+	cm/yr. The dt 0.01 history at 500 Myr remains statistical rather than pointwise: 18 vs 22
+	plates, 17.7 vs 15.2% continents, and 10.52 vs 11.15 cm/yr. Exact trajectories diverge from
 	minute floating-order changes, so release gates must stay on invariants and declared
 	statistics, never column identity after thousands of frames.
 
-	the numbers above are the linear-law history. the q² intake (0.3.3) moved the release
-	statistics with it and the full-profile baseline is re-committed in js/params.js: 19.3%
-	continents at the 1500 Myr acceptance epoch and 9.01 cm/yr in the middle epoch, L5 seed 7,
-	hot start, dt 0.1. the 4.5 Gyr profile needs its own re-run on the rig before those two
-	sentences can be replaced.
+	those are the q²-law numbers (zKnee 9000, 0.3.3): the 1500 Myr baseline is re-committed in
+	js/params.js and the 4.5 Gyr history is captured in "experiments/logs/0.3.3 longrun
+	--release.txt". the linear law's world at the same end time had 21 plates, 13.5% continents
+	and 4.9% cratons — the knee spares the shields, so the cooled world ends with three times
+	the cratons and a fifth more land, and still inside every declared band. the history is
+	deterministic (seed 7, hot start, fixed dt), so the 1500 Myr rows of this capture match the
+	owner rig's full-test line for line; the rig numbers and the sandbox numbers are the same
+	numbers.
 ## WebGPU parity: precision floors, not bugs
 
 	Measured on SwiftShader (Chromium 137, forceFallbackAdapter): builtin cos is only
@@ -1441,3 +1444,18 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	not arm it, or a fresh page sits out its first second; and a pin for the hold must fail in
 	both directions - "left alone while armed" catches a missing gate, "resumes while still
 	focused" catches a gate that never lets go.
+
+## a capture log is UTF-8 end to end: decode the child with the page's encoding (2026-09-16)
+
+	every owner-rig capture printed `В·` and `П‰` where the tests wrote `·` and `ω`: node emits
+	UTF-8 to a pipe whatever the console's codepage is, but python's `Popen(text=True)` without
+	an explicit encoding decodes with the locale — cp1251 on a Russian Windows — and the log
+	then faithfully preserves the wrong characters (the log file itself was already opened
+	UTF-8, so only the child's half was broken). `encoding='utf-8'` on the one Popen in
+	run_common.run is the whole fix. Two smaller capture bugs from the same read of the
+	2026-09-16 22:47/22:48 logs: a headless page's automatic /favicon.ico request 404s on the
+	drivers' static serve() and lands in the capture as an unrelated "Failed to load resource"
+	line — answer it 204, in all four serve() copies; and a label field only one rig sets must
+	be printed conditionally, never padded with the default (`gpuBuild=undefinedms` on every
+	ensemble capture until the driver learned the conditional and `__ens` began recording its
+	first seed's cold build — the number comparable with `__run`'s).

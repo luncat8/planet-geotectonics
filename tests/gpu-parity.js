@@ -34,6 +34,9 @@ function serve(dir) {
 	const types = { '.html': 'text/html', '.js': 'text/javascript' };
 	const server = http.createServer((req, res) => {
 		const file = path.join(dir, decodeURIComponent(req.url.split('?')[0]));
+		// Chrome asks for /favicon.ico on every http page; a 404 there lands in the capture
+		// log as an unrelated "Failed to load resource" line. 204 is the empty favicon.
+		if (file === path.join(dir, 'favicon.ico')) { res.writeHead(204); res.end(); return; }
 		fs.readFile(file, (err, data) => {
 			if (err) { res.writeHead(404); res.end(); return; }
 			res.writeHead(200, { 'content-type': types[path.extname(file)] || 'text/plain' });
@@ -92,7 +95,11 @@ function serve(dir) {
 		const env = await page.evaluate('window.__envLine ? window.__envLine() : ""').catch(() => '');
 		if (env) console.log(env + ' · ' + hostLine());
 		if (!batch) {
-			console.log(`frames=${report.frames} level=${report.level} seed=${report.seeds ? '[' + report.seeds + ']' : report.seed} wall=${ms}ms gpuBuild=${report.gpuBuildMs}ms`);
+			// gpuBuild only exists where a single GpuSim.init built the world (__run; __ens
+			// records its first seed's build). Printing it unconditionally made every
+			// ensemble capture say gpuBuild=undefinedms.
+			console.log(`frames=${report.frames} level=${report.level} seed=${report.seeds ? '[' + report.seeds + ']' : report.seed} wall=${ms}ms`
+				+ (report.gpuBuildMs ? ` gpuBuild=${report.gpuBuildMs}ms` : ''));
 		} else {
 			console.log(`batch-identity level=${report.level} seed=${report.seed} wall=${ms}ms`);
 		}

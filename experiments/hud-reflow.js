@@ -35,6 +35,9 @@ function serve(dir, port) {
 	const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png' };
 	const server = http.createServer((req, res) => {
 		const file = path.join(dir, decodeURIComponent(req.url.split('?')[0]));
+		// Chrome asks for /favicon.ico on every http page; a 404 there lands in the capture
+		// log as an unrelated "Failed to load resource" line. 204 is the empty favicon.
+		if (file === path.join(dir, 'favicon.ico')) { res.writeHead(204); res.end(); return; }
 		fs.readFile(file, (err, data) => {
 			if (err) { res.writeHead(404); res.end(); return; }
 			res.writeHead(200, { 'content-type': types[path.extname(file)] || 'text/plain' });

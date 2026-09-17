@@ -87,9 +87,12 @@ def run(cmd, log, header):
     with open(log, 'w', encoding='utf-8', errors='replace') as handle:
         handle.write(header + '\n')
         handle.flush()
+        # encoding='utf-8': node writes UTF-8 regardless of the Windows codepage, and
+        # text=True alone would decode it with the locale (cp1251 on a Russian Windows),
+        # turning every '·' and 'ω' in the log into 'В·' and 'П‰'.
         proc = subprocess.Popen([str(part) for part in cmd], cwd=str(ROOT),
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, errors='replace', bufsize=1)
+                                text=True, encoding='utf-8', errors='replace', bufsize=1)
         code = 130
         try:
             for line in proc.stdout:

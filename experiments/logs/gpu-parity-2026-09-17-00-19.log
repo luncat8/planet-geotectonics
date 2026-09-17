@@ -1,0 +1,17 @@
+gpu parity · 2026-09-17 00:19 · node 22.15.1 · win x86_64 · 1000 --ensemble
+[page] 2026-09-17 00:19 · chrome 150 · win x86_64 — ready. Choose a run above, or use ?run=ens&frames=1000&level=5&seed=7
+[page] Tip: headless `python3 run_gpu_parity.py` prints the same log via puppeteer; `file://` needs no rig.
+2026-09-17 00:20 · chrome 150 · win x86_64 · gpu hardware nvidia · node 22.15.1 · win x86_64
+frames=1000 level=5 seed=[7,8,9] wall=49147ms gpuBuild=1173ms
+ensemble: 1000 frames, seeds [7,8,9] (bounds: plates +-2, cols 2%, mean 20%, max 2x, cont 2pp)
+  seed 7: worst plates 0, cols 0.92%, mean 7.6%, max 63.6%, cont 0.45pp
+    end cpu: t=100 plates=16 cols=9504 mean=6.22cm/yr cont=21.9%
+    end gpu: t=100 plates=16 cols=9531 mean=6.07cm/yr cont=21.9%
+  seed 8: worst plates 1, cols 1.08%, mean 15.1%, max 30.5%, cont 0.47pp
+    end cpu: t=100 plates=16 cols=9519 mean=5.41cm/yr cont=21.8%
+    end gpu: t=100 plates=16 cols=9563 mean=5.32cm/yr cont=21.3%
+  seed 9: worst plates 1, cols 0.76%, mean 15.5%, max 51.2%, cont 0.67pp
+    end cpu: t=100 plates=16 cols=9499 mean=5.38cm/yr cont=24.3%
+    end gpu: t=100 plates=17 cols=9524 mean=5.95cm/yr cont=24.5%
+all seeds within predeclared statistical bounds
+exit 0 · 50 s
