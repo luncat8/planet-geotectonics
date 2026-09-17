@@ -161,6 +161,13 @@ var Surface = {
 				}
 				s.mobile[c4] = 0; s.mobileFel[c4] = 0; s.mobilePla[c4] = 0;
 			}
+			// Legacy piles (a checkpoint from before the cap) relax in one frame: everything
+			// above the accommodation limit books to the mantle ledger, so an old world
+			// heals on the first step instead of carrying the artifact forever.
+			if (s.hSed[i2] > p.sedMax) {
+				s.subductedSed += (s.hSed[i2] - p.sedMax) * s.A0ref;
+				s.hSed[i2] = p.sedMax;
+			}
 		}
 	},
 	// Basin potential for sediment that is thick and under water. This is a K9 job, not a K8

@@ -49,6 +49,12 @@ assert.ok(checker === 0, 'two-cell routing oscillation ' + checker);
 	assert.equal(s.hSed[basin], Params.sedMax, 'the basin column stops at the cap exactly');
 	assert.ok(s.subductedSed > 0, 'the refused sediment booked to the mantle ledger: ' + s.subductedSed);
 	assert.ok(s.hFel[cone] < 70000, 'the cone still eroded into the full basin');
+	// A legacy pile - a checkpoint from before the cap - relaxes in one frame.
+	s.hSed[basin] = Params.sedMax + 5000;
+	s.subductedSed = 0;
+	Surface.route(s, 0.1);
+	assert.equal(s.hSed[basin], Params.sedMax, 'a legacy pile relaxes to the cap in one frame');
+	assert.ok(s.subductedSed >= 5000 * s.A0ref, 'the relaxed depth is booked: ' + s.subductedSed);
 }
 console.log('PASS erosion: cone mass reaches basin, total crust plus mobile conserved, routing settles,'
 	+ ' deposition stops at the sediment cap with the excess booked to the mantle');
