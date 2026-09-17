@@ -1497,3 +1497,15 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	it. The device has the same relation (CELLI) but not the defect - its `raster` is dispatched
 	before every kernel that reads the map, so a mirror-side fix stays mirror-side; check the
 	dispatch order before assuming the GPU path shares a CPU bug.
+
+## a greyed control that must wake on touch cannot be `disabled` (2026-09-17)
+
+	The 0.3.5 sea controls are two sliders where the last one touched is the mode. The first
+	implementation used `input.disabled` for the inactive slider, and on paper the click that
+	wakes it works - except a disabled form control fires no `input`, no `change` and no
+	click handler, so the very interaction that is supposed to re-arm the control is the one
+	it swallows. The fix is to keep the control live and dim its label with a class
+	(`.controls label.off { opacity: .45 }`, the `slow` warning's pattern): the grey is a
+	paint decision, the interactivity stays. Generalise: whenever "touching the inactive
+	control activates it" is the design, `disabled` is off the table by construction - dim
+	with styles, gate in the handler.

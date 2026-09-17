@@ -260,7 +260,7 @@ const world = (level, seed) => {
 }
 
 // --- 7. The page: the controls write, and the copy header records ---------------------------
-const MODULES = ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
+const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'sim', 'render'];
 const indexHtml = read('index.html');

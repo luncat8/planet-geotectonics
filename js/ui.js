@@ -15,11 +15,19 @@
 	var coolingInput = document.getElementById('cooling'), tmInput = document.getElementById('tm');
 	var frictionInput = document.getElementById('friction'), eroInput = document.getElementById('ero');
 	var reliefInput = document.getElementById('relief');
-	var seaInput = document.getElementById('sea'), seaVolInput = document.getElementById('sea-vol'), seaVolumeInput = document.getElementById('sea-volume');
+	var seaInput = document.getElementById('sea'), seaVolInput = document.getElementById('sea-vol');
 	var tmValue = document.getElementById('tm-value'), frictionValue = document.getElementById('friction-value');
 	var eroValue = document.getElementById('ero-value'), reliefValue = document.getElementById('relief-value');
 	var seaValue = document.getElementById('sea-value'), seaVolValue = document.getElementById('sea-vol-value');
-	var waterDirty = true, waterData = null;
+	// Sea controls (0.3.5): two sliders, one active - the last one touched takes the level
+	// and greys the other. The level slider writes Params.sea directly (a recolour on both
+	// engines); the volume slider names a conserved quantity (x of the sea-0 volume V0) and
+	// the level is solved from the hypsometric histogram. There is no mode flag: the two
+	// defaults agree (0 km = 1.00x), so the first-paint coast is the same whichever slider
+	// is active. waterArmed defers the volume solve to the frame loop (one per rAF at most,
+	// input events fire faster); waterDirty marks a changed bathymetry for the 2 Hz tick.
+	var waterActive = 'level', waterArmed = false, waterDirty = true, waterData = null;
+	function seaKm(sea) { return (sea >= 0 ? '+' : '') + (sea / 1000).toFixed(1); }
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var extractScratch = null;
@@ -40,9 +48,17 @@
 		frictionValue.textContent = (+frictionInput.value).toFixed(2);
 		eroValue.textContent = (+eroInput.value).toFixed(2);
 		reliefValue.textContent = (+reliefInput.value).toFixed(1) + ' km';
-		seaValue.textContent = (Params.sea >= 0 ? '+' : '') + (Params.sea / 1000).toFixed(1) + ' km';
-		seaVolValue.textContent = (+seaVolInput.value).toFixed(2) + '×';
-		seaInput.disabled = seaVolumeInput.checked; seaVolInput.disabled = !seaVolumeInput.checked;
+		seaValue.textContent = seaKm(Params.sea) + ' km';
+		// The volume readout always carries the solved level: that is the quantity the map
+		// actually uses, and it is what the inactive control keeps, dimmed, while greyed.
+		// The clamps are named: x = 0 is a dry planet, past full submersion a flooded one.
+		var volText = (+seaVolInput.value).toFixed(2) + '×';
+		if (waterData) volText += waterData.level <= Water.ZLO ? ' · dry'
+			: waterData.level >= Water.ZHI ? ' · flooded'
+			: ' · ' + seaKm(waterData.level) + ' km';
+		seaVolValue.textContent = volText;
+		seaInput.parentNode.classList[waterActive === 'level' ? 'remove' : 'add']('off');
+		seaVolInput.parentNode.classList[waterActive === 'volume' ? 'remove' : 'add']('off');
 	}
 	// The follow waits for the hand, not for the focus: a range input keeps focus after a drag,
 	// so gating the rewrite on `document.activeElement` left the control stuck on the value it
@@ -73,27 +89,27 @@
 	// The other direction, for the paths that hand the page a world it did not set: a rebuild
 	// starts on the new world's own start temperature, and Load takes the temperature and the
 	// cooling flag from the blob. The Params knobs are global settings and carry over.
-	// Water controls are display-only. A histogram is rebuilt only when requested by input or
-	// the 2 Hz tracking tick; never in the simulation hot loop.
+	// Water controls are display-only. The level slider writes the level in its own handler;
+	// the volume solve is deferred to the frame loop (one per rAF at most - input events fire
+	// faster, and the L7 solve is ~2 ms) and re-run by the 2 Hz tick while the volume slider
+	// is active, so the coast tracks the moving bathymetry. Never in the simulation hot loop.
+	function applySeaLevel() {
+		waterActive = 'level'; waterArmed = false; waterDirty = false;
+		// A recolour, not a view move: `dirty` is the frame loop's draw gate on both engines.
+		Params.sea = +seaInput.value * 1000;
+		dirty = true;
+		paintAdjust();
+	}
 	function solveWater() {
-		if (!seaVolumeInput.checked) { Params.sea = +seaInput.value * 1000; waterDirty = false; paintAdjust(); return; }
 		waterData = Water.fromElevations(state.z, +seaVolInput.value);
 		Params.sea = waterData.level; Params.seaVolScale = +seaVolInput.value;
-		waterDirty = false; paintAdjust(); dirty = true;
+		waterArmed = false; waterDirty = false;
+		dirty = true;
+		paintAdjust();
 	}
-	function armWater() { waterDirty = true; if (!seaVolumeInput.checked) solveWater(); else dirty = true; }
-	function switchWaterMode() {
-		Params.seaVolume = seaVolumeInput.checked ? 1 : 0;
-		if (seaVolumeInput.checked) {
-			if (!waterData) waterData = Water.fromElevations(state.z, 1);
-			var v = Water.volumeBelow(state.z, Params.sea);
-			seaVolInput.value = Math.max(0, Math.min(4, v / (waterData.v0 || 1))).toFixed(2);
-		} else { seaInput.value = (Params.sea / 1000).toFixed(1); }
-		waterDirty = true; solveWater();
-	}
-	seaInput.addEventListener('input', armWater);
-	seaVolInput.addEventListener('input', armWater);
-	seaVolumeInput.addEventListener('change', switchWaterMode);
+	function armSeaVolume() { waterActive = 'volume'; waterArmed = true; paintAdjust(); }
+	seaInput.addEventListener('input', applySeaLevel);
+	seaVolInput.addEventListener('input', armSeaVolume);
 
 	function syncAdjust() {
 		coolingInput.checked = state.cooling === 1;
@@ -116,9 +132,11 @@
 		if (Params.friction !== ADJ_DEFAULTS.friction) parts.push('friction ' + Params.friction + 'x');
 		if (Params.eroScale !== ADJ_DEFAULTS.eroScale) parts.push('erosion ' + Params.eroScale + 'x');
 		if (Params.zRange !== ADJ_DEFAULTS.zRange) parts.push('relief ' + (Params.zRange / 1000).toFixed(1) + ' km');
-		if (seaVolumeInput.checked) {
-			if (Math.abs(+seaVolInput.value - 1) > 1e-9 || Math.abs(Params.sea) > 1) parts.push('sea vol ' + (+seaVolInput.value).toFixed(2) + 'x (' + (Params.sea / 1000).toFixed(1) + ' km)');
-		} else if (Math.abs(Params.sea) > 1) parts.push('sea ' + (Params.sea >= 0 ? '+' : '') + (Params.sea / 1000).toFixed(1) + ' km');
+		// Whichever slider is active names the control that produced the world; the defaults
+		// (level 0 / 1.00x) print nothing.
+		if (waterActive === 'volume') {
+			if (Math.abs(+seaVolInput.value - 1) > 1e-9 || Math.abs(Params.sea) > 1) parts.push('sea vol ' + (+seaVolInput.value).toFixed(2) + 'x (' + seaKm(Params.sea) + ' km)');
+		} else if (Math.abs(Params.sea) > 1) parts.push('sea ' + seaKm(Params.sea) + ' km');
 		return parts.length ? 'adj ' + parts.join(' · ') : '';
 	}
 	// A press arms the hold as much as a move does: a thumb the pointer has taken but not yet
@@ -154,8 +172,9 @@
 	// land in Params and in the world's temperature, where a NaN would be unrecoverable.
 	function prefilled(name, input) {
 		var raw = query.get(name), v = +raw;
-		if (!raw || !Number.isFinite(v)) return;
+		if (!raw || !Number.isFinite(v)) return false;
 		input.value = String(v);
+		return true;
 	}
 	if (offeredLevel(+query.get('level'))) Params.level = +query.get('level');
 	if (query.get('seed')) Params.seed = +query.get('seed') >>> 0;
@@ -216,18 +235,19 @@
 	prefilled('fric', frictionInput);
 	prefilled('ero', eroInput);
 	prefilled('relief', reliefInput);
-	prefilled('sea', seaInput);
-	prefilled('seavol', seaVolInput);
-	if (query.get('seamode') === '1') seaVolumeInput.checked = true;
-	Params.seaVolume = seaVolumeInput.checked ? 1 : 0;
+	// ?seavol= makes the volume slider the active control; ?sea= keeps the level one, and
+	// wins the tie when both are given. Either first paint is the same coast: the defaults
+	// agree (level 0 = 1.00x).
+	var seaPrefilled = prefilled('sea', seaInput);
+	if (prefilled('seavol', seaVolInput) && !seaPrefilled) waterActive = 'volume';
 	Params.seaVolScale = +seaVolInput.value;
 	if (query.get('cool')) coolingInput.checked = query.get('cool') !== '0';
 	state.cooling = coolingInput.checked ? 1 : 0;
 	applyTm();
 	applyAdjust();
 	Sim.raster(state);
-	Params.sea = +seaInput.value * 1000;
-	solveWater();
+	if (waterActive === 'volume') solveWater();
+	else Params.sea = +seaInput.value * 1000;
 	Perf.reset();
 	function paintBadge() {
 		badge.textContent = (gpu.on && gpu.ready ? 'GPU · L' : 'CPU · L') + grid.level;
@@ -307,6 +327,7 @@
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
 		extractScratch = null;   // sized to the old grid.V
+		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
 		paintGrid();
@@ -411,7 +432,7 @@
 		runTarget = Infinity;
 		if (gpu.on && gpu.ready) {
 			if (gpu.busy) return;
-			gpu.busy = true;
+			gpu.busy = true; waterDirty = true;
 			gpu.pending = GpuSim.step(state, +dtInput.value, GpuSim.Events, GpuSim.Checkpoint, GpuSim.Params)
 				.then(function () {
 					return GpuSim.S.device.queue.onSubmittedWorkDone().then(function () {
@@ -428,7 +449,7 @@
 					probe.textContent = 'GPU engine error: ' + error.message;
 				});
 		} else {
-			Sim.step(state, +dtInput.value); dirty = true;
+			Sim.step(state, +dtInput.value); dirty = true; waterDirty = true;
 		}
 	});
 	runToStart.addEventListener('click', function () {
@@ -525,6 +546,7 @@
 					syncAdjust();
 					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
 						+ state.t.toFixed(1) + ' Myr.';
+					waterDirty = true;   // the loaded world's bathymetry feeds the next volume solve
 					if (gpu.on && gpu.ready) {
 						GpuSim.uploadState(state).then(function () { dirty = true; });
 					} else {
@@ -741,6 +763,7 @@
 					// boundary (the round-trip edge) instead of queueing the rest of its
 					// compute under the pointer - at most one encoder, FIN_MAX frames.
 					if (!gpu.busy) {
+						waterDirty = true;   // the batch moves the bathymetry the volume solve reads
 						// K11 is on demand: the status line refreshes on the 150 ms tick,
 						// so ask for one diagnostic frame per tick instead of every frame.
 						if (now - lastUpdate > 150) GpuSim.wantDiag();
@@ -788,6 +811,9 @@
 				runTarget = Infinity; setPlaying(false);
 			}
 		}
+	// A volume drag only arms the solve; it lands here, once per rAF at most, so the draw
+	// below already sees the solved level (the level slider wrote Params.sea in its handler).
+	if (waterArmed) solveWater();
 	// `dirty` is a changed layer or state and recolours the cells; a view move alone only
 	// re-samples the screen table and repaints the last colours (the GPU draw is one
 	// triangle either way). On the GPU engine the canvas always shows the world texture,
@@ -820,7 +846,7 @@
 		if (Perf.due(now)) {
 			Perf.update(now);
 			showStrip(stripRows());
-			if (seaVolumeInput.checked && waterDirty) solveWater();
+			if (waterActive === 'volume' && waterDirty) solveWater();
 			// The Mantle Tm slider follows the sim on the strip's own 2 Hz tick while cooling
 			// is on, and never while a hand is on the control: the hold holdTmFollow arms is
 			// retired after the rewrite check, so it covers its own ticks.

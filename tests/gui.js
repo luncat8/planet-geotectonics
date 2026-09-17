@@ -25,6 +25,11 @@
 //      ?tm/?cool/?fric/?ero/?relief pre-fill lands on the world and its Params, the copied
 //      adj line names only what differs from the defaults, and the relief ramp recolours
 //      (never rebuilds the world or the pipeline) on both engines.
+//  10. the 0.3.5 sea controls are two sliders with no checkbox: the last slider touched takes
+//      the level and greys the other, the level drag recolours through an explicit `dirty`,
+//      the volume drag defers one histogram solve to the frame loop, ?sea=/?seavol= pre-fill
+//      and activate their own slider (level wins the tie), the header names whichever control
+//      is active, and the probe's wet/land follows Params.sea.
 //
 // js/ui.js runs as a classic script against tests/dom-stub.js, which is built by parsing the
 // real index.html, and a recorded fake GpuSim: the device side of the engine is
@@ -36,6 +41,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Checkpoint = require('../js/checkpoint.js');
+const Water = require('../js/water.js');
 const { makeDom, installGlobals } = require('./dom-stub.js');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -121,7 +127,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 }
 
 // --- 3. the page, running ----------------------------------------------------------------
-const MODULES = ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
+const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'sim', 'render'];
 
@@ -769,6 +775,90 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.ok(liveT() > 0, 'the sim advances on the CPU engine: t ' + liveT());
 	lEl('play').click();
 
+	// --- 0.3.5: the sea controls - two sliders, one active, no checkbox ----------------------
+	// The mode bit is gone: whichever slider the user last touched takes the level, and the
+	// other greys until touched. The defaults agree (level 0 = 1.00x), so there is no mode to
+	// report and no flip to test - only the enable, the writes, the pre-fill and the header.
+	assert.ok(!/sea-volume/.test(indexHtml), 'the Volume checkbox is gone from the page');
+	assert.ok(!/seamode/.test(read('js/ui.js')), 'and no mode token survives in the page script');
+	const seaPage = loadPage('');
+	const sEl = seaPage.el;
+	for (const id of ['sea', 'sea-vol'])
+		assert.equal(groupOf(sEl(id)) && groupOf(sEl(id)).id, 'adjust', '#' + id + ' lives in the Adjust group');
+	const seaLabel = sEl('sea').parentNode, volLabel = sEl('sea-vol').parentNode;
+	assert.ok(!seaLabel.classList.contains('off') && volLabel.classList.contains('off'),
+		'the level slider starts active and the volume slider greyed');
+	assert.equal(sEl('sea-value').textContent, '+0.0 km');
+	assert.equal(sEl('sea-vol-value').textContent, '1.00×');
+
+	// A level drag writes Params.sea explicitly and recolours the CPU map on the next frame.
+	const seaMap = sEl('map'), seaPuts = seaMap.puts;
+	sEl('sea').value = '1.2';
+	sEl('sea').dispatch('input');
+	assert.equal(seaPage.Params.sea, 1200, 'the level slider is kilometres on the control, metres in Params');
+	seaPage.pump(2, 40000);
+	assert.ok(seaMap.puts > seaPuts, 'the CPU map repainted after the level change');
+	assert.equal(sEl('sea-value').textContent, '+1.2 km');
+	assert.ok(/^adj sea \+1\.2 km$/m.test(seaPage.copy()), 'the capture names the level control:\n' + seaPage.copy());
+
+	// Touching the volume slider enables it, greys the level slider, and the frame loop lands
+	// one solve (deferred out of the input handler): Params.sea becomes the solved level and
+	// the readout carries it, because it is the quantity the map actually uses.
+	sEl('sea-vol').value = '1.5';
+	sEl('sea-vol').dispatch('input');
+	assert.ok(!volLabel.classList.contains('off') && seaLabel.classList.contains('off'),
+		'the touched slider takes over and the other greys');
+	seaPage.pump(1, 40100);
+	const solvedSea = seaPage.Params.sea;
+	assert.equal(seaPage.Params.seaVolScale, 1.5, 'the volume slider lands in Params');
+	assert.equal(sEl('sea-vol-value').textContent,
+		'1.50× · ' + (solvedSea >= 0 ? '+' : '') + (solvedSea / 1000).toFixed(1) + ' km',
+		'the volume readout carries the solved level');
+	assert.ok(/^adj sea vol 1\.50x \(/m.test(seaPage.copy()), 'the capture names the volume control:\n' + seaPage.copy());
+
+	// And touching the level slider back switches again; the greyed readout stays where it is.
+	sEl('sea').value = '-0.5';
+	sEl('sea').dispatch('input');
+	assert.equal(seaPage.Params.sea, -500);
+	assert.ok(!seaLabel.classList.contains('off') && volLabel.classList.contains('off'), 'touching back switches again');
+	assert.ok(sEl('sea-vol-value').textContent.startsWith('1.50× · '), 'the greyed volume readout keeps its last solved level');
+
+	// The clamp is named: x = 0 is a dry planet, the level sits on the histogram floor.
+	sEl('sea-vol').value = '0';
+	sEl('sea-vol').dispatch('input');
+	seaPage.pump(1, 40200);
+	assert.equal(seaPage.Params.sea, Water.ZLO, 'x = 0 clamps the level to the dry floor');
+	assert.ok(sEl('sea-vol-value').textContent.endsWith('× · dry'), 'and the readout names it: ' + sEl('sea-vol-value').textContent);
+
+	// ?sea= and ?seavol= each pre-fill and activate their own slider; both given, level wins.
+	const seaPre = loadPage('?sea=1.2');
+	assert.equal(seaPre.Params.sea, 1200, '?sea= lands on the display level');
+	assert.ok(!seaPre.el('sea').parentNode.classList.contains('off'), '?sea= keeps the level slider active');
+	assert.ok(/^adj sea \+1\.2 km$/m.test(seaPre.copy()), seaPre.copy());
+	const volPre = loadPage('?seavol=1.5');
+	assert.ok(!volPre.el('sea-vol').parentNode.classList.contains('off')
+		&& volPre.el('sea').parentNode.classList.contains('off'), '?seavol= makes the volume slider the active control');
+	assert.equal(volPre.Params.seaVolScale, 1.5);
+	assert.ok(/^adj sea vol 1\.50x \(/m.test(volPre.copy()), 'the volume pre-fill prints the solved level:\n' + volPre.copy());
+	const tie = loadPage('?sea=1.2&seavol=1.5');
+	assert.equal(tie.Params.sea, 1200, 'both given, the level slider wins the tie');
+	assert.ok(!tie.el('sea').parentNode.classList.contains('off'), 'and stays the active control');
+	const plainSea = loadPage('');
+	plainSea.pump(40, 1000);
+	assert.ok(!/^adj /m.test(plainSea.copy()), 'a default capture says nothing about the sea:\n' + plainSea.copy());
+
+	// The inspector agrees with the drawn coast: wet/land follows Params.sea, never z < 0.
+	const probePage = loadPage('');
+	const prEl = probePage.el, prMap = prEl('map');
+	prMap.dispatch('click', { clientX: 460, clientY: 250, currentTarget: prMap });
+	const probedElev = +/elevation (-?\d+) m/.exec(prEl('probe').textContent)[1];
+	probePage.Params.sea = probedElev + 100;
+	prMap.dispatch('click', { clientX: 460, clientY: 250, currentTarget: prMap });
+	assert.match(prEl('probe').textContent, /wet · depth/, 'a level above the column floods it (z ' + probedElev + ' m)');
+	probePage.Params.sea = probedElev - 100;
+	prMap.dispatch('click', { clientX: 460, clientY: 250, currentTarget: prMap });
+	assert.match(prEl('probe').textContent, /land · depth 0 m/, 'and a level below drains it');
+
 	// --- the CPU renderer's view path, straight: fast re-sample, repaint without recolour ---
 	const g5 = new Grid(5, 7).build();
 	const s5 = new State(g5, 7);
@@ -860,5 +950,8 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' at its frame boundary, and paint never recolors); a fine-pointer hover switches the view mode,'
 		+ ' the controls live in Startup/Adjust groups, the slow-on-CPU warning flags L7 and L6 >1 step/frame,'
 		+ ' the Adjust sliders pre-fill from the query, report themselves in the copy header and recolor the'
-		+ ' map without a rebuild, and an engine switch mid-run pulls the full mirror and keeps playing');
+		+ ' map without a rebuild, an engine switch mid-run pulls the full mirror and keeps playing,'
+		+ ' and the sea controls are two sliders enabled by last touch - the level drag recolours,'
+		+ ' the volume drag solves the level, the pre-fill and the header name the active control,'
+		+ ' and the probe follows Params.sea');
 })().catch((error) => { console.error(error); process.exit(1); });

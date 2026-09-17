@@ -29,6 +29,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <script src="js/env.js"></script>
 <script src="js/geodesics.js"></script>
 <script src="js/params.js"></script>
+<script src="js/water.js"></script>
 <script src="js/quat.js"></script>
 <script src="js/mantle.js"></script>
 <script src="js/diag.js"></script>
@@ -328,6 +329,53 @@ function captureLine(adapter, fallback) {
 		else if (mean > 2 || worst > 32) fail('GPU/CPU pixels disagree on layer ' + layers[l]
 			+ ': mean|d| ' + mean.toFixed(2) + ' max|d| ' + worst);
 	}
+	// 0.3.5 sea level: renderer-only on both engines. The sweep above ran at sea 0; the
+	// z layer must keep its pixel parity at non-default levels too, because both renderers
+	// recolour from Params.sea with the same sea-relative ramp.
+	var seaChecked = 0;
+	for (var seaLevel = -2500; readbackOk && seaLevel <= 1200; seaLevel += 3700) {
+		Params.sea = seaLevel;
+		renderer.redraw('z');
+		ref.draw('z');
+		var spx = null;
+		try { spx = await renderer.readPixels(); }
+		catch (e) { fail('readback threw at sea ' + seaLevel + ' m: ' + ((e && e.message) || e)); continue; }
+		var ssum = 0, sworst = 0, ssamples = 0;
+		for (var sy = 0; sy < gh; sy++) {
+			for (var sx = 0; sx < gw; sx++) {
+				var so = sy * row + sx * 4, sq = (sy * gw + sx) * 4;
+				for (var sk = 0; sk < 3; sk++) {
+					var sgv = spx[so + (bgra ? 2 - sk : sk)], scv = cpx[sq + sk];
+					var sd = sgv > scv ? sgv - scv : scv - sgv;
+					ssum += sd; ssamples++; if (sd > sworst) sworst = sd;
+				}
+			}
+		}
+		var smean = ssamples ? ssum / ssamples : NaN;
+		if (!ssamples || !Number.isFinite(smean)) fail('sea parity compared nothing at sea ' + seaLevel + ' m');
+		else if (smean > 2 || sworst > 32) fail('sea recolour breaks pixel parity at sea ' + seaLevel
+			+ ' m: mean|d| ' + smean.toFixed(2) + ' max|d| ' + sworst);
+		else seaChecked++;
+		note('render', 'z at sea ' + (seaLevel / 1000).toFixed(1) + ' km: mean|d| ' + smean.toFixed(2)
+			+ ' max|d| ' + sworst + ' · ' + ssamples + ' samples');
+	}
+	Params.sea = 0;
+	if (readbackOk) { renderer.redraw('z'); ref.draw('z'); }
+	// The volume solve on both engines' z of the same L5 world: the device stores f32 and
+	// the histogram buckets on it, so the solved levels agree to a bucket (60 m) at most -
+	// the display-level tolerance the 0.3.5 plan pins, never a bit-identity claim.
+	// V0 is a count-weighted sum (m per cell); the grid's cells are equal-area, so the
+	// constant area factor cancels in the level solve and x-of-V0 is exact anyway.
+	for (var wscale = 1; wscale <= 1.5; wscale += 0.5) {
+		var wcpu = Water.fromElevations(cpu.z, wscale), wgpu = Water.fromElevations(gpu.z, wscale);
+		var dsea = Math.abs(wcpu.level - wgpu.level);
+		note('sea', 'water x' + wscale.toFixed(2) + ': level cpu ' + (wcpu.level / 1000).toFixed(3)
+			+ ' km · gpu ' + (wgpu.level / 1000).toFixed(3) + ' km · |dL| ' + dsea.toFixed(1)
+			+ ' m · mean depth below 0 ' + Math.round(wcpu.v0 / V) + ' m');
+		if (dsea > Water.WIDTH) fail('volume solve disagrees across engines: |dL| ' + dsea.toFixed(1)
+			+ ' m > ' + Water.WIDTH + ' m');
+	}
+
 	if (renderer) {
 		renderer.redraw('dir');
 		// One canvas blit, on a drained queue: the parity loop drew the world texture

@@ -41,9 +41,12 @@ canvas:active { cursor: grabbing; }
 
 /* Adjust sliders (ui.js): the checkbox accent on a compact track, with the value under it.
    The readout is fixed-width and tabular so the 2 Hz Mantle Tm follow rewrites text without
-   moving the label. */
+   moving the label. The sea controls are two sliders with one active: the last slider
+   touched takes the level, the other is greyed (never disabled - touching it back re-arms
+   its mode). */
 .controls input[type="range"] { width: 132px; min-height: 0; padding: 0; border: 0; background: none; accent-color: #9bdfba; }
 .controls .value { display: block; min-width: 4.5em; text-align: center; color: #80d7b9; font-variant-numeric: tabular-nums; }
+.controls label.off { opacity: .45; }
 
 /* Slow-on-CPU warning (ui.js paintSlow): amber label text and a tinted control, not red -
    the run is slow, not broken. */
