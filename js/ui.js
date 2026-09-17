@@ -682,12 +682,37 @@
 		reader.readAsArrayBuffer(file);
 	});
 	function probeAt(event, target) {
+		if (v3d.on && target === map3d) { probeAt3d(event); return; }
 		var rect = mapRect(target);
 		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * grid.lookupW)));
 		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * grid.lookupH)));
 		if (renderer.updateViewLookup) renderer.updateViewLookup();
 		var mapLookup = renderer.viewLookup || grid.lookup;
-		var cell = mapLookup[(grid.lookupH - 1 - y) * grid.lookupW + x], owner = state.owner[cell];
+		probeReport(mapLookup[(grid.lookupH - 1 - y) * grid.lookupW + x]);
+	}
+	// The 3D inspector: the pointer ray is intersected with the unit planet (Render3D.pick,
+	// the camera's own basis maths), the hit direction maps to uv exactly like the gather
+	// kernel maps texels (u = lon/tau + 1/2, v = lat/pi + 1/2, row 0 = south - no flip,
+	// unlike the 2D screen path), and the cell under it reports from the CPU state. probeClick
+	// has already pulled a fresh mirror on the GPU engine; a hover reads it as it is, one
+	// event cycle old - the same split as the 2D map.
+	var pickDir = new Float64Array(3);
+	function probeAt3d(event) {
+		var r3d = v3d.r3d;
+		if (!r3d || !r3d.pick) return;
+		var rect = mapRect(map3d);
+		if (!r3d.pick(pickDir, event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height)) {
+			probe.textContent = 'Off the planet.';
+			return;
+		}
+		var u = Math.atan2(pickDir[2], pickDir[0]) / MapView.TAU + 0.5;
+		var v = Math.asin(Math.max(-1, Math.min(1, pickDir[1]))) / Math.PI + 0.5;
+		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor(u * grid.lookupW)));
+		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor(v * grid.lookupH)));
+		probeReport(grid.lookup[y * grid.lookupW + x]);
+	}
+	function probeReport(cell) {
+		var owner = state.owner[cell];
 		if (owner < 0) { probe.textContent = 'Cell ' + cell + ' · uncovered gap, ' + state.gapFrames[cell] + ' frames old.'; return; }
 		var rank = 0, names = ['interior', 'transform', 'divergent', 'subduction', 'collision'];
 		for (var k = 0; k < grid.ringN[cell]; k++) {
@@ -825,6 +850,7 @@
 	});
 	function endOrbit(event) {
 		if (!orbit.active || (event && event.pointerId !== undefined && event.pointerId !== orbit.id)) return;
+		orbit.suppressClick = orbit.moved;   // a drag that ends on the canvas is not a pick
 		orbit.active = false; orbit.id = null; orbit.moved = false;
 	}
 	map3d.addEventListener('pointerup', endOrbit);
@@ -837,6 +863,18 @@
 		if (v3dDist > Render3D.DIST_MAX) v3dDist = Render3D.DIST_MAX;
 		if (v3d.r3d) v3d.r3d.setOrbit(v3dYaw, v3dPitch, v3dDist);
 		dirty = true;
+	});
+	// The inspector works over the 3D view too: hover follows the pointer ("Info follows
+	// pointer", shared with the 2D map), a click that is not an orbit pins the column -
+	// with a fresh GPU mirror through probeClick, exactly like the 2D map's click.
+	map3d.addEventListener('pointermove', function (event) {
+		if (orbit.active || !v3d.on || !followInput.checked) return;
+		probeAt3d(event);
+	});
+	map3d.addEventListener('click', function (event) {
+		if (orbit.suppressClick) { orbit.suppressClick = false; return; }
+		if (!v3d.on) return;
+		probeClick(event);
 	});
 	// The perf strip is one row per part of the report (Perf.rows), plus the kernel line:
 	// on the GPU engine that is the device's own timestamp table, on the CPU engine the

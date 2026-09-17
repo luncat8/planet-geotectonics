@@ -234,6 +234,14 @@ FakeRender3D.prototype.redraw = function () { this.redraws++; };
 FakeRender3D.prototype.presentWhenDrained = function () { this.presents++; };
 FakeRender3D.prototype.release = function () { this.releases++; this.target = null; };
 FakeRender3D.prototype.tsLine = function () { return this.tsText; };
+// The 3D inspector pick: reports the sub-camera surface direction (1, 0, 0) and records
+// the pixel, so the test can prove the hover/click actually went through the pick.
+FakeRender3D.prototype.pick = function (out, px, py, w, h) {
+	this.picks = (this.picks || 0) + 1;
+	this.pickAt = [px, py, w, h];
+	out[0] = 1; out[1] = 0; out[2] = 0;
+	return true;
+};
 
 function loadPage(search) {
 	const api = makeDom(indexHtml);
@@ -1018,6 +1026,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		page3.pump(2, 9200);
 		assert.ok(r3.redraws > idleBefore, 'the orbit dirties the frame');
 		assert.equal(page3.gpu.plays.length, gateBefore, 'and none of this is a sim-gate event (paused page)');
+		m3d.dispatch('pointerup', { pointerId: 1, currentTarget: m3d });   // the drag ends; hover may inspect again
 
 		// The wheel zoom clamps to the session's distance window.
 		m3d.dispatch('wheel', { deltaY: -1200, preventDefault: () => {} });
@@ -1054,6 +1063,31 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.ok(r3.releases >= 1, 'the old session was released, not abandoned');
 		assert.equal(page3.gpu.rasters, rasters, 'no world rebuild happened under it');
 		assert.equal(fakeR3ds[1].opts.k, 9, 'the new session is the k9 one');
+
+		// The inspector works over the 3D view: a hover resolves through the session's
+		// pick, and so does a click that is not an orbit drag. The k9 session above is
+		// the live one.
+		const r3k9 = fakeR3ds[fakeR3ds.length - 1];
+		page3.el('probe').textContent = 'pre-pick';
+		console.log('DEBUG', JSON.stringify({ sessions: fakeR3ds.length,
+			picks: fakeR3ds.map(function (s) { return [s.picks || 0, s.releases]; }),
+			checked: page3.el('v3d').checked, disabled: page3.el('v3d').disabled,
+			map3dHidden: page3.el('map3d').hidden, mapHidden: page3.el('map').hidden,
+			follow: page3.el('follow').checked, probe: page3.el('probe').textContent }));
+		page3.el('map3d').dispatch('pointermove', { pointerId: 5, clientX: 120, clientY: 60, currentTarget: page3.el('map3d') });
+		console.log('DEBUG post', JSON.stringify({ picks: fakeR3ds.map(function (s) { return s.picks || 0; }),
+			probe: page3.el('probe').textContent.slice(0, 40) }));
+		assert.ok(/^Cell \d+/.test(page3.el('probe').textContent),
+			'a hover over the 3D view inspects a column: ' + page3.el('probe').textContent);
+		assert.ok(r3k9.picks === 1 && r3k9.pickAt[0] === 120 && r3k9.pickAt[1] === 60,
+			'the hover went through the session pick at the pointer pixel');
+		page3.el('map3d').dispatch('click', { clientX: 120, clientY: 60, currentTarget: page3.el('map3d') });
+		assert.ok(/^Cell \d+/.test(page3.el('probe').textContent), 'a click pins a 3D column too');
+		page3.el('map3d').dispatch('pointerdown', { button: 0, pointerId: 5, clientX: 120, clientY: 60, currentTarget: page3.el('map3d') });
+		page3.el('map3d').dispatch('pointermove', { pointerId: 5, clientX: 200, clientY: 90, currentTarget: page3.el('map3d') });
+		page3.el('map3d').dispatch('pointerup', { pointerId: 5, currentTarget: page3.el('map3d') });
+		page3.el('map3d').dispatch('click', { clientX: 200, clientY: 90, currentTarget: page3.el('map3d') });
+		assert.ok(r3k9.picks === 1, 'a click that ends an orbit drag is not a pick');
 
 		// Off again: everything swaps back and the session is released.
 		v3.checked = false;

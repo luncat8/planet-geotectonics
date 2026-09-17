@@ -185,6 +185,42 @@ assert.ok(!lookBuf.destroyed && !cellF.destroyed, 'a borrowed LOOK/cellF is not 
 const r3d = new Render3D(canvasOf(512, 256)).init({
 	device: makeDevice(), k: 3, look: look, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
 });
+// --- the inspector's ray pick ----------------------------------------------------------------
+// The pick must agree with what was drawn: the canvas centre looks at the sub-camera point,
+// a corner misses (the planet spans ~19.5 deg of a 40 deg FOV at dist 3), and a hit direction
+// projected back through matVP lands on the pixel it came from.
+{
+	const r3p = new Render3D(canvasOf(512, 256));   // aspect 2, default orbit yaw .65 pitch .42 dist 3
+	r3p.aspect = 2;
+	const dir = new Float64Array(3);
+	const ex = 3 * Math.cos(r3p.pitch) * Math.sin(r3p.yaw), ey = 3 * Math.sin(r3p.pitch), ez = 3 * Math.cos(r3p.pitch) * Math.cos(r3p.yaw);
+	assert.ok(r3p.pick(dir, 256, 128, 512, 256), 'the centre pixel hits the planet');
+	assert.ok(Math.abs(dir[0] - ex / 3) < 1e-9 && Math.abs(dir[1] - ey / 3) < 1e-9
+		&& Math.abs(dir[2] - ez / 3) < 1e-9, 'and looks at the sub-camera surface point');
+	assert.ok(!r3p.pick(dir, 511.5, 0.5, 512, 256), 'a corner ray misses (background, like the smoke corner assert)');
+	assert.ok(!r3p.pick(dir, 256, 128, 512, 256) === false && Math.hypot(dir[0], dir[1], dir[2]) <= 1 + 1e-12,
+		'hits return a unit direction');
+	const vp = new Float32Array(16), eye = new Float32Array(4);
+	for (const [px, py] of [[256, 128], [300, 110], [210, 150], [256, 45]]) {
+		assert.ok(r3p.pick(dir, px, py, 512, 256), px + ',' + py + ' hits');
+		Render3D.matVP(vp, eye, r3p.yaw, r3p.pitch, r3p.dist, r3p.aspect);
+		const cx = vp[0] * dir[0] + vp[4] * dir[1] + vp[8] * dir[2] + vp[12];
+		const cy = vp[1] * dir[0] + vp[5] * dir[1] + vp[9] * dir[2] + vp[13];
+		const cw = vp[3] * dir[0] + vp[7] * dir[1] + vp[11] * dir[2] + vp[15];
+		const backX = (cx / cw + 1) / 2 * 512, backY = (1 - cy / cw) / 2 * 256;
+		// the projection matrix is f32, so the honest bound is a hundredth of a pixel
+		assert.ok(Math.abs(backX - px) < 0.01 && Math.abs(backY - py) < 0.01,
+			'the hit at ' + px + ',' + py + ' projects back to its own pixel (got '
+			+ backX.toFixed(4) + ',' + backY.toFixed(4) + ')');
+	}
+	// a hit direction round-trips through the gather's uv convention to a sane cell id
+	const u = Math.atan2(dir[2], dir[0]) / (Math.PI * 2) + 0.5;
+	const v = Math.asin(dir[1]) / Math.PI + 0.5;
+	const cell = look[Math.min(grid.lookupH - 1, Math.floor(v * grid.lookupH)) * grid.lookupW
+		+ Math.min(grid.lookupW - 1, Math.floor(u * grid.lookupW))];
+	assert.ok(cell >= 0 && cell < grid.V, 'the picked direction lands on a real cell (' + cell + ')');
+}
+
 const oldPos = r3d.posBuf, oldIdx = r3d.idxBuf, height = r3d.height, uniform = r3d.uniform;
 r3d.setDetail(4);
 assert.ok(oldPos.destroyed && oldIdx.destroyed, 'a detail change destroys the old mesh buffers');

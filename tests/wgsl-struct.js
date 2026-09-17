@@ -201,6 +201,9 @@ assert.ok(r3dSrc.includes('1.0 + Z_RIM * u.knob.x * R_INV'),
 	'the rim shell scales with exag, so no peak can pierce it');
 assert.ok(!/\b6500\b/.test(r3dSrc) && r3dSrc.includes('u.knob.z'),
 	'no baked relief range: the 3D ramp rides the uniform like the 2D one');
+assert.ok(r3dSrc.includes('heightAt(uvOf(normalize(in.dir)))') && !r3dSrc.includes('in.uv'),
+	'fragments rebuild uv from the interpolated direction - a uv varying interpolates'
+	+ ' across the texture cut and paints a pole-to-pole strip of the wrong hemisphere');
 assert.ok(r3dSrc.includes('15.0 + 23.0 * s') && r3dSrc.includes('100.0 + 145.0 * hi'),
 	'the 3D ramp is the 2D relief ramp, sea-relative, verbatim');
 assert.ok(!/textureSample\b/.test(r3dSrc),

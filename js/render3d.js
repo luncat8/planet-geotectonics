@@ -106,7 +106,7 @@ fn heightAt(uv: vec2<f32>) -> f32 {
 	return mix(mix(z00, z10, t.x), mix(z01, z11, t.x), t.y);
 }
 
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @location(1) uv: vec2<f32>, @location(2) wp: vec3<f32> };
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @location(2) wp: vec3<f32> };
 
 @vertex fn vsLand(@location(0) dirIn: vec3<f32>) -> VOut {
 	let dir = dirIn;
@@ -115,7 +115,6 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @l
 	var o: VOut;
 	o.pos = u.vp * vec4<f32>(dir * r, 1.0);
 	o.dir = dir;
-	o.uv = uv;
 	o.wp = dir * r;
 	return o;
 }
@@ -127,7 +126,6 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @l
 	var o: VOut;
 	o.pos = u.vp * vec4<f32>(dir * r, 1.0);
 	o.dir = dir;
-	o.uv = uv;
 	o.wp = dir * r;
 	return o;
 }
@@ -139,14 +137,16 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @l
 	var o: VOut;
 	o.pos = u.vp * vec4<f32>(dir * r, 1.0);
 	o.dir = dir;
-	o.uv = uv;
 	o.wp = dir * r;
 	return o;
 }
 
 // The world position rides its own varying: a fragment stage's @builtin(position) is
 // framebuffer coordinates, not the clip position, and the derivative normals need the
-// true interpolated surface point.
+// true interpolated surface point. The uv must never be a varying: a triangle across
+// the texture cut interpolates u from ~1 to ~0 through the middle of the map, which
+// painted a pole-to-pole strip of wrong-hemisphere texture (the seam bug). Fragments
+// rebuild uv from the interpolated direction instead - exact at every fragment.
 fn surfaceNormal(wp: vec3<f32>) -> vec3<f32> {
 	var n = normalize(cross(dpdx(wp), dpdy(wp)));
 	if (dot(n, u.eye.xyz - wp) < 0.0) { n = -n; }
@@ -167,7 +167,7 @@ struct FOut { @location(0) color: vec4<f32> };
 
 @fragment fn fsLand(in: VOut) -> FOut {
 	let n = surfaceNormal(in.wp);
-	let col = rampColor(heightAt(in.uv));
+	let col = rampColor(heightAt(uvOf(normalize(in.dir))));
 	let lam = 0.25 + 0.75 * max(0.0, dot(n, LIGHT));
 	let limb = 0.75 + 0.25 * dot(n, normalize(u.eye.xyz - in.wp));
 	var o: FOut;
@@ -177,7 +177,7 @@ struct FOut { @location(0) color: vec4<f32> };
 
 @fragment fn fsWater(in: VOut) -> FOut {
 	let n = surfaceNormal(in.wp);
-	let s = max(0.0, 1.0 - (u.knob.y - heightAt(in.uv)) / u.knob.z);
+	let s = max(0.0, 1.0 - (u.knob.y - heightAt(uvOf(normalize(in.dir)))) / u.knob.z);
 	let col = vec3<f32>(15.0 + 23.0 * s, 40.0 + 95.0 * s, 69.0 + 100.0 * s) / 255.0;
 	let v = normalize(u.eye.xyz - in.wp);
 	let halfv = normalize(LIGHT + v);
@@ -313,6 +313,35 @@ Render3D.prototype.setOrbit = function (yaw, pitch, dist) {
 	this.dist = Math.max(Render3D.DIST_MIN, Math.min(Render3D.DIST_MAX, dist));
 	if (!this.vpW) return;
 	Render3D.matVP(this.vpW, this.eyeW, this.yaw, this.pitch, this.dist, this.aspect);
+};
+
+// Camera ray pick for the inspector: canvas pixel -> NDC -> world ray -> unit-sphere
+// hit. Writes the normalized surface direction into out and returns true, or false when
+// the ray misses. The basis, FOV and aspect mirror matVP exactly - a pick must land on
+// the pixel the sphere was drawn at.
+Render3D.prototype.pick = function (out, px, py, w, h) {
+	var cp = Math.cos(this.pitch), sp = Math.sin(this.pitch), cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+	var dist = this.dist;
+	var ex = dist * cp * sy, ey = dist * sp, ez = dist * cp * cy;
+	var fx = -ex / dist, fy = -ey / dist, fz = -ez / dist;
+	var rl = Math.hypot(fz, fx);
+	var rx = -fz / rl, ry = 0, rz = fx / rl;
+	var ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;
+	var ndcX = (px / w) * 2 - 1, ndcY = 1 - (py / h) * 2;
+	var t = Math.tan(Render3D.FOV / 2);
+	var dx = fx + t * (ndcX * this.aspect * rx + ndcY * ux);
+	var dy = fy + t * (ndcX * this.aspect * ry + ndcY * uy);
+	var dz = fz + t * (ndcX * this.aspect * rz + ndcY * uz);
+	var L0 = Math.hypot(dx, dy, dz);
+	dx /= L0; dy /= L0; dz /= L0;   // the sphere quadratic below assumes a unit ray
+	var b = ex * dx + ey * dy + ez * dz;
+	var disc = b * b - (dist * dist - 1);
+	if (disc <= 0) return false;
+	var s = -b - Math.sqrt(disc);
+	var hx = ex + dx * s, hy = ey + dy * s, hz = ez + dz * s;
+	var L = Math.hypot(hx, hy, hz);
+	out[0] = hx / L; out[1] = hy / L; out[2] = hz / L;
+	return true;
 };
 
 Render3D.prototype.setDetail = function (k) {

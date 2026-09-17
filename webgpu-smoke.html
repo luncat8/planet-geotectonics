@@ -457,6 +457,7 @@ function captureLine(adapter, fallback) {
 		// The CPU-engine mode: same device, but z packed from the CPU state per frame.
 		var r3z = new Render3D(m3d).init({ device: device, k: 6, look: cpu.grid.lookup, V: V,
 			zSource: 'cellZ', lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
+		r3z.initReadback();
 		r3z.redraw(cpu);
 		await device.queue.onSubmittedWorkDone();
 		var p3d = await r3z.readPixels();
