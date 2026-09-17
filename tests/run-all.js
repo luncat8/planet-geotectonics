@@ -15,7 +15,7 @@ const release = argv.includes('--release');
 const full = release || argv.includes('--full');
 const HISTORIES = ['kinematics', 'ores', 'alloc', 'longrun'];
 const SHORT = ['browser-scripts', 'gui', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces',
-	'determinism', 'raster', 'conveyor', 'rift', 'isostasy', 'erosion', 'adj', 'collapse', 'split',
+	'determinism', 'water', 'raster', 'conveyor', 'rift', 'isostasy', 'erosion', 'adj', 'collapse', 'split',
 	'checkpoint', 'view-dir', 'perf', 'clipboard', 'wgsl-struct', 'gpu-play', 'gpu-readback',
 	'gpu-d1diff', 'gpu-parity-ui'];
 const names = full ? SHORT.concat(HISTORIES) : SHORT;

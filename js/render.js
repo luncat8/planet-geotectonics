@@ -269,15 +269,15 @@ Renderer.prototype.draw = function (layer) {
 			colors[b + 2] = hue2rgb(pp, q, h - 1 / 3) * 255;
 			continue;
 		}
-		// Relief range (0.3.3): |z| = RenderParams.zRange saturates land and the deep-water floor
-		// symmetrically, so the ramp's cap and its floor move together.
-		var z = s.z[c];
-		if (z < 0) {
-			var shallow = Math.max(0, 1 + z / RenderParams.zRange);
+		// Display sea level is intentionally separate from the calibrated physics wet flag.
+		// The relief ramp follows the drawn shoreline, so changing sea never changes contrast.
+		var z = s.z[c], sea = RenderParams.sea;
+		if (z < sea) {
+			var shallow = Math.max(0, 1 - (sea - z) / RenderParams.zRange);
 			colors[b] = 15 + 23 * shallow; colors[b + 1] = 40 + 95 * shallow; colors[b + 2] = 69 + 100 * shallow;
 			continue;
 		}
-		var high = Math.min(1, z / RenderParams.zRange);
+		var high = Math.min(1, (z - sea) / RenderParams.zRange);
 		colors[b] = 100 + 145 * high; colors[b + 1] = 156 + 79 * high; colors[b + 2] = 112 + 113 * high;
 	}
 	this.paint();

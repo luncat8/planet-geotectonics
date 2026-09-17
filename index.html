@@ -31,6 +31,9 @@
 				<label>Friction ×<input id="friction" type="range" min="0" max="3" step="0.05" value="1"><span class="value" id="friction-value">1.00</span></label>
 				<label>Erosion ×<input id="ero" type="range" min="0" max="3" step="0.05" value="1"><span class="value" id="ero-value">1.00</span></label>
 				<label>Relief range<input id="relief" type="range" min="2" max="20" step="0.5" value="6.5"><span class="value" id="relief-value">6.5 km</span></label>
+				<label>Sea level<input id="sea" type="range" min="-10" max="5" step="0.1" value="0"><span class="value" id="sea-value">+0.0 km</span></label>
+				<label>Water ×<input id="sea-vol" type="range" min="0" max="4" step="0.05" value="1"><span class="value" id="sea-vol-value">1.00×</span></label>
+				<label class="check"><input id="sea-volume" type="checkbox">Volume</label>
 				<button id="save">Save world</button><button id="deposits">Deposits JSON</button>
 			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
@@ -45,6 +48,7 @@
 	<script src="js/env.js"></script>
 	<script src="js/geodesics.js"></script>
 	<script src="js/params.js"></script>
+	<script src="js/water.js"></script>
 	<script src="js/quat.js"></script>
 	<script src="js/mantle.js"></script>
 	<script src="js/diag.js"></script>

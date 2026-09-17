@@ -15,8 +15,11 @@
 	var coolingInput = document.getElementById('cooling'), tmInput = document.getElementById('tm');
 	var frictionInput = document.getElementById('friction'), eroInput = document.getElementById('ero');
 	var reliefInput = document.getElementById('relief');
+	var seaInput = document.getElementById('sea'), seaVolInput = document.getElementById('sea-vol'), seaVolumeInput = document.getElementById('sea-volume');
 	var tmValue = document.getElementById('tm-value'), frictionValue = document.getElementById('friction-value');
 	var eroValue = document.getElementById('ero-value'), reliefValue = document.getElementById('relief-value');
+	var seaValue = document.getElementById('sea-value'), seaVolValue = document.getElementById('sea-vol-value');
+	var waterDirty = true, waterData = null;
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var extractScratch = null;
@@ -37,6 +40,9 @@
 		frictionValue.textContent = (+frictionInput.value).toFixed(2);
 		eroValue.textContent = (+eroInput.value).toFixed(2);
 		reliefValue.textContent = (+reliefInput.value).toFixed(1) + ' km';
+		seaValue.textContent = (Params.sea >= 0 ? '+' : '') + (Params.sea / 1000).toFixed(1) + ' km';
+		seaVolValue.textContent = (+seaVolInput.value).toFixed(2) + '×';
+		seaInput.disabled = seaVolumeInput.checked; seaVolInput.disabled = !seaVolumeInput.checked;
 	}
 	// The follow waits for the hand, not for the focus: a range input keeps focus after a drag,
 	// so gating the rewrite on `document.activeElement` left the control stuck on the value it
@@ -67,6 +73,28 @@
 	// The other direction, for the paths that hand the page a world it did not set: a rebuild
 	// starts on the new world's own start temperature, and Load takes the temperature and the
 	// cooling flag from the blob. The Params knobs are global settings and carry over.
+	// Water controls are display-only. A histogram is rebuilt only when requested by input or
+	// the 2 Hz tracking tick; never in the simulation hot loop.
+	function solveWater() {
+		if (!seaVolumeInput.checked) { Params.sea = +seaInput.value * 1000; waterDirty = false; paintAdjust(); return; }
+		waterData = Water.fromElevations(state.z, +seaVolInput.value);
+		Params.sea = waterData.level; Params.seaVolScale = +seaVolInput.value;
+		waterDirty = false; paintAdjust(); dirty = true;
+	}
+	function armWater() { waterDirty = true; if (!seaVolumeInput.checked) solveWater(); else dirty = true; }
+	function switchWaterMode() {
+		Params.seaVolume = seaVolumeInput.checked ? 1 : 0;
+		if (seaVolumeInput.checked) {
+			if (!waterData) waterData = Water.fromElevations(state.z, 1);
+			var v = Water.volumeBelow(state.z, Params.sea);
+			seaVolInput.value = Math.max(0, Math.min(4, v / (waterData.v0 || 1))).toFixed(2);
+		} else { seaInput.value = (Params.sea / 1000).toFixed(1); }
+		waterDirty = true; solveWater();
+	}
+	seaInput.addEventListener('input', armWater);
+	seaVolInput.addEventListener('input', armWater);
+	seaVolumeInput.addEventListener('change', switchWaterMode);
+
 	function syncAdjust() {
 		coolingInput.checked = state.cooling === 1;
 		tmInput.value = state.Tm.toFixed(2);
@@ -88,6 +116,9 @@
 		if (Params.friction !== ADJ_DEFAULTS.friction) parts.push('friction ' + Params.friction + 'x');
 		if (Params.eroScale !== ADJ_DEFAULTS.eroScale) parts.push('erosion ' + Params.eroScale + 'x');
 		if (Params.zRange !== ADJ_DEFAULTS.zRange) parts.push('relief ' + (Params.zRange / 1000).toFixed(1) + ' km');
+		if (seaVolumeInput.checked) {
+			if (Math.abs(+seaVolInput.value - 1) > 1e-9 || Math.abs(Params.sea) > 1) parts.push('sea vol ' + (+seaVolInput.value).toFixed(2) + 'x (' + (Params.sea / 1000).toFixed(1) + ' km)');
+		} else if (Math.abs(Params.sea) > 1) parts.push('sea ' + (Params.sea >= 0 ? '+' : '') + (Params.sea / 1000).toFixed(1) + ' km');
 		return parts.length ? 'adj ' + parts.join(' · ') : '';
 	}
 	// A press arms the hold as much as a move does: a thumb the pointer has taken but not yet
@@ -185,11 +216,18 @@
 	prefilled('fric', frictionInput);
 	prefilled('ero', eroInput);
 	prefilled('relief', reliefInput);
+	prefilled('sea', seaInput);
+	prefilled('seavol', seaVolInput);
+	if (query.get('seamode') === '1') seaVolumeInput.checked = true;
+	Params.seaVolume = seaVolumeInput.checked ? 1 : 0;
+	Params.seaVolScale = +seaVolInput.value;
 	if (query.get('cool')) coolingInput.checked = query.get('cool') !== '0';
 	state.cooling = coolingInput.checked ? 1 : 0;
 	applyTm();
 	applyAdjust();
 	Sim.raster(state);
+	Params.sea = +seaInput.value * 1000;
+	solveWater();
 	Perf.reset();
 	function paintBadge() {
 		badge.textContent = (gpu.on && gpu.ready ? 'GPU · L' : 'CPU · L') + grid.level;
@@ -522,7 +560,7 @@
 			' km · sediment ' + (state.hSed[owner] / 1000).toFixed(1) + ' km' +
 			'\nAge ' + state.age[owner].toFixed(1) + ' Myr · elevation ' + Math.round(state.z[cell]) +
 			' m · slope ' + (state.slope[cell] * 100).toFixed(2) + '% · damage ' + state.damage[owner].toFixed(2) +
-			'\n' + (state.wet[cell] ? 'wet' : 'land') + ' · dynamic ' + Math.round(state.zDyn[owner]) + ' m' +
+			'\n' + (state.z[cell] < Params.sea ? 'wet' : 'land') + ' · depth ' + Math.max(0, Params.sea - state.z[cell]).toFixed(0) + ' m · dynamic ' + Math.round(state.zDyn[owner]) + ' m' +
 			'\nOres VMS ' + state.oVms[owner].toFixed(2) + ' · mafic ' + state.oMaf[owner].toFixed(2) +
 			' · arc ' + state.oArc[owner].toFixed(2) + ' · oro ' + state.oOro[owner].toFixed(2) +
 		' · basin ' + state.oBas[owner].toFixed(2) + ' · placer ' + state.oPla[owner].toFixed(2) +
@@ -743,7 +781,7 @@
 							});
 					}
 				} else {
-					Sim.advance(state, dt, steps); ran += steps; dirty = true;
+					Sim.advance(state, dt, steps); ran += steps; dirty = true; waterDirty = true;
 				}
 			}
 			if (runTarget < Infinity && state.t >= runTarget - dt * 0.5) {
@@ -782,6 +820,7 @@
 		if (Perf.due(now)) {
 			Perf.update(now);
 			showStrip(stripRows());
+			if (seaVolumeInput.checked && waterDirty) solveWater();
 			// The Mantle Tm slider follows the sim on the strip's own 2 Hz tick while cooling
 			// is on, and never while a hand is on the control: the hold holdTmFollow arms is
 			// retired after the rewrite check, so it covers its own ticks.

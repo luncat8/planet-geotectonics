@@ -21,6 +21,8 @@ var Params = Object.seal({
 	// Relief ramp: |z| = zRange metres saturates land and the deep-water floor of the
 	// elevation palette symmetrically (render.js, render-gpu.js). Renderer-only.
 	zRange: 6500,
+	// Display-only sea level; physics continues to use wet = z < 0.
+	sea: 0, seaVolume: 0, seaVolScale: 1,
 	kDam: 5e-4, kDamT: 1e-3, kHeal: 0.005, extRef: 0.01, splitDamage: 0.6, minPlateCells: 100,
 	mergeTime: 20, vRift: 10000, splitAge: 40,
 	Tm0: 1, TmHot: 1.6, tauCool: 2500, Tfloor: 0.35, kPlume: 0.01, plumeRad: 500000,

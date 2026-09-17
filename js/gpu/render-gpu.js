@@ -26,7 +26,7 @@ GpuRenderer.LAYERS = { plate: 0, type: 1, z: 2, damage: 3, owner: 4, sediment: 5
 
 // zRange is the relief ramp in metres (Params.zRange): land saturates at +zRange, the
 // deep-water floor at -zRange. A uniform, not a const, so the slider needs no rebuild.
-GpuRenderer.SHADER = `struct U { layer: u32, viewQ: vec4<f32>, zRange: f32 };
+GpuRenderer.SHADER = `struct U { layer: u32, viewQ: vec4<f32>, zRange: f32, sea: f32 };
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var<storage, read> LOOK: array<f32>;
 @group(0) @binding(2) var<storage, read> GRIDI: array<i32>;
@@ -189,12 +189,15 @@ fn cellColor(c: u32, px: u32, py: u32) -> vec3<f32> {
 		return hslToRgb(hsl.x, hsl.y, hsl.z) * 255.0;
 	}
 	// Same relief ramp as Renderer.draw: |z| = u.zRange saturates land and the floor.
+	// The zero-sea specialization is the old ramp: max(0.0, 1.0 + z / u.zRange)
+	// and min(1.0, z / u.zRange). Keeping the spelling here documents the default
+	// bit-compatible path while the general expression below translates it by sea.
 	let z = cellZ(c);
-	if (z < 0.0) {
-		let shallow = max(0.0, 1.0 + z / u.zRange);
+	if (z < u.sea) {
+		let shallow = max(0.0, 1.0 - (u.sea - z) / u.zRange);
 		return vec3(15.0 + 23.0 * shallow, 40.0 + 95.0 * shallow, 69.0 + 100.0 * shallow);
 	}
-	let high = min(1.0, z / u.zRange);
+	let high = min(1.0, (z - u.sea) / u.zRange);
 	return vec3(100.0 + 145.0 * high, 156.0 + 79.0 * high, 112.0 + 113.0 * high);
 }
 
@@ -269,14 +272,15 @@ GpuRenderer.prototype.init = function (state, opts) {
 		device.queue.writeBuffer(S.buf.lookup, 0, g.lookup);
 	}
 	// struct U { layer: u32, viewQ: vec4<f32>, zRange: f32 }: viewQ is 16-byte aligned at 16,
-	// zRange at 32, and the struct rounds up to 48.
+	// zRange and sea at 32/36; the struct remains 48 bytes.
 	this.uniform = device.createBuffer({ size: 48, usage: 0x40 | 0x8 });
 	this.uniformBytes = new ArrayBuffer(48);
 	this.layerWord = new Uint32Array(this.uniformBytes);
 	this.viewWord = new Float32Array(this.uniformBytes, 16, 4);
-	this.zRangeWord = new Float32Array(this.uniformBytes, 32, 1);
+	this.zRangeWord = new Float32Array(this.uniformBytes, 32, 2);
 	this.viewWord.set(this.viewQ);
 	this.zRangeWord[0] = GpuRendererParams.zRange;
+	this.zRangeWord[1] = GpuRendererParams.sea;
 	var shaderModule = device.createShaderModule({ code: code });
 	var layout = device.createBindGroupLayout({ entries: [
 		{ binding: 0, visibility: 0x2, buffer: { type: 'uniform' } },
@@ -420,6 +424,7 @@ GpuRenderer.prototype.appendTo = function (enc, layer) {
 	this.layerWord[0] = id;
 	// Read per draw, like the layer id: the Relief range slider needs no pipeline rebuild.
 	this.zRangeWord[0] = GpuRendererParams.zRange;
+	this.zRangeWord[1] = GpuRendererParams.sea;
 	var device = GpuSimRef.S.device;
 	device.queue.writeBuffer(this.uniform, 0, this.uniformBytes);
 	this.passInto(enc, this.worldView);
