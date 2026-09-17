@@ -60,6 +60,9 @@ tests/gpu-parity.js (headless CPU/GPU ensemble; needs the Chromium rig).
 0.1.5-final-design.md - normative design.
 0.3.3-draft-adj.md - draft: live-adjustable global settings (temperature, erosion, relief ramp).
 0.3.3-plan.md - the live adjustment plan built on the draft (temperature, friction, erosion, relief).
+0.3.5-plan-water-level.md - the water level plan: display eustasy, level and volume modes (draft inlined).
+0.5.0-draft-3d-render.md - draft: 3D planet render.
+0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent water).
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.

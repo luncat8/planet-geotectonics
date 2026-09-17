@@ -1,0 +1,13 @@
+**F1 — real bug, now fixed.** `Events.compact` shifted every live column down but left `owner` (cell → column) pointing at the pre-compaction indices until the next raster. For one cycle after *any* column death, the corridor test, orphan tally and stale-owner sweep read a **different column's** state. Instrumented: 9,493,680 wrong reads and 427,544 flipped corridor classifications over 1000 Myr, every cycle affected. Fixed by remapping `owner` where the columns shift (one pass over V per cycle). The GPU path never had it — the device rebuilds `owner` in `raster` before any reader.
+
+**F2 — checkpoint ring bounded in slots, not bytes.** L7 blobs are 41 MB, so 16 slots = 628 MB. Now `Params.ckptBytes` (96 MB) caps it: L5 16 slots / L6 9 / L7 2, allocated lazily on the first snapshot.
+
+**F3 — ~40 MB of dead grid buffers at L7** (`cellA/cellB/nbrA/nbrB/indices`) kept for a WebGL path that no longer exists; removed, and `advection-bench` reads the flat tables instead.
+
+**F4 — 48.7 whole-grid passes per event cycle.** Every plate was processed with grid-wide scans (`components` cleared the label array and scanned all V twice, per plate, twice per cycle; `dragFit` too). Cells are now bucketed per plate once and the per-plate passes walk that bucket. Same-session A/B: `Events.cycle` 3.19 → 2.42 ms at L5; bit-exact results (module-swap digest verified over 300 Myr).
+
+**F5 — renderer.** `ORE.indexOf(layer)` per cell plus byte-wise paint: draw+paint at L7 14.7 → 10.2 ms, output byte-identical on all 17 layers.
+
+**Consequence you should know about:** removing the damage noise the bug was feeding makes early rifting later — seed 11 no longer splits by 150 Myr, so `tests/split.js`'s natural run is re-baselined to seed 4 / 200 Myr. The long-run regime is intact: `longrun` reaches 1500 Myr with **75 splits / 75 merges** (was 66/70), 19.3 % continental, and the dt pair still matches.
+
+**Verification:** short profile 26/26 green; all four histories (`longrun`, `ores`, `alloc`, `kinematics`) re-run individually and green. The 4.5 Gyr release profile and the strict 60 fps proxy remain your owner-rig run.

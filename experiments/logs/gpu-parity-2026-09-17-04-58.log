@@ -1,0 +1,66 @@
+2026-09-17 04:56 · chrome 151 · win x86_64 — ready. Choose a run above, or use ?run=ens&frames=1000&level=5&seed=7
+Tip: headless `python3 run_gpu_parity.py` prints the same log via puppeteer; `file://` needs no rig.
+[determinism] frames=8 level=5 seed=7 …
+2026-09-17 04:56 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+determinism: frames=8 level=5 seed=7 wall=769ms
+PASS determinism: two 8-frame runs from the same upload are bit-identical
+[result] PASS
+[batch] level=5 seed=7 …
+2026-09-17 04:57 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+batch: 8 frame counts, level=5 seed=7 wall=3781ms
+batch-identity: 8 frame counts, seed 7, level 5 (zero tolerance)
+  1 frames: t=0.10000000000000001 frame=1 lastEvent=0 identical
+  7 frames: t=0.69999999999999996 frame=7 lastEvent=0 identical
+  11 frames: t=1.0999999999999999 frame=11 lastEvent=0 identical
+  12 frames: t=1.2000000000000000 frame=12 lastEvent=1.0999999999999999 identical
+  20 frames: t=2.0000000000000004 frame=20 lastEvent=1.0999999999999999 identical
+  21 frames: t=2.1000000000000005 frame=21 lastEvent=1.0999999999999999 identical
+  25 frames: t=2.5000000000000009 frame=25 lastEvent=2.1000000000000005 identical
+  40 frames: t=4.0000000000000018 frame=40 lastEvent=3.1000000000000014 identical
+PASS batch encoders are bit-identical to one-frame encoders
+[result] PASS
+[ensemble] frames=1000 level=5 seed=[7,8,9] …
+2026-09-17 04:57 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+ensemble: frames=1000 level=5 seed=[7,8,9] wall=47539ms gpuBuild=76ms
+ensemble: 1000 frames, seeds [7,8,9]
+  seed 7: worst plates 1, cols 0.85%, mean 10.6%, max 69.6%, cont 0.39pp
+    end cpu: t=100 plates=16 cols=9504 mean=6.22cm/yr cont=21.9%
+    end gpu: t=100 plates=16 cols=9501 mean=6.18cm/yr cont=21.7%
+  seed 8: worst plates 1, cols 1.02%, mean 11.4%, max 30.5%, cont 0.33pp
+    end cpu: t=100 plates=17 cols=9519 mean=5.41cm/yr cont=21.8%
+    end gpu: t=100 plates=16 cols=9537 mean=5.20cm/yr cont=21.5%
+  seed 9: worst plates 1, cols 0.76%, mean 13.4%, max 51.2%, cont 0.67pp
+    end cpu: t=100 plates=16 cols=9499 mean=5.38cm/yr cont=24.3%
+    end gpu: t=100 plates=17 cols=9518 mean=5.98cm/yr cont=24.5%
+all seeds within predeclared statistical bounds
+PASS ensemble
+[result] PASS
+[parity] frames=1 level=5 seed=7 …
+2026-09-17 04:58 · chrome 151 · win x86_64 · gpu hardware nvidia · browser · win x86_64
+parity: frames=1 level=5 seed=7 wall=484ms gpuBuild=111ms
+FIRST DIVERGENCE at frame 0:
+  low: 28 bad, first at [410] cpu=6305 gpu=9536 worstRatio=0.00
+  hSed: 2 bad, first at [2078] cpu=0.030249166925610648 gpu=0.014938806183636189 worstRatio=12019.06
+  oBas: 2 bad, first at [2078] cpu=0.0000039553695025210625 gpu=0.0000019533927115844563 worstRatio=2.33
+FAIL parity
+worst fields at last frame:
+  low: ratio=0.000 mismatches=28 at [410] cpu=6305 gpu=9536
+  world: ratio=0.013 mismatches=0
+  hFel: ratio=0.113 mismatches=0
+  hMaf: ratio=0.094 mismatches=0
+  hSed: ratio=12019.061 mismatches=2 at [2078] cpu=0.030249166925610648 gpu=0.014938806183636189
+  age: ratio=0.010 mismatches=0
+  zDyn: ratio=0.154 mismatches=0
+  oVms: ratio=0.011 mismatches=0
+  oBas: ratio=2.330 mismatches=2 at [2078] cpu=0.0000039553695025210625 gpu=0.0000019533927115844563
+  z: ratio=0.222 mismatches=0
+  slope: ratio=0.116 mismatches=0
+  gradZ: ratio=0.137 mismatches=0
+  uMantle: ratio=0.055 mismatches=0
+  plumeT: ratio=0.055 mismatches=0
+  vel: ratio=0.022 mismatches=0
+  ext: ratio=0.194 mismatches=0
+  subRate: ratio=0.123 mismatches=0
+  maxSpeed: ratio=0.016 mismatches=0
+  erodedFel: ratio=0.143 mismatches=0
+[result] FAIL
