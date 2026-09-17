@@ -182,18 +182,21 @@ function convergence(W) {
 }
 
 // --- events are deterministic and leave the ledger alone ------------------------------------
-// The natural run is re-baselined on seed 11: 0.3.3's quadratic intake erodes low relief much
-// slower, and the seed-7 world (three splits under the linear law) now reaches 150 Myr with
-// none - the statistics drift the plan's §3 recalibration re-proof owns. Seed 11 exercises
-// both paths on the new default; the prescribed corridor above keeps a fixed split target.
+// The natural run is re-baselined on seed 4 / 200 Myr: the 0.4.0 owner-remap fix (the column
+// compaction used to leave cell -> column pointing one cycle behind, so the corridor test read
+// a neighbouring column's damage) removed the spurious damage that used to make plates rift
+// early. On the fixed field the seed-11 world reaches 150 Myr with no split at all, seed 4
+// first splits at 72 Myr and first merges at 171 Myr, so 200 Myr exercises both paths inside
+// the test's time budget. The statistics themselves are the 0.4.0 recalibration's business;
+// the prescribed corridor above keeps a fixed split target either way.
 {
 	const runs = [];
 	for (let pass = 0; pass < 2; pass++) {
-		const s = new State(g, 11);
+		const s = new State(g, 4);
 		s.ckptCap = 0;
 		Sim.raster(s);
 		s.rebase();
-		Sim.advance(s, 0.1, 1500);          // 150 Myr with live splits and merges
+		Sim.advance(s, 0.1, 2000);          // 200 Myr with live splits and merges
 		runs.push({ s, fel: s.massFel0 + s.producedFel - s.massFel, maf: s.massMaf0 + s.producedMaf - s.subductedMaf - s.massMaf });
 	}
 	assert.equal(runs[0].s.plateCount, runs[1].s.plateCount);

@@ -142,17 +142,28 @@ var Checkpoint = {
 	},
 	push: function (s) {
 		if (!(s.ckptCap > 0)) return -1;
-		var slot = s.ckptI % s.ckptCap;
+		var ring = s.ckpt;
+		if (!ring) {
+			// First snapshot: the ring is allocated here because only now is the blob size
+			// known. ckptBytes bounds what a full-mirror blob may retain: 96 MB keeps all
+			// 16 slots at L5/L6 (2.7/9.9 MB) and 2 at L7 (41 MB), instead of 630 MB.
+			var slots = s.ckptCap;
+			if (s.ckptBytes > 0) slots = Math.max(1, Math.min(slots, Math.floor(s.ckptBytes / Checkpoint.size(s))));
+			s.ckptSlots = slots;
+			ring = s.ckpt = new Array(slots);
+			s.ckptT = new Float64Array(slots);
+		}
+		var slot = s.ckptI % ring.length;
 		s.ckpt[slot] = Checkpoint.save(s);
 		s.ckptT[slot] = s.t;
 		s.ckptI++;
-		if (s.ckptN < s.ckptCap) s.ckptN++;
+		if (s.ckptN < ring.length) s.ckptN++;
 		return slot;
 	},
 	// age 0 is the newest; null once the ring does not reach that far back.
 	entry: function (s, age) {
-		if (!(s.ckptN > age)) return null;
-		var slot = (s.ckptI - 1 - age) % s.ckptCap;
+		if (!s.ckpt || !(s.ckptN > age)) return null;
+		var slot = (s.ckptI - 1 - age) % s.ckpt.length;
 		return { blob: s.ckpt[slot], t: s.ckptT[slot] };
 	}
 };

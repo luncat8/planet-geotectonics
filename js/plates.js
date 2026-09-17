@@ -51,10 +51,15 @@ var Plates = {
 	// is the rotation a piece of lithosphere would take if it were free of every boundary force.
 	// Events uses it to ask whether the flow under two halves of a plate is actually pulling
 	// them apart before it cuts the plate along a damaged corridor.
-	dragFit: function (s, label, want, out, off) {
+	// label is a per-cell array; the optional list/begin/end narrow the scan to one plate's
+	// cells (Events.opening), which keeps a call off the full grid without changing what it
+	// sums.
+	dragFit: function (s, label, want, out, off, list, begin, end) {
 		var g = s.grid, R = PlateParams.radius, m = s.fitM, b = s.fitRhs;
+		var span = list ? end : g.V;
 		m.fill(0); b.fill(0);
-		for (var c = 0; c < g.V; c++) {
+		for (var at = 0; at < span; at++) {
+			var c = list ? list[begin + at] : at;
 			if (label[c] !== want) continue;
 			var cb = c * 3, x = g.pos[cb], y = g.pos[cb + 1], z = g.pos[cb + 2], A = g.A0[c];
 			m[0] += A * (1 - x * x); m[1] += -A * x * y; m[2] += -A * x * z;

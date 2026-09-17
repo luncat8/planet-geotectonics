@@ -59,6 +59,16 @@ function State(grid, seed, hot) {
 	// Plate pairs are keyed [lo * plateCap + hi]: suture timers plus the per-cycle census.
 	this.sutureTime = new Float32Array(this.plateCap * this.plateCap);
 	this.pairScratch = new Float32Array(this.plateCap * this.plateCap);
+	// Event-cycle scratch. colRemap follows the column compaction, so owner stays a valid
+	// cell -> column index. plateCellList groups the cells by their (frame-stale) cellPlate
+	// value in ascending cell order, so the per-plate passes in split/orphans walk one
+	// plate's cells instead of scanning all V once per plate (48 whole-grid passes per event
+	// cycle became two streaming passes).
+	this.colRemap = new Int32Array(this.colCap);
+	this.plateCellList = new Int32Array(grid.V);
+	this.plateCellStart = new Int32Array(this.plateCap + 1);
+	this.plateCellCursor = new Int32Array(this.plateCap);
+	this.plateCellFrame = -1;   // frame the buckets were built for; Events.buckets owns it
 	// Per-orphan-component adjacent-plate tallies for Events.orphans (64 = compSize cap).
 	this.orphanTally = new Int32Array(64 * this.plateCap);
 	this.orphanIndex = new Int32Array(64);
@@ -155,9 +165,15 @@ function State(grid, seed, hot) {
 	this.histPlates = new Uint16Array(StateParams.histCap);
 	this.histChanges = new Uint32Array(StateParams.histCap);
 	this.histCols = new Uint32Array(StateParams.histCap);
+	// ckptCap is a slot request, not a promise: one blob is ~260 bytes per cell, so the
+	// 16-slot ring is 43 MB at L5 but 630 MB at L7. Checkpoint.push sizes the ring to the
+	// smaller of ckptCap slots and ckptBytes bytes on the first snapshot, when the blob
+	// size is known; s.ckptSlots records what it chose. ckptCap = 0 still disables the ring.
 	this.ckptCap = StateParams.ckptCap;
-	this.ckpt = new Array(this.ckptCap);
-	this.ckptT = new Float64Array(this.ckptCap);
+	this.ckptBytes = StateParams.ckptBytes;
+	this.ckptSlots = 0;
+	this.ckpt = null;
+	this.ckptT = null;
 	this.reset(seed === undefined ? grid.seed : seed);
 }
 State.prototype.reset = function (seed) {
@@ -176,7 +192,8 @@ State.prototype.reset = function (seed) {
 	// lastEvent starts at 0, not -Infinity: plateCells is only meaningful after the first K5
 	// pass, and the event cadence would otherwise retire every plate on the opening frame.
 	this.spawns = 0; this.deaths = 0; this.overlaps = 0; this.splits = 0; this.merges = 0;
-	this.lastEvent = 0; this.ckptI = 0; this.ckptN = 0; this.ckpt.fill(null); this.ckptT.fill(0);
+	this.lastEvent = 0; this.ckptI = 0; this.ckptN = 0; this.ckptSlots = 0;
+	this.ckpt = null; this.ckptT = null;
 	this.ckptDue = StateParams.ckptEvery;
 	this.producedFel = 0; this.producedMaf = 0; this.erodedFel = 0; this.erodedMaf = 0;
 	this.subductedMaf = 0; this.subductedSed = 0;
@@ -193,6 +210,8 @@ State.prototype.reset = function (seed) {
 	this.M.fill(0); this.rhs.fill(0); this.seeds.fill(0); this.plateCells.fill(0);
 	this.plateBirth.fill(0); this.plateParent.fill(-1); this.plateDead.fill(0); this.plateRemap.fill(0);
 	this.sutureTime.fill(0); this.pairLen.fill(0); this.pairVel.fill(0); this.pairOk.fill(1);
+	// Event-cycle scratch, zeroed so a reset state matches a freshly built one (tests).
+	this.colRemap.fill(0); this.plateCellList.fill(0); this.plateCellStart.fill(0); this.plateCellCursor.fill(0);
 	this.pairScratch.fill(0); this.orphanTally.fill(0); this.orphanIndex.fill(0); this.corridor.fill(0); this.compLabel.fill(-1); this.queue.fill(0);
 	this.compSize.fill(0); this.compPlate.fill(-1);
 	this.fitM.fill(0); this.fitRhs.fill(0); this.fitOmega.fill(0);
@@ -204,7 +223,8 @@ State.prototype.reset = function (seed) {
 	this.count.fill(0); this.offset.fill(0); this.cursor.fill(0); this.entries.fill(0);
 	this.owner.fill(-1); this.distance.fill(Infinity); this.z.fill(NaN); this.wet.fill(0);
 	this.gradZ.fill(0); this.slope.fill(0); this.low.fill(-1); this.climbHistogram.fill(0);
-	this.cellPlate.fill(65535); this.gapFrames.fill(0); this.gapTime.fill(0); this.spawnSlot.fill(-1);
+	this.cellPlate.fill(65535); this.plateCellFrame = -1;
+	this.gapFrames.fill(0); this.gapTime.fill(0); this.spawnSlot.fill(-1);
 	this.gapPlate.fill(0); this.gapDonor.fill(-1); this.gapDonorN.fill(0); this.riftZone.fill(0); this.gapScan.fill(0);
 	this.mobile.fill(0); this.mobileFel.fill(0); this.mobilePla.fill(0);
 	this.outflow.fill(0); this.outflowFel.fill(0); this.outflowPla.fill(0);

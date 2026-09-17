@@ -28,30 +28,20 @@ var spacing = Math.sqrt(4 * Math.PI * R * R / V);
 var omega = CM_PER_YR * 1e-2 * 1e6 / R; /* rad per Myr */
 var cosCap = Math.cos(CAP_DEG * Math.PI / 180);
 
-/* flat neighbour tables: ring[i*6+k], -1 when absent (pentagons) */
-var pos = new Float64Array(V * 3), area = new Float64Array(V), ring = new Int32Array(V * 6).fill(-1);
-var ringN = new Uint8Array(V), nbrDist = new Float64Array(V), edgeLen = new Float64Array(V * 6);
+/* flat neighbour tables come straight from the build: ring[i*6+k] is -1 when absent (pentagons) */
+var pos = grid.pos, area = grid.A0, ring = grid.ring;
+var ringN = grid.ringN, nbrDist = grid.nbrDist, edgeLen = grid.edgeLen;
 var faceNx = new Float64Array(V * 6), faceNy = new Float64Array(V * 6), faceNz = new Float64Array(V * 6);
-var i, k, j, b;
+var i, k, j;
 for (i = 0; i < V; i++) {
-	pos[i * 3] = grid.cellA[i * 4]; pos[i * 3 + 1] = grid.cellA[i * 4 + 1]; pos[i * 3 + 2] = grid.cellA[i * 4 + 2];
-	area[i] = grid.cellA[i * 4 + 3];
-}
-for (i = 0; i < V; i++) {
-	var n = 0, dsum = 0;
-	for (k = 0; k < 6; k++) {
-		b = (i + k * WH) * 4;
-		if (grid.nbrA[b + 3] === 0) continue;
-		j = grid.nbrA[b];
-		ring[i * 6 + n] = j; edgeLen[i * 6 + n] = grid.nbrA[b + 1]; dsum += grid.nbrA[b + 2];
+	for (k = 0; k < ringN[i]; k++) {
+		j = ring[i * 6 + k];
 		var dx = pos[j * 3] - pos[i * 3], dy = pos[j * 3 + 1] - pos[i * 3 + 1], dz = pos[j * 3 + 2] - pos[i * 3 + 2];
 		var d = dx * pos[i * 3] + dy * pos[i * 3 + 1] + dz * pos[i * 3 + 2];
 		dx -= d * pos[i * 3]; dy -= d * pos[i * 3 + 1]; dz -= d * pos[i * 3 + 2];
 		var l = Math.hypot(dx, dy, dz);
-		faceNx[i * 6 + n] = dx / l; faceNy[i * 6 + n] = dy / l; faceNz[i * 6 + n] = dz / l;
-		n++;
+		faceNx[i * 6 + k] = dx / l; faceNy[i * 6 + k] = dy / l; faceNz[i * 6 + k] = dz / l;
 	}
-	ringN[i] = n; nbrDist[i] = dsum / n;
 }
 
 /* nearest cell to a unit vector by hill climbing from a guess (exact for a Voronoi grid) */

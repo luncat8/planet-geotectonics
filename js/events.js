@@ -18,7 +18,7 @@ var Events = {
 	cycle: function (s, span) {
 		if (span === undefined) span = s.t - s.lastEvent;
 		Events.compact(s);
-		Events.census(s);
+		Events.census(s);   // also buckets the cells per plate for split/orphans
 		Events.suture(s, span);
 		Events.absorb(s);
 		Events.retire(s);
@@ -40,11 +40,22 @@ var Events = {
 		s.alive[to] = 1;
 	},
 	compact: function (s) {
-		var dst = 0;
+		var dst = 0, remap = s.colRemap;
 		for (var i = 0; i < s.n; i++) {
 			if (!s.alive[i]) continue;
+			remap[i] = dst;
 			if (dst !== i) Events.copy(s, i, dst);
 			dst++;
+		}
+		// owner is the cell -> column map, so it has to follow the compaction here. Everything
+		// between this pass and the next raster (the corridor test in split, the orphan tally,
+		// contact's stale-owner sweep) would otherwise read the pre-compaction column: the
+		// instrumentation measured 9.5M shifted cells and 427k damage-class flips over 1000 Myr,
+		// one full cycle out of phase with the columns themselves.
+		var owner = s.owner, V = s.grid.V;
+		for (var c = 0; c < V; c++) {
+			var o = owner[c];
+			if (o >= 0) owner[c] = s.alive[o] ? remap[o] : -1;
 		}
 		for (var j = dst; j < s.n; j++) {
 			s.alive[j] = 0;
@@ -77,6 +88,30 @@ var Events = {
 				if (!Events.suturing(s, e, v)) ok[slot] = 0;
 			}
 		}
+		Events.buckets(s);
+	},
+	// The cells of each plate in ascending order, for the per-plate passes in split and
+	// orphans. Without it those passes scanned all V cells once per plate - 48 whole-grid
+	// passes per event cycle at L5, the whole cost of Events.cycle. Keyed on the same
+	// frame-stale cellPlate the full-grid scans filtered on, so the component numbering is
+	// identical. Rebuilt when the frame moves on, which is also what lets a direct
+	// Events.split() call outside a cycle find a list that matches the current plate map.
+	buckets: function (s) {
+		if (s.plateCellFrame === s.frame) return;
+		var g = s.grid, cap = s.plateCap, V = g.V, c, p;
+		var start = s.plateCellStart, cursor = s.plateCellCursor, list = s.plateCellList;
+		start.fill(0);
+		for (c = 0; c < V; c++) {
+			p = s.cellPlate[c];
+			if (p < cap) start[p + 1]++;
+		}
+		for (p = 0; p < cap; p++) start[p + 1] += start[p];
+		for (p = 0; p < cap; p++) cursor[p] = start[p];
+		for (c = 0; c < V; c++) {
+			p = s.cellPlate[c];
+			if (p < cap) list[cursor[p]++] = c;
+		}
+		s.plateCellFrame = s.frame;
 	},
 	// A boundary sutures while it neither opens nor creeps: continental collision, or a
 	// transform slower than vSuture. relN and relT span the tangent plane, so their magnitude
@@ -224,24 +259,31 @@ var Events = {
 		return p;
 	},
 	// Connected components of one plate after its damaged cells are removed, labelled in
-	// s.compLabel. Returns the component count; s.compSize holds the core sizes and
-	// compLabel is cleared for the whole grid, so a label always names a cell of the plate
-	// currently being cut. The threshold is an argument so a test can prescribe a corridor
-	// without touching the damage field.
+	// s.compLabel. Returns the component count; s.compSize holds the core sizes. The
+	// threshold is an argument so a test can prescribe a corridor without touching the
+	// damage field.
+	//
+	// The pass walks the plate's bucket of s.plateCellList (built by census from the same
+	// frame-stale cellPlate the old full-grid scan filtered on), in ascending cell order, so
+	// the component numbering is the one a whole-grid scan would produce. Labels are cleared
+	// per bucket: cells of other plates may still carry labels from an earlier plate, and
+	// every reader is scoped to the current plate's bucket or guards on cellPlate.
 	components: function (s, plate, threshold) {
 		var g = s.grid, label = s.compLabel, queue = s.queue, corridor = s.corridor;
 		var thr = threshold === undefined ? EventsParams.splitDamage : threshold;
-		var nComp = 0, head, tail, c, k;
-		label.fill(-1);
-		for (c = 0; c < g.V; c++) {
-			if (s.cellPlate[c] !== plate) { corridor[c] = 0; continue; }
+		var list = s.plateCellList, begin = s.plateCellStart[plate], end = s.plateCellStart[plate + 1];
+		var nComp = 0, head, tail, at, k;
+		for (at = begin; at < end; at++) {
+			var c = list[at];
+			label[c] = -1;
 			var o = s.owner[c];
 			corridor[c] = o >= 0 && s.damage[o] > thr ? 1 : 0;
 		}
-		for (c = 0; c < g.V; c++) {
-			if (s.cellPlate[c] !== plate || corridor[c] || label[c] >= 0) continue;
+		for (at = begin; at < end; at++) {
+			var seed = list[at];
+			if (corridor[seed] || label[seed] >= 0) continue;
 			var size = 0;
-			queue[0] = c; head = 0; tail = 1; label[c] = nComp;
+			queue[0] = seed; head = 0; tail = 1; label[seed] = nComp;
 			while (head < tail) {
 				var cur = queue[head++];
 				size++;
@@ -260,9 +302,11 @@ var Events = {
 	// joins the nearest surviving component, so a split never orphans cells.
 	assignRest: function (s, plate) {
 		var g = s.grid, label = s.compLabel, queue = s.queue;
-		var head = 0, tail = 0;
-		for (var c = 0; c < g.V; c++) {
-			if (s.cellPlate[c] === plate && label[c] >= 0) queue[tail++] = c;
+		var list = s.plateCellList, begin = s.plateCellStart[plate], end = s.plateCellStart[plate + 1];
+		var head = 0, tail = 0, at;
+		for (at = begin; at < end; at++) {
+			var c = list[at];
+			if (label[c] >= 0) queue[tail++] = c;
 		}
 		while (head < tail) {
 			var cur = queue[head++];
@@ -281,20 +325,24 @@ var Events = {
 	// around any closed corridor. The positive part is what opens an ocean; the closing half
 	// becomes a trench. A damaged line the flow is not pulling apart anywhere is a fossil weak
 	// zone, and cutting it shreds the plate instead of rifting it.
-	opening: function (s, keep) {
+	opening: function (s, keep, plate) {
 		var g = s.grid, R = EventsParams.radius, label = s.compLabel;
 		var sum = s.openSum, count = s.openLen, fitted = s.openFitted, omega = s.fitOmega;
+		var list = s.plateCellList, begin = s.plateCellStart[plate], end = s.plateCellStart[plate + 1];
 		var keepW = keep * 3;
 		sum.fill(0); count.fill(0); fitted.fill(0);
-		EventsPlates.dragFit(s, label, keep, omega, keepW);
+		EventsPlates.dragFit(s, label, keep, omega, keepW, list, begin, end);
 		fitted[keep] = 1;
-		for (var c = 0; c < g.V; c++) {
+		for (var at = begin; at < end; at++) {
+			var c = list[at];
 			if (label[c] !== keep) continue;
 			var b = c * 3, x = g.pos[b], y = g.pos[b + 1], z = g.pos[b + 2];
 			for (var k = 0; k < g.ringN[c]; k++) {
 				var e = c * 6 + k, j = g.ring[e], lab = label[j];
-				if (lab < 0 || lab === keep) continue;
-				if (!fitted[lab]) { EventsPlates.dragFit(s, label, lab, omega, lab * 3); fitted[lab] = 1; }
+				// A neighbour off the plate still carries a label from an earlier plate, so
+				// the cellPlate guard stands in for the old array-wide label.clear().
+				if (s.cellPlate[j] !== plate || lab < 0 || lab === keep) continue;
+				if (!fitted[lab]) { EventsPlates.dragFit(s, label, lab, omega, lab * 3, list, begin, end); fitted[lab] = 1; }
 				var jb = j * 3;
 				var dx = g.pos[jb] - x, dy = g.pos[jb + 1] - y, dz = g.pos[jb + 2] - z;
 				var radial = dx * x + dy * y + dz * z;
@@ -315,21 +363,22 @@ var Events = {
 	// K10 then gives each half the rotation of the flow beneath it, which is what opens the rift.
 	split: function (s) {
 		var g = s.grid, nP = s.plateCount, min = Events.minCells(s), corridor = s.corridor, label = s.compLabel;
-		var c, i;
+		var list = s.plateCellList, i, at;
+		Events.buckets(s);
 		for (var plate = 0; plate < nP; plate++) {
 			if (s.plateCells[plate] < 2 * min) continue;
 			// A plate that has just rifted has a warm, healing margin: the next weak zone takes
 			// tens of Myr to accumulate, which is what keeps splits from cascading.
 			if (s.t - s.plateBirth[plate] < EventsParams.splitAge) continue;
+			var begin = s.plateCellStart[plate], end = s.plateCellStart[plate + 1];
 			var nComp = Events.components(s, plate);
 			if (nComp < 2) continue;
 			// A corridor that covers most of the plate is diffuse weakening, not a rift: cutting
 			// along it would shred the plate instead of opening one ocean.
 			var cells = 0, corridorCells = 0;
-			for (c = 0; c < g.V; c++) {
-				if (s.cellPlate[c] !== plate) continue;
+			for (at = begin; at < end; at++) {
 				cells++;
-				corridorCells += corridor[c];
+				corridorCells += corridor[list[at]];
 			}
 			if (corridorCells * 2 > cells) continue;
 			var big = 0, biggest = -1, biggestSize = 0;
@@ -341,12 +390,13 @@ var Events = {
 			if (big < 2 || biggest < 0) continue;
 			// Pieces too small to be a plate are unlabelled, so the next pass folds their cells
 			// (and the corridor) into whichever surviving piece is nearest.
-			for (c = 0; c < g.V; c++) {
-				if (label[c] < 0 || s.compSize[label[c]] >= min) continue;
-				label[c] = -1;
+			for (at = begin; at < end; at++) {
+				var fold = list[at];
+				if (label[fold] < 0 || s.compSize[label[fold]] >= min) continue;
+				label[fold] = -1;
 			}
 			Events.assignRest(s, plate);
-			Events.opening(s, biggest);
+			Events.opening(s, biggest, plate);
 			var map = s.compPlate, made = 0;
 			for (i = 0; i < nComp; i++) map[i] = -1;
 			map[biggest] = plate;
@@ -361,7 +411,9 @@ var Events = {
 			for (i = 0; i < s.n; i++) {
 				if (!s.alive[i] || s.plate[i] !== plate) continue;
 				var cell = s.cell[i];
-				if (cell < 0 || label[cell] < 0 || map[label[cell]] < 0) continue;
+				// The cellPlate guard is the old "label[cell] < 0": a column sitting on a cell
+				// another plate's bucket owns carries a stale label and must not be remapped.
+				if (cell < 0 || s.cellPlate[cell] !== plate || label[cell] < 0 || map[label[cell]] < 0) continue;
 				s.plate[i] = map[label[cell]];
 				if (corridor[cell]) s.damage[i] = EventsParams.splitDamage * 0.5;
 			}
@@ -379,8 +431,11 @@ var Events = {
 	// cut by a damage corridor is still one component until Events.split formally cuts it.
 	orphans: function (s) {
 		var g = s.grid, min = Events.minCells(s), label = s.compLabel, cap = s.plateCap;
+		var list = s.plateCellList;
+		Events.buckets(s);
 		for (var p = 0; p < s.plateCount; p++) {
 			if (s.plateDead[p] || s.plateCells[p] < 2 * min) continue;
+			var begin = s.plateCellStart[p], end = s.plateCellStart[p + 1];
 			var nComp = Events.components(s, p, Infinity);
 			if (nComp < 2) continue;
 			var main = 0, id;
@@ -398,7 +453,8 @@ var Events = {
 				if (id !== main && s.compSize[id] < min) index[id] = next++;
 			}
 			tally.fill(0, 0, next * cap);
-			for (var c = 0; c < g.V; c++) {
+			for (var at = begin; at < end; at++) {
+				var c = list[at];
 				var lab = label[c];
 				if (lab < 0 || lab === main || lab >= 64 || index[lab] < 0) continue;
 				for (var k = 0; k < g.ringN[c]; k++) {
@@ -424,7 +480,8 @@ var Events = {
 				for (var i = 0; i < s.n; i++) {
 					if (!s.alive[i] || s.plate[i] !== p) continue;
 					var cell = s.cell[i];
-					if (cell < 0 || label[cell] !== id) continue;
+					// As in split: a stale label on another plate's bucket must not match id.
+					if (cell < 0 || s.cellPlate[cell] !== p || label[cell] !== id) continue;
 					var b = i * 3;
 					EventsQuat.rotate(scratch, 0, s.q, lp, s.body, b);
 					EventsQuat.rotateInv(s.body, b, s.q, wp, scratch, 0);

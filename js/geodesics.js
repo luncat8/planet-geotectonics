@@ -149,28 +149,18 @@ Grid.prototype.build = function () {
 
 	var W = 256;
 	var H = Math.ceil(V / W);
-	var cellA = new Float32Array(W * H * 4);
-	var cellB = new Float32Array(W * H * 4);
-	var nbrA = new Float32Array(W * H * 6 * 4);
-	var nbrB = new Float32Array(W * H * 6 * 4);
-
-	var AXIS = [0, 1, 0];
-	var e1s = new Array(V), e2s = new Array(V);
-	for (var i5 = 0; i5 < V; i5++) {
-		var n = pos[i5];
-		var e1 = Grid.cross(n, AXIS);
-		if (Math.hypot(e1[0], e1[1], e1[2]) < 1e-7) e1 = [1, 0, 0];
-		e1 = Grid.norm(e1);
-		var e2 = Grid.cross(e1, n);
-		e1s[i5] = e1;
-		e2s[i5] = e2;
-	}
+	// Flat, consumer-facing tables, filled by the Voronoi pass and the gradient pass below.
+	// The old packed cellA/cellB/nbrA/nbrB buffers (float32 W*H copies of the same numbers,
+	// carried for a WebGL draw that no longer exists) are gone; the one experiment that read
+	// them now reads pos/A0/ring/edgeLen/nbrDist.
+	var flatPos = new Float64Array(V * 3), A0 = new Float64Array(V);
+	var flatRing = new Int32Array(V * 6).fill(-1), ringN = new Uint8Array(V);
+	var nbrDist = new Float64Array(V), edgeLen = new Float64Array(V * 6);
 
 	var neighbourIdx = rings;
 
 	for (var i6 = 0; i6 < V; i6++) {
 		var nn = pos[i6];
-		var e1n = e1s[i6], e2n = e2s[i6];
 		var ringn = neighbourIdx[i6];
 		var mm = ringn.length;
 
@@ -186,56 +176,22 @@ Grid.prototype.build = function () {
 			area += 0.5 * Math.hypot(c[0], c[1], c[2]);
 		}
 		area *= R * R;
+		flatPos.set(pos[i6], i6 * 3);
+		A0[i6] = area;
+		ringN[i6] = mm;
 
-		cellA[i6 * 4 + 0] = nn[0];
-		cellA[i6 * 4 + 1] = nn[1];
-		cellA[i6 * 4 + 2] = nn[2];
-		cellA[i6 * 4 + 3] = area;
-		cellB[i6 * 4 + 0] = e1n[0];
-		cellB[i6 * 4 + 1] = e1n[1];
-		cellB[i6 * 4 + 2] = e1n[2];
-		cellB[i6 * 4 + 3] = land[i6];
-
-		for (var k3 = 0; k3 < 6; k3++) {
-			var base = (i6 + k3 * W * H) * 4;
-			if (k3 >= mm) {
-				nbrA[base + 3] = 0;
-				continue;
-			}
+		for (var k3 = 0; k3 < mm; k3++) {
+			var e3 = i6 * 6 + k3;
 			var j = ringn[k3];
 			var d0 = duals[(k3 - 1 + mm) % mm], d1 = duals[k3];
 			var ev = Grid.sub(d1, d0);
 			var len = Math.hypot(ev[0], ev[1], ev[2]) * R;
 			var dist = Math.acos(Math.max(-1, Math.min(1, Grid.dot(nn, pos[j])))) * R;
 
-			var pj = pos[j];
-			var dp = Grid.dot(pj, nn);
-			var tv = [pj[0] - nn[0] * dp, pj[1] - nn[1] * dp, pj[2] - nn[2] * dp];
-			tv = Grid.norm(tv);
-			var nx = Grid.dot(tv, e1n), ny = Grid.dot(tv, e2n);
-
-			var ej = e1s[j];
-			var dpe = Grid.dot(ej, nn);
-			var te = [ej[0] - nn[0] * dpe, ej[1] - nn[1] * dpe, ej[2] - nn[2] * dpe];
-			te = Grid.norm(te);
-			var rotA = Grid.dot(te, e1n), rotB = Grid.dot(te, e2n);
-
-			nbrA[base + 0] = j;
-			nbrA[base + 1] = len;
-			nbrA[base + 2] = Math.max(dist, 1.0);
-			nbrA[base + 3] = 1;
-			nbrB[base + 0] = nx;
-			nbrB[base + 1] = ny;
-			nbrB[base + 2] = rotA;
-			nbrB[base + 3] = rotB;
+			flatRing[e3] = j;
+			edgeLen[e3] = len;
+			nbrDist[i6] += Math.max(dist, 1.0) / mm;
 		}
-	}
-
-	var indices = new Uint32Array(faces.length * 3);
-	for (var f3 = 0; f3 < faces.length; f3++) {
-		indices[f3 * 3 + 0] = faces[f3][0];
-		indices[f3 * 3 + 1] = faces[f3][1];
-		indices[f3 * 3 + 2] = faces[f3][2];
 	}
 
 	var lookupW = 1024, lookupH = 512;
@@ -269,24 +225,15 @@ Grid.prototype.build = function () {
 		}
 	}
 
-	var flatPos = new Float64Array(V * 3), A0 = new Float64Array(V);
-	var flatRing = new Int32Array(V * 6).fill(-1), ringN = new Uint8Array(V);
-	var nbrDist = new Float64Array(V), edgeLen = new Float64Array(V * 6);
 	var faceN = new Float64Array(V * 18), faceT = new Float64Array(V * 18);
 	var fluxN = new Float64Array(V * 18), collapseWeight = new Float64Array(V * 6);
 	// Least-squares tangent gradient operator per cell: grad z = gradInv · Σ (z_j − z_i) r_j.
 	// Exact for tangent-linear fields, so ridge push sees no grid-scale noise.
 	var gradInv = new Float64Array(V * 9), mom = new Float64Array(9), inv = new Float64Array(9);
 	for (var c = 0; c < V; c++) {
-		flatPos.set(pos[c], c * 3);
-		A0[c] = cellA[c * 4 + 3];
-		ringN[c] = rings[c].length;
 		mom.fill(0);
 		for (var k = 0; k < ringN[c]; k++) {
-			var e = c * 6 + k, packed = (c + k * W * H) * 4, j = rings[c][k];
-			flatRing[e] = j;
-			edgeLen[e] = nbrA[packed + 1];
-			nbrDist[c] += nbrA[packed + 2] / ringN[c];
+			var e = c * 6 + k, j = rings[c][k];
 			var dot = Grid.dot(pos[c], pos[j]);
 			var normal = Grid.norm([pos[j][0] - dot * pos[c][0], pos[j][1] - dot * pos[c][1], pos[j][2] - dot * pos[c][2]]);
 			var eb = e * 3;
@@ -317,11 +264,10 @@ Grid.prototype.build = function () {
 	}
 
 	return {
-		level: level, seed: seed, V: V, W: W, H: H, cellA: cellA, cellB: cellB,
+		level: level, seed: seed, V: V, W: W, H: H,
 		pos: flatPos, A0: A0, ring: flatRing, ringN: ringN, nbrDist: nbrDist, edgeLen: edgeLen,
 		faceN: faceN, faceT: faceT, fluxN: fluxN, collapseWeight: collapseWeight,
 		gradInv: gradInv, land: land,
-		nbrA: nbrA, nbrB: nbrB, indices: indices,
 		lookup: lookup, lookupW: lookupW, lookupH: lookupH,
 		landFraction: landCount / V,
 	};

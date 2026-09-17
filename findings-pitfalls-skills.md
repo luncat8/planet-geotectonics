@@ -1459,3 +1459,41 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	be printed conditionally, never padded with the default (`gpuBuild=undefinedms` on every
 	ensemble capture until the driver learned the conditional and `__ens` began recording its
 	first seed's cold build — the number comparable with `__run`'s).
+
+## a refactor is proven by swapping the module, not by reading the diff (2026-09-17)
+
+	a refactor that claims to change nothing observable should be checked with the old code, not
+	with the new one's good intentions. node's `require.cache` makes that cheap: replace the
+	entry for the module under test with `{ id, filename, loaded: true, exports: require(refPath) }`
+	before anything requires it, and every consumer (sim, tests/helpers) picks up the reference
+	instead - one probe then runs the same world, the same seed and the same horizon twice, once
+	per module, and prints an FNV digest over the state's typed arrays. Make the reference the
+	previous commit's file with only the intended behavioural fix applied (here: the owner remap
+	inside `compact`), and the check becomes bit-exact instead of approximate. Two things bite:
+	the copy has to sit in the repo tree or its own relative requires (`./params.js`) fail - either
+	place it inside `js/` temporarily or rewrite those paths to absolute ones; and a refactor that
+	introduces scratch arrays must zero them in `State.reset`, because `tests/determinism.js`
+	compares a reset state against a freshly built one byte for byte and a stale scratch buffer
+	shows up as "1 !== 0" on the first array it reaches.
+
+	the same harness answers "is it faster" without a profiler: run the two module copies back to
+	back in one session and compare the same counter (here mean `Events.cycle` ms over 281
+	cycles: 3.19 -> 2.42). Do not use a number from an earlier session as the "before": absolute
+	sandbox timings drift by ~1.6x on untouched tests (`quat` 39 -> 60 ms, `mantle` 169 -> 264 ms
+	on identical code), which is enough to invent a 2x regression out of nothing. Same rule for
+	the histories: `longrun`'s "1500 Myr in 117 s" and 232 s are the same code and two machines'
+	worth of throttling.
+
+## a derived index map has to be remapped where its array is shifted (2026-09-17)
+
+	`Events.compact` shifts every live column down and drops the dead ones. Every column array it
+	copies is fine; `owner` (cell -> column) is not a column array, so it kept pointing at the
+	pre-compaction indices until the next `Sim.raster` - a whole event cycle in which the
+	corridor test, the orphan tally and the stale-owner sweep read another column's damage
+	(measured: 9.5M wrong reads, 427k flipped corridor classifications over 1000 Myr, every
+	cycle). The cheap fix is to write `remap[old] = new` in the same loop that shifts and remap
+	the derived map once at the end (`owner[c] = alive[o] ? remap[o] : -1`). Generalise: when a
+	function renumbers one side of a relation it maintains, it owns every map that points into
+	it. The device has the same relation (CELLI) but not the defect - its `raster` is dispatched
+	before every kernel that reads the map, so a mirror-side fix stays mirror-side; check the
+	dispatch order before assuming the GPU path shares a CPU bug.

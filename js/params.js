@@ -27,6 +27,9 @@ var Params = Object.seal({
 	kV: 0.3, kM: 0.2, kM2: 0.15, kA: 0.02, kRec: 3, kO: 0.02, kB: 2e-4, kB2: 0.002, kDecay: 0.002,
 	fertLo: 0.5, hOro: 45000, hBas: 2000, zBasin: 300,
 	nWave: 8, nPhi: 4, nPlume: 4, histCap: 256, hotStart: 0, eventCadence: 1,
-	ckptCap: 16, ckptEvery: 20
+	// ckptCap is the ring length at L5; ckptBytes caps the ring by bytes so a full-mirror
+	// checkpoint blob (L7 is ~41 MB) cannot quietly turn the ring into hundreds of MB.
+	// Checkpoint.push sizes the ring to the smaller of the two and reports it in ckptSlots.
+	ckptCap: 16, ckptBytes: 96 * 1024 * 1024, ckptEvery: 20
 });
 if (typeof module !== 'undefined' && module.exports) module.exports = Params;
