@@ -27,9 +27,9 @@
    kept and the residual jump is reported - the model itself is discontinuous there, and
    hiding that in the ingest would move the surprise into the sim.
 
-   Usage:
-     node tools/earth/rot_ingest.js [--rot data/earth/PALEOMAP_PlateModel.rot]
-                                    [--out js/data/rot-paleomap.js] [--tmin 0] [--tmax 1100]
+   Usage (flags take =value or a following argument):
+     node tools/earth/rot_ingest.js [--rot=data/earth/PALEOMAP_PlateModel.rot]
+                                    [--out=js/data/rot-paleomap.js] [--tmin=0] [--tmax=540]
 */
 'use strict';
 const fs = require('node:fs');
@@ -37,8 +37,11 @@ const path = require('node:path');
 const Quat = require('../../js/quat.js');
 
 const arg = (name, def) => {
-	const a = process.argv.find((x) => x.startsWith('--' + name + '='));
-	return a === undefined ? def : a.slice(name.length + 3);
+	const at = process.argv.indexOf('--' + name);
+	const eq = process.argv.find((x) => x.startsWith('--' + name + '='));
+	if (eq !== undefined) return eq.slice(name.length + 3);
+	if (at >= 0 && at + 1 < process.argv.length && !process.argv[at + 1].startsWith('--')) return process.argv[at + 1];
+	return def;
 };
 const ROT = arg('rot', 'data/earth/PALEOMAP_PlateModel.rot');
 const OUT = arg('out', 'js/data/rot-paleomap.js');

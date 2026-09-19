@@ -77,8 +77,16 @@ var Rotations = {
 		}
 		return lo;
 	},
+	// Whether the model actually speaks for this plate at t. It often does not: the sample
+	// windows are the plates' existence windows, and at 250 Ma the model has nothing for South
+	// America (oldest sample 143.8 Ma), Australia (94), the Pacific (84) or Antarctica (166) -
+	// they were not distinct plates yet. at() clamps past the end rather than failing, so
+	// callers reconstructing an epoch must check this first and merge or drop the plate.
+	has: function (p, t) { return p.n > 1 && t >= p.t[0] && t <= p.t[p.n - 1]; },
 	// Reconstruction rotation R(t): present-day position -> position at time t. Slerped between
-	// the model's samples, which is the same curve a fractional stage rotation traces.
+	// the model's samples, which is the same curve a fractional stage rotation traces. Beyond
+	// either end the nearest sample is held, which is a constant-rotation extrapolation, not a
+	// model value - see has().
 	at: function (p, t, out, o) {
 		var ts = p.t, i = Rotations.bracket(p, t);
 		if (i < 0 || i >= p.n - 1) {

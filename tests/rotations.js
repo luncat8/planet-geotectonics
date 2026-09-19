@@ -169,6 +169,27 @@ for (const code of ['NAM', 'IND', 'AUS', 'AFR']) {
 	assert.ok(Math.abs(home[0] - 20) < 1e-6 && Math.abs(home[1] - 40) < 1e-6, code + ' round trip');
 }
 
+// --- existence windows: the model is silent about plates that were not distinct yet ---------
+// at() clamps past the end of a plate's samples instead of failing, so a caller that
+// reconstructs an epoch has to ask first - otherwise it silently rotates South America by its
+// 143.8 Ma rotation and calls the result Pangaea.
+const window = [['NAM', 515], ['EUR', 515], ['AFR', 515], ['IND', 206], ['ANT', 166],
+	['SAM', 143.8], ['AUS', 94], ['PAC', 84]];
+for (const [code, oldest] of window) {
+	const p = Rotations.find(code);
+	assert.equal(p.t[p.n - 1], oldest, code + ' oldest sample');
+	assert.ok(Rotations.has(p, 0), code + ' exists today');
+	assert.ok(Rotations.has(p, oldest), code + ' exists at its oldest sample');
+	assert.ok(!Rotations.has(p, oldest + 1), code + ' has nothing older than ' + oldest + ' Ma');
+}
+assert.ok(!Rotations.has(Rotations.find('AUS'), 250), 'Australia is undefined at 250 Ma');
+assert.ok(Rotations.has(Rotations.find('AFR'), 250), 'Africa is defined at 250 Ma');
+// The coarsest sample gaps, which bound the interpolation error at an epoch: NAM 175 -> 306 Ma
+// and EUR 255 -> 425 Ma both straddle 250 Ma, so a 250 Ma reconstruction of those two is an
+// arc across a 131 and an 80 Myr gap respectively.
+assert.equal(Rotations.find('NAM').t[Rotations.bracket(Rotations.find('NAM'), 250)], 175);
+assert.equal(Rotations.find('EUR').t[Rotations.bracket(Rotations.find('EUR'), 250)], 175);
+
 // --- the geography those rotations imply ---------------------------------------------------
 // Australia was against Antarctica 50 Ma ago; North America was 50 degrees closer to Africa.
 Rotations.place(Rotations.find('AUS'), 50, -25, 135, ll, 0);
