@@ -18,14 +18,23 @@ var Earth = {
 		var g = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this);
 		return g.EarthPacks || [];
 	},
-	// Best registered pack for a grid level: the 0.5deg raster (w >= 720) for L7+, the
-	// 1.0deg baseline below; any registered pack is a fallback.
-	pick: function (level) {
-		var packs = Earth.packs(), wide = level >= 7, fallback = null;
+	// Best registered pack for a grid level and start value: 'earth' (present day) gets
+	// the 0.5deg raster (w >= 720) at L7+ and the 1.0deg baseline below; the historical
+	// checkpoints (0.4.5) name their 1.0deg epoch pack directly. A missing pack is null
+	// and the caller falls back to the procedural map start.
+	pick: function (level, start) {
+		var packs = Earth.packs();
+		start = start || 'earth';
+		var want = start === 'pangaea' ? 'earth-250Ma' : (start === 'gondwana' ? 'earth-200Ma' : null);
+		var wide = level >= 7, fallback = null;
 		for (var i = 0; i < packs.length; i++) {
 			var p = packs[i];
-			if ((p.w >= 720) === wide) return p;
-			if (!fallback) fallback = p;
+			if (want) {
+				if (p.name === want) return p;
+			} else if (p.name === 'earth') {
+				if ((p.w >= 720) === wide) return p;
+				if (!fallback) fallback = p;
+			}
 		}
 		return fallback;
 	},
@@ -161,21 +170,28 @@ var Earth = {
 			s.age[i] = ageS; s.fert[i] = Math.max(p.fertLo, Math.min(1, fert));
 			s.plate[i] = d.plate[at]; s.cell[i] = i; s.alive[i] = 1; s.area[i] = g.A0[i];
 		}
-		s.body.set(g.pos); s.world.set(g.pos);
-		for (var q = 0; q < count; q++) {
-			var qb = q * 4, wb = q * 3, pb = q * 4;
-			s.q[qb] = 0; s.q[qb + 1] = 0; s.q[qb + 2] = 0; s.q[qb + 3] = 1;
-			s.seeds[wb] = d.seeds[wb]; s.seeds[wb + 1] = d.seeds[wb + 1]; s.seeds[wb + 2] = d.seeds[wb + 2];
-			var om = opts.realistic ? d.poles[pb + 3] : 0;
-			s.omega[wb] = d.poles[pb] * om; s.omega[wb + 1] = d.poles[pb + 1] * om; s.omega[wb + 2] = d.poles[pb + 2] * om;
-			s.omegaTarget[wb] = s.omega[wb]; s.omegaTarget[wb + 1] = s.omega[wb + 1]; s.omegaTarget[wb + 2] = s.omega[wb + 2];
-		}
-		s.prescribedOmega = opts.realistic ? 1 : 0;
-		if (opts.realistic) s.cooling = 0;
-		EarthSim.raster(s);
-		s.rebase();
-		return s;
-	},
+	s.body.set(g.pos); s.world.set(g.pos);
+	// Historical packs (0.4.5) carry no Euler poles - no NNR model exists for past epochs.
+	// With every pole zero, 'realistic' would hold zero omega and freeze the world, so the
+	// prescription is dropped and K10 drives the plates like the game preset. The thermal
+	// pin of the realistic preset (cooling = 0) is kept either way.
+	var sumOm = 0;
+	for (var p2 = 3; p2 < d.poles.length; p2 += 4) sumOm += Math.abs(d.poles[p2]);
+	var prescribe = opts.realistic && sumOm > 0;
+	for (var q = 0; q < count; q++) {
+		var qb = q * 4, wb = q * 3, pb = q * 4;
+		s.q[qb] = 0; s.q[qb + 1] = 0; s.q[qb + 2] = 0; s.q[qb + 3] = 1;
+		s.seeds[wb] = d.seeds[wb]; s.seeds[wb + 1] = d.seeds[wb + 1]; s.seeds[wb + 2] = d.seeds[wb + 2];
+		var om = prescribe ? d.poles[pb + 3] : 0;
+		s.omega[wb] = d.poles[pb] * om; s.omega[wb + 1] = d.poles[pb + 1] * om; s.omega[wb + 2] = d.poles[pb + 2] * om;
+		s.omegaTarget[wb] = s.omega[wb]; s.omegaTarget[wb + 1] = s.omega[wb + 1]; s.omegaTarget[wb + 2] = s.omega[wb + 2];
+	}
+	s.prescribedOmega = prescribe ? 1 : 0;
+	if (opts.realistic) s.cooling = 0;
+	EarthSim.raster(s);
+	s.rebase();
+	return s;
+},
 	// Wet fraction, mean land/ocean and the round-trip RMS of derived z vs the pack's z bank,
 	// resampled at the same cell positions (plan §7 acceptance).
 	score: function (s, pack) {
@@ -205,6 +221,46 @@ var Earth = {
 			+ ' · datum ' + pk.datum + ' m · wet ' + (sc.wetFraction * 100).toFixed(2) + '%'
 			+ ' · land ' + Math.round(sc.meanLand) + ' m · ocean ' + Math.round(sc.meanOcean)
 			+ ' m · rms ' + Math.round(sc.rms) + ' m';
+	},
+	// --- 0.4.5 checkpoint scoring ----------------------------------------------------
+	// The forward-reconstruction gate (plan §8): run from a historical pack, measure how
+	// close the drifted continents get to a reference land mask. All masks are one byte
+	// per grid cell over the same icosphere grid, so IoU is a plain count.
+	// Exposed-land mask (z >= 0) of a live state; NaN columns (gaps) read as ocean.
+	landFromState: function (s) {
+		var m = new Uint8Array(s.grid.V);
+		for (var c = 0; c < s.grid.V; c++) m[c] = (s.z[c] === s.z[c] && s.z[c] >= 0) ? 1 : 0;
+		return m;
+	},
+	// Exposed-land mask a pack draws (continental crust at or above its calibrated sea
+	// level), resampled onto the grid by nearest-centre kind, the same sampling the
+	// loader uses for the crust type. Flooded shelf cells stay water, like the map.
+	landFromPack: function (pack, grid) {
+		var d = Earth.decode(pack);
+		var m = new Uint8Array(grid.V);
+		var scratch = new Float64Array(2);
+		for (var c = 0; c < grid.V; c++) {
+			var b = c * 3;
+			Earth.coords(pack.w, pack.h, grid.pos[b], grid.pos[b + 1], grid.pos[b + 2], scratch);
+			var at = Math.min(pack.h - 1, Math.round(scratch[1])) * pack.w
+				+ ((Math.round(scratch[0]) % pack.w) + pack.w) % pack.w;
+			m[c] = ((d.kind[at] & 1) && d.z[at] >= 0) ? 1 : 0;
+		}
+		return m;
+	},
+	// Intersection-over-union of two equal-length land masks.
+	iou: function (a, b) {
+		var inter = 0, union = 0;
+		for (var i = 0; i < a.length; i++) {
+			if (a[i] && b[i]) inter++;
+			if (a[i] || b[i]) union++;
+		}
+		return { inter: inter, union: union, iou: union ? inter / union : 1 };
+	},
+	fraction: function (m) {
+		var n = 0;
+		for (var i = 0; i < m.length; i++) n += m[i];
+		return m.length ? n / m.length : 0;
 	}
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Earth;

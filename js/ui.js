@@ -12,8 +12,10 @@
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var presetInput = document.getElementById('preset'), presetLabel = document.getElementById('preset-label');
 	var earthScore = null;
-	// The Preset select belongs to the Earth start only; the Start select shows/hides it.
-	function paintStart() { presetLabel.hidden = startInput.value !== 'earth'; }
+	// Starts that boot from an Earth pack (0.4.0/0.4.5): present day, plus the historical
+	// checkpoints (Pangaea 250 Ma, Gondwana 200 Ma). The Preset select belongs to these only.
+	function isEarthStart(v) { return v === 'earth' || v === 'pangaea' || v === 'gondwana'; }
+	function paintStart() { presetLabel.hidden = !isEarthStart(startInput.value); }
 	startInput.addEventListener('change', paintStart);
 	var followInput = document.getElementById('follow');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
@@ -367,13 +369,13 @@
 	if (prefilled('seavol', seaVolInput) && !seaPrefilled) waterActive = 'volume';
 	Params.seaVolScale = +seaVolInput.value;
 	if (query.get('cool')) coolingInput.checked = query.get('cool') !== '0';
-	// ?start=earth&preset=game boots straight onto the real-Earth columns (0.4.0), the same
+	// ?start=pangaea&preset=game boots straight onto a start pack (0.4.0/0.4.5), the same
 	// world the Startup fieldset rebuilds; a missing pack falls back to the map start.
 	if (query.get('start')) startInput.value = query.get('start');
 	if (query.get('preset')) presetInput.value = query.get('preset');
 	paintStart();
-	if (startInput.value === 'earth') {
-		var bootPack = Earth.pick(Params.level);
+	if (isEarthStart(startInput.value)) {
+		var bootPack = Earth.pick(Params.level, startInput.value);
 		if (bootPack) {
 			Earth.apply(state, bootPack, { realistic: presetInput.value === 'realistic' });
 			earthScore = Earth.score(state, bootPack);
@@ -460,12 +462,14 @@
 		Params.level = level;
 		grid = new Grid(level, seed).build();
 		state = new State(grid, seed, start === 'hot');
-		// The Earth start (0.4.0) replaces the procedural columns with the decoded pack:
-		// the realistic preset pins the NNR-MORVEL poles and the thermal budget, the game
-		// preset lets the procedural mantle drive the real continents.
+		// An Earth start (0.4.0/0.4.5) replaces the procedural columns with the decoded
+		// pack: the realistic preset pins the NNR-MORVEL poles and the thermal budget, the
+		// game preset lets the procedural mantle drive the continents. Historical packs
+		// carry no poles, so the loader's zero-pole guard makes realistic a frozen-pole
+		// game run (thermal pin kept, K10 driven).
 		earthScore = null;
-		if (start === 'earth') {
-			var pack = Earth.pick(level);
+		if (isEarthStart(start)) {
+			var pack = Earth.pick(level, start);
 			if (pack) {
 				Earth.apply(state, pack, { realistic: presetInput.value === 'realistic' });
 				earthScore = Earth.score(state, pack);
@@ -702,7 +706,9 @@
 					// The blob owns the temperature and the cooling flag; the sliders follow it.
 					// prescribedOmega is not a checkpoint scalar, so an Earth world keeps the
 					// rebuild's preset (realistic holds the poles, game lets the mantle drive).
-					if (startInput.value === 'earth') state.prescribedOmega = presetInput.value === 'realistic' ? 1 : 0;
+					// Historical packs have no poles: only the present-day pack is prescribed.
+					if (isEarthStart(startInput.value))
+						state.prescribedOmega = (startInput.value === 'earth' && presetInput.value === 'realistic') ? 1 : 0;
 					syncAdjust();
 					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
 						+ state.t.toFixed(1) + ' Myr.';

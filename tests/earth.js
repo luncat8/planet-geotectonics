@@ -106,6 +106,11 @@ equal(sa, sb);
 assert.equal(sa.finite, 1, 'synthetic run stays finite');
 
 // --- the committed 1° pack -------------------------------------------------------------
+// 0.4.5: the modern pack is re-baked from the PALEOMAP 0 Ma reconstruction
+// (real coastlines + crust type, NNR-MORVEL plate table, datum fixed at the true
+// modern 70.81% ocean fraction). Banded 1deg bathymetry at the true sea level runs
+// deeper in mean than the 0.4.0 IDW synthesis did, so the ocean window documents
+// that range instead of the older -4200..-3500.
 require('../js/data/earth-1deg.js');
 const pack = Earth.pick(5);
 assert.equal(pack.w, 360, 'L5 gets the 1° pack');
@@ -137,8 +142,8 @@ assert.ok(distinct.size >= 20, 'most plates survive the L5 resample: ' + distinc
 const score = Earth.score(s, pack);
 console.log('  ' + Earth.describe(score));
 assert.ok(Math.abs(score.wetFraction - 0.7081) <= 0.015, 'wet fraction ' + score.wetFraction.toFixed(4));
-assert.ok(score.meanLand > 650 && score.meanLand < 950, 'mean land ' + score.meanLand.toFixed(0));
-assert.ok(score.meanOcean > -4200 && score.meanOcean < -3500, 'mean ocean ' + score.meanOcean.toFixed(0));
+assert.ok(score.meanLand > 600 && score.meanLand < 1000, 'mean land ' + score.meanLand.toFixed(0));
+assert.ok(score.meanOcean > -4800 && score.meanOcean < -3800, 'mean ocean ' + score.meanOcean.toFixed(0));
 assert.ok(score.rms <= 250, 'round-trip RMS ' + score.rms.toFixed(1) + ' m');
 let maxFel = 0, maxMaf = 0;
 for (let i = 0; i < s.n; i++) { maxFel = Math.max(maxFel, s.hFel[i]); maxMaf = Math.max(maxMaf, s.hMaf[i]); }

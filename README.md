@@ -77,11 +77,25 @@ Open `index.html` directly in a browser.
   late), the column probe, saving and the deposit extract. The event cadence travels light:
   it ships only what the event cycle reads and writes (columns, plate table, frame
   counters), because the frame kernels recompute every cell and edge array themselves. Same-device repeat runs are
-  bit-identical, and 1000-frame CPU-vs-GPU ensembles stay within predeclared statistical
-  bounds (`node tests/gpu-parity.js 1000 --ensemble`; boot/parity/determinism modes in the
-  same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIBS`).
+bit-identical, and 1000-frame CPU-vs-GPU ensembles stay within predeclared statistical
+bounds (`node tests/gpu-parity.js 1000 --ensemble`; boot/parity/determinism modes in the
+same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIBS`).
+- Earth start (0.4.0/0.4.5): the Startup fieldset can boot the real Earth instead of the
+  procedural land mask. `?start=earth` is present-day Earth, baked from the PALEOMAP 0 Ma map
+  plus the NNR-MORVEL56 plate model (true sea level, 70.8 % wet, real 25 plates, 1° and 0.5°
+  packs); `?start=pangaea` and `?start=gondwana` boot the 250 Ma and 200 Ma reconstructions
+  (Scotese & Wright 2018) as pole-less packs. An Earth start shows a Preset select:
+  `realistic` pins the thermal budget and, for the modern start, the NNR Euler poles
+  (`prescribedOmega`), while `game` hands the rotations to the procedural mantle — on a
+  pole-less historical pack, `realistic` is a frozen-pole game run. The sea controls ride the
+  true hypsometry. `experiments/paleo-score.js` steps a checkpoint forward to the present and
+  scores its land mask against the modern one: both full-epoch runs are stable (~42 s for the
+  250 Myr Pangaea run at L5), but the IoU plateaus around 0.25–0.32 — the procedural mantle does
+  not yet reproduce Phanerozoic kinematics, so that reconstruction fidelity is the next
+  milestone, and older checkpoints (150 → 20 Ma) are gated on it (see
+  `0.4.0-Earth-map-plan.md` §8).
 
-See `0.2-plan.md` and `0.1.5-final-design.md`.
+See `0.2-plan.md`, `0.1.5-final-design.md` and `0.4.0-Earth-map-plan.md`.
 
 ## Test
 
