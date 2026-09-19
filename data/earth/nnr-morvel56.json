@@ -1,0 +1,2427 @@
+{
+  "metadata": {
+    "title": "NNR-MORVEL56 Global Plate Kinematic Model",
+    "authors": "Donald F. Argus, Richard G. Gordon, Charles DeMets",
+    "year": 2011,
+    "citation": "Argus, D. F., R. G. Gordon, and C. DeMets (2011), Geologically current motion of 56 plates relative to the no-net-rotation reference frame, Geochem. Geophys. Geosyst., 12, Q11001, doi:10.1029/2011GC003751.",
+    "doi": "10.1029/2011GC003751",
+    "source_url": "https://sideshow.jpl.nasa.gov/pub/usrs/argus/supporting.info/nnr.morvel56/",
+    "reference_frame": "No-Net-Rotation (NNR)",
+    "plate_counts": {
+      "total": 56,
+      "morvel25": 25,
+      "bird31_microplates": 31
+    },
+    "earth_surface_area_km2": 510064471.90978825
+  },
+  "plates": [
+    {
+      "code": "pa",
+      "name": "Pacific",
+      "tier": "MORVEL25",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": -63.5756,
+        "lon_deg": 114.6975,
+        "omega_deg_per_ma": 0.6509,
+        "omega_rad_per_myr": 0.01136035
+      },
+      "rotation_unit_axis": [
+        -0.18594,
+        0.404309,
+        -0.895522
+      ],
+      "pole_vector": [
+        -0.18594,
+        0.404309,
+        -0.895522,
+        0.01136035
+      ],
+      "area_steradians": 2.57683098,
+      "area_percent": 20.5058,
+      "area_km2": 104592644.2,
+      "rotation_matrix_Q": [
+        1.17566625,
+        1.96123162,
+        2.01676408,
+        -0.42946777,
+        0.07742868,
+        -0.05742492
+      ],
+      "seed_unit_vector": [
+        -0.866025,
+        -0.5,
+        0.0
+      ],
+      "seed_lat_lon": [
+        0.0,
+        -150.0
+      ]
+    },
+    {
+      "code": "am",
+      "name": "Amur",
+      "tier": "MORVEL25",
+      "parent_morvel25": "am",
+      "euler_pole": {
+        "lat_deg": 63.1704,
+        "lon_deg": -122.8242,
+        "omega_deg_per_ma": 0.2973,
+        "omega_rad_per_myr": 0.00518886
+      },
+      "rotation_unit_axis": [
+        -0.244654,
+        -0.379277,
+        0.892353
+      ],
+      "pole_vector": [
+        -0.244654,
+        -0.379277,
+        0.892353,
+        0.00518886
+      ],
+      "area_steradians": 0.13065731,
+      "area_percent": 1.0397,
+      "area_km2": 5303333.5,
+      "rotation_matrix_Q": [
+        0.10824635,
+        0.0894779,
+        0.06359038,
+        0.02873257,
+        0.03632172,
+        -0.05129477
+      ],
+      "seed_unit_vector": [
+        -0.40558,
+        0.579228,
+        0.707107
+      ],
+      "seed_lat_lon": [
+        45.0,
+        125.0
+      ]
+    },
+    {
+      "code": "an",
+      "name": "Antarctica",
+      "tier": "MORVEL25",
+      "parent_morvel25": "an",
+      "euler_pole": {
+        "lat_deg": 65.4235,
+        "lon_deg": -118.1053,
+        "omega_deg_per_ma": 0.25,
+        "omega_rad_per_myr": 0.00436332
+      },
+      "rotation_unit_axis": [
+        -0.195931,
+        -0.366865,
+        0.909407
+      ],
+      "pole_vector": [
+        -0.195931,
+        -0.366865,
+        0.909407,
+        0.00436332
+      ],
+      "area_steradians": 1.43268228,
+      "area_percent": 11.4009,
+      "area_km2": 58152059.6,
+      "rotation_matrix_Q": [
+        1.32673957,
+        1.17475845,
+        0.36386655,
+        -0.05095605,
+        0.05246486,
+        0.07910522
+      ],
+      "seed_unit_vector": [
+        0.173648,
+        0.0,
+        -0.984808
+      ],
+      "seed_lat_lon": [
+        -80.0,
+        0.0
+      ]
+    },
+    {
+      "code": "ar",
+      "name": "Arabia",
+      "tier": "MORVEL25",
+      "parent_morvel25": "ar",
+      "euler_pole": {
+        "lat_deg": 48.8807,
+        "lon_deg": -8.4909,
+        "omega_deg_per_ma": 0.5588,
+        "omega_rad_per_myr": 0.0097529
+      },
+      "rotation_unit_axis": [
+        0.650421,
+        -0.0971,
+        0.753342
+      ],
+      "pole_vector": [
+        0.650421,
+        -0.0971,
+        0.753342,
+        0.0097529
+      ],
+      "area_steradians": 0.12082175,
+      "area_percent": 0.9615,
+      "area_km2": 4904111.5,
+      "rotation_matrix_Q": [
+        0.07424718,
+        0.06680877,
+        0.10058755,
+        -0.04878144,
+        -0.02955173,
+        -0.03104048
+      ],
+      "seed_unit_vector": [
+        0.650895,
+        0.650895,
+        0.390731
+      ],
+      "seed_lat_lon": [
+        23.0,
+        45.0
+      ]
+    },
+    {
+      "code": "au",
+      "name": "Australia",
+      "tier": "MORVEL25",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": 33.8612,
+        "lon_deg": 37.9414,
+        "omega_deg_per_ma": 0.6316,
+        "omega_rad_per_myr": 0.0110235
+      },
+      "rotation_unit_axis": [
+        0.654879,
+        0.510569,
+        0.557183
+      ],
+      "pole_vector": [
+        0.654879,
+        0.510569,
+        0.557183,
+        0.0110235
+      ],
+      "area_steradians": 0.92137088,
+      "area_percent": 7.332,
+      "area_km2": 37398113.2,
+      "rotation_matrix_Q": [
+        0.59761619,
+        0.5586715,
+        0.68645407,
+        0.2239982,
+        -0.21720136,
+        0.24106706
+      ],
+      "seed_unit_vector": [
+        -0.640856,
+        0.640856,
+        -0.422618
+      ],
+      "seed_lat_lon": [
+        -25.0,
+        135.0
+      ]
+    },
+    {
+      "code": "ca",
+      "name": "Caribbean",
+      "tier": "MORVEL25",
+      "parent_morvel25": "ca",
+      "euler_pole": {
+        "lat_deg": 35.1956,
+        "lon_deg": -92.6236,
+        "omega_deg_per_ma": 0.2862,
+        "omega_rad_per_myr": 0.00499513
+      },
+      "rotation_unit_axis": [
+        -0.037406,
+        -0.816333,
+        0.57637
+      ],
+      "pole_vector": [
+        -0.037406,
+        -0.816333,
+        0.57637,
+        0.00499513
+      ],
+      "area_steradians": 0.07304248,
+      "area_percent": 0.5813,
+      "area_km2": 2964768.0,
+      "rotation_matrix_Q": [
+        0.06600218,
+        0.01197013,
+        0.06811265,
+        0.01800648,
+        -0.0052126,
+        0.01705908
+      ],
+      "seed_unit_vector": [
+        0.25,
+        -0.933013,
+        0.258819
+      ],
+      "seed_lat_lon": [
+        15.0,
+        -75.0
+      ]
+    },
+    {
+      "code": "co",
+      "name": "Cocos",
+      "tier": "MORVEL25",
+      "parent_morvel25": "co",
+      "euler_pole": {
+        "lat_deg": 26.9346,
+        "lon_deg": -124.3074,
+        "omega_deg_per_ma": 1.1978,
+        "omega_rad_per_myr": 0.02090555
+      },
+      "rotation_unit_axis": [
+        -0.502492,
+        -0.736422,
+        0.452973
+      ],
+      "pole_vector": [
+        -0.502492,
+        -0.736422,
+        0.452973,
+        0.02090555
+      ],
+      "area_steradians": 0.07222587,
+      "area_percent": 0.5748,
+      "area_km2": 2931621.9,
+      "rotation_matrix_Q": [
+        0.0710726,
+        0.00301771,
+        0.07036142,
+        -0.00554246,
+        0.00106251,
+        0.01014196
+      ],
+      "seed_unit_vector": [
+        -0.086506,
+        -0.988769,
+        0.121869
+      ],
+      "seed_lat_lon": [
+        7.0,
+        -95.0
+      ]
+    },
+    {
+      "code": "cp",
+      "name": "Capricorn",
+      "tier": "MORVEL25",
+      "parent_morvel25": "cp",
+      "euler_pole": {
+        "lat_deg": 44.4352,
+        "lon_deg": 23.088,
+        "omega_deg_per_ma": 0.608,
+        "omega_rad_per_myr": 0.0106116
+      },
+      "rotation_unit_axis": [
+        0.65685,
+        0.280008,
+        0.700102
+      ],
+      "pole_vector": [
+        0.65685,
+        0.280008,
+        0.700102,
+        0.0106116
+      ],
+      "area_steradians": 0.20364126,
+      "area_percent": 1.6205,
+      "area_km2": 8265725.6,
+      "rotation_matrix_Q": [
+        0.19653004,
+        0.02217601,
+        0.18857647,
+        -0.02163795,
+        0.00718676,
+        0.04560324
+      ],
+      "seed_unit_vector": [
+        0.167731,
+        0.951251,
+        -0.258819
+      ],
+      "seed_lat_lon": [
+        -15.0,
+        80.0
+      ]
+    },
+    {
+      "code": "eu",
+      "name": "Eurasia",
+      "tier": "MORVEL25",
+      "parent_morvel25": "eu",
+      "euler_pole": {
+        "lat_deg": 48.8509,
+        "lon_deg": -106.5007,
+        "omega_deg_per_ma": 0.2227,
+        "omega_rad_per_myr": 0.00388685
+      },
+      "rotation_unit_axis": [
+        -0.186896,
+        -0.630921,
+        0.753
+      ],
+      "pole_vector": [
+        -0.186896,
+        -0.630921,
+        0.753,
+        0.00388685
+      ],
+      "area_steradians": 1.19632035,
+      "area_percent": 9.52,
+      "area_km2": 48558213.7,
+      "rotation_matrix_Q": [
+        1.00592042,
+        0.89479911,
+        0.49192118,
+        -0.03556165,
+        -0.21323785,
+        -0.31149346
+      ],
+      "seed_unit_vector": [
+        0.286788,
+        0.496732,
+        0.819152
+      ],
+      "seed_lat_lon": [
+        55.0,
+        60.0
+      ]
+    },
+    {
+      "code": "in",
+      "name": "India",
+      "tier": "MORVEL25",
+      "parent_morvel25": "in",
+      "euler_pole": {
+        "lat_deg": 50.3722,
+        "lon_deg": -3.2898,
+        "omega_deg_per_ma": 0.5438,
+        "omega_rad_per_myr": 0.0094911
+      },
+      "rotation_unit_axis": [
+        0.636747,
+        -0.036601,
+        0.770204
+      ],
+      "pole_vector": [
+        0.636747,
+        -0.036601,
+        0.770204,
+        0.0094911
+      ],
+      "area_steradians": 0.30635798,
+      "area_percent": 2.4379,
+      "area_km2": 12434960.2,
+      "rotation_matrix_Q": [
+        0.28634662,
+        0.04231488,
+        0.28405445,
+        -0.05704872,
+        -0.01309656,
+        -0.06048869
+      ],
+      "seed_unit_vector": [
+        0.197736,
+        0.930274,
+        0.309017
+      ],
+      "seed_lat_lon": [
+        18.0,
+        78.0
+      ]
+    },
+    {
+      "code": "jf",
+      "name": "Juan de Fuca",
+      "tier": "MORVEL25",
+      "parent_morvel25": "jf",
+      "euler_pole": {
+        "lat_deg": -38.3086,
+        "lon_deg": 60.0379,
+        "omega_deg_per_ma": 0.9513,
+        "omega_rad_per_myr": 0.01660332
+      },
+      "rotation_unit_axis": [
+        0.391892,
+        0.679815,
+        -0.619897
+      ],
+      "pole_vector": [
+        0.391892,
+        0.679815,
+        -0.619897,
+        0.01660332
+      ],
+      "area_steradians": 0.00631452,
+      "area_percent": 0.0502,
+      "area_km2": 256304.1,
+      "rotation_matrix_Q": [
+        0.00516096,
+        0.00435507,
+        0.00311301,
+        -0.0015009,
+        0.00191542,
+        0.0024913
+      ],
+      "seed_unit_vector": [
+        -0.427674,
+        -0.547398,
+        0.71934
+      ],
+      "seed_lat_lon": [
+        46.0,
+        -128.0
+      ]
+    },
+    {
+      "code": "lw",
+      "name": "Lwandle",
+      "tier": "MORVEL25",
+      "parent_morvel25": "lw",
+      "euler_pole": {
+        "lat_deg": 51.886,
+        "lon_deg": -69.5195,
+        "omega_deg_per_ma": 0.2856,
+        "omega_rad_per_myr": 0.00498466
+      },
+      "rotation_unit_axis": [
+        0.215961,
+        -0.578214,
+        0.786784
+      ],
+      "pole_vector": [
+        0.215961,
+        -0.578214,
+        0.786784,
+        0.00498466
+      ],
+      "area_steradians": 0.11712064,
+      "area_percent": 0.932,
+      "area_km2": 4753884.7,
+      "rotation_matrix_Q": [
+        0.06315153,
+        0.08112111,
+        0.08996864,
+        -0.04334346,
+        0.03605526,
+        0.02966093
+      ],
+      "seed_unit_vector": [
+        0.627507,
+        0.526541,
+        -0.573576
+      ],
+      "seed_lat_lon": [
+        -35.0,
+        40.0
+      ]
+    },
+    {
+      "code": "na",
+      "name": "North America",
+      "tier": "MORVEL25",
+      "parent_morvel25": "na",
+      "euler_pole": {
+        "lat_deg": -4.8548,
+        "lon_deg": -80.6447,
+        "omega_deg_per_ma": 0.2087,
+        "omega_rad_per_myr": 0.0036425
+      },
+      "rotation_unit_axis": [
+        0.161973,
+        -0.983159,
+        -0.084631
+      ],
+      "pole_vector": [
+        0.161973,
+        -0.983159,
+        -0.084631,
+        0.0036425
+      ],
+      "area_steradians": 1.36569969,
+      "area_percent": 10.8679,
+      "area_km2": 55433260.3,
+      "rotation_matrix_Q": [
+        1.22860951,
+        0.9416017,
+        0.56118818,
+        0.06618575,
+        -0.00362233,
+        0.39575757
+      ],
+      "seed_unit_vector": [
+        -0.122788,
+        -0.696364,
+        0.707107
+      ],
+      "seed_lat_lon": [
+        45.0,
+        -100.0
+      ]
+    },
+    {
+      "code": "nb",
+      "name": "Nubia",
+      "tier": "MORVEL25",
+      "parent_morvel25": "nb",
+      "euler_pole": {
+        "lat_deg": 47.6763,
+        "lon_deg": -68.4377,
+        "omega_deg_per_ma": 0.2921,
+        "omega_rad_per_myr": 0.00509811
+      },
+      "rotation_unit_axis": [
+        0.247453,
+        -0.626199,
+        0.739353
+      ],
+      "pole_vector": [
+        0.247453,
+        -0.626199,
+        0.739353,
+        0.00509811
+      ],
+      "area_steradians": 1.44060694,
+      "area_percent": 11.464,
+      "area_km2": 58473718.5,
+      "rotation_matrix_Q": [
+        0.3725543,
+        1.30120252,
+        1.20745706,
+        -0.05134611,
+        -0.00542521,
+        0.04810099
+      ],
+      "seed_unit_vector": [
+        0.951251,
+        0.254887,
+        0.173648
+      ],
+      "seed_lat_lon": [
+        10.0,
+        15.0
+      ]
+    },
+    {
+      "code": "mq",
+      "name": "Macquarie",
+      "tier": "MORVEL25",
+      "parent_morvel25": "mq",
+      "euler_pole": {
+        "lat_deg": 49.1891,
+        "lon_deg": 11.0524,
+        "omega_deg_per_ma": 1.144,
+        "omega_rad_per_myr": 0.01996657
+      },
+      "rotation_unit_axis": [
+        0.641442,
+        0.125293,
+        0.756871
+      ],
+      "pole_vector": [
+        0.641442,
+        0.125293,
+        0.756871,
+        0.01996657
+      ],
+      "area_steradians": 0.00789197,
+      "area_percent": 0.0628,
+      "area_km2": 320332.4,
+      "rotation_matrix_Q": [
+        0.00613048,
+        0.00750979,
+        0.00214368,
+        0.00081256,
+        -0.00317328,
+        0.00146544
+      ],
+      "seed_unit_vector": [
+        -0.538986,
+        0.196175,
+        -0.819152
+      ],
+      "seed_lat_lon": [
+        -55.0,
+        160.0
+      ]
+    },
+    {
+      "code": "nz",
+      "name": "Nazca",
+      "tier": "MORVEL25",
+      "parent_morvel25": "nz",
+      "euler_pole": {
+        "lat_deg": 46.2348,
+        "lon_deg": -101.0564,
+        "omega_deg_per_ma": 0.6957,
+        "omega_rad_per_myr": 0.01214226
+      },
+      "rotation_unit_axis": [
+        -0.132652,
+        -0.678866,
+        0.72218
+      ],
+      "pole_vector": [
+        -0.132652,
+        -0.678866,
+        0.72218,
+        0.01214226
+      ],
+      "area_steradians": 0.39668681,
+      "area_percent": 3.1567,
+      "area_km2": 16101375.2,
+      "rotation_matrix_Q": [
+        0.38535358,
+        0.06840755,
+        0.33961249,
+        -0.01264557,
+        -0.00297206,
+        -0.11342704
+      ],
+      "seed_unit_vector": [
+        0.0819,
+        -0.936117,
+        -0.34202
+      ],
+      "seed_lat_lon": [
+        -20.0,
+        -85.0
+      ]
+    },
+    {
+      "code": "ps",
+      "name": "Philippine Sea",
+      "tier": "MORVEL25",
+      "parent_morvel25": "ps",
+      "euler_pole": {
+        "lat_deg": -46.0242,
+        "lon_deg": -31.3615,
+        "omega_deg_per_ma": 0.9098,
+        "omega_rad_per_myr": 0.01587901
+      },
+      "rotation_unit_axis": [
+        0.59291,
+        -0.361367,
+        -0.719633
+      ],
+      "pole_vector": [
+        0.59291,
+        -0.361367,
+        -0.719633,
+        0.01587901
+      ],
+      "area_steradians": 0.13411588,
+      "area_percent": 1.0673,
+      "area_km2": 5443715.4,
+      "rotation_matrix_Q": [
+        0.07774326,
+        0.07126772,
+        0.11922078,
+        0.05830108,
+        0.02664798,
+        -0.02763826
+      ],
+      "seed_unit_vector": [
+        -0.664463,
+        0.664463,
+        0.34202
+      ],
+      "seed_lat_lon": [
+        20.0,
+        135.0
+      ]
+    },
+    {
+      "code": "ri",
+      "name": "Rivera",
+      "tier": "MORVEL25",
+      "parent_morvel25": "ri",
+      "euler_pole": {
+        "lat_deg": 20.245,
+        "lon_deg": -107.2861,
+        "omega_deg_per_ma": 4.5359,
+        "omega_rad_per_myr": 0.07916639
+      },
+      "rotation_unit_axis": [
+        -0.278786,
+        -0.895845,
+        0.346035
+      ],
+      "pole_vector": [
+        -0.278786,
+        -0.895845,
+        0.346035,
+        0.07916639
+      ],
+      "area_steradians": 0.00248598,
+      "area_percent": 0.0198,
+      "area_km2": 100905.0,
+      "rotation_matrix_Q": [
+        0.00228938,
+        0.00048895,
+        0.00219363,
+        -0.00062534,
+        0.00023946,
+        0.00076305
+      ],
+      "seed_unit_vector": [
+        -0.27474,
+        -0.898633,
+        0.34202
+      ],
+      "seed_lat_lon": [
+        20.0,
+        -107.0
+      ]
+    },
+    {
+      "code": "sa",
+      "name": "South America",
+      "tier": "MORVEL25",
+      "parent_morvel25": "sa",
+      "euler_pole": {
+        "lat_deg": -22.6179,
+        "lon_deg": -112.8327,
+        "omega_deg_per_ma": 0.109,
+        "omega_rad_per_myr": 0.00190241
+      },
+      "rotation_unit_axis": [
+        -0.358197,
+        -0.850758,
+        -0.384584
+      ],
+      "pole_vector": [
+        -0.358197,
+        -0.850758,
+        -0.384584,
+        0.00190241
+      ],
+      "area_steradians": 1.00337256,
+      "area_percent": 7.9846,
+      "area_km2": 40726532.2,
+      "rotation_matrix_Q": [
+        0.60676113,
+        0.58268105,
+        0.81730295,
+        0.33831818,
+        0.17918532,
+        -0.16860864
+      ],
+      "seed_unit_vector": [
+        0.538986,
+        -0.769751,
+        -0.34202
+      ],
+      "seed_lat_lon": [
+        -20.0,
+        -55.0
+      ]
+    },
+    {
+      "code": "sc",
+      "name": "Scotia",
+      "tier": "MORVEL25",
+      "parent_morvel25": "sc",
+      "euler_pole": {
+        "lat_deg": 22.5244,
+        "lon_deg": -106.1485,
+        "omega_deg_per_ma": 0.1464,
+        "omega_rad_per_myr": 0.00255516
+      },
+      "rotation_unit_axis": [
+        -0.256911,
+        -0.88727,
+        0.383077
+      ],
+      "pole_vector": [
+        -0.256911,
+        -0.88727,
+        0.383077,
+        0.00255516
+      ],
+      "area_steradians": 0.04189938,
+      "area_percent": 0.3334,
+      "area_km2": 1700680.8,
+      "rotation_matrix_Q": [
+        0.03672192,
+        0.03446296,
+        0.01261388,
+        0.00569496,
+        0.01198864,
+        -0.01445097
+      ],
+      "seed_unit_vector": [
+        0.417218,
+        -0.350087,
+        -0.838671
+      ],
+      "seed_lat_lon": [
+        -57.0,
+        -40.0
+      ]
+    },
+    {
+      "code": "sm",
+      "name": "Somalia",
+      "tier": "MORVEL25",
+      "parent_morvel25": "sm",
+      "euler_pole": {
+        "lat_deg": 49.9506,
+        "lon_deg": -84.5154,
+        "omega_deg_per_ma": 0.3393,
+        "omega_rad_per_myr": 0.0059219
+      },
+      "rotation_unit_axis": [
+        0.0615,
+        -0.640502,
+        0.76549
+      ],
+      "pole_vector": [
+        0.0615,
+        -0.640502,
+        0.76549,
+        0.0059219
+      ],
+      "area_steradians": 0.35478484,
+      "area_percent": 2.8233,
+      "area_km2": 14400589.5,
+      "rotation_matrix_Q": [
+        0.22103235,
+        0.15373628,
+        0.33480106,
+        -0.15489672,
+        0.02474812,
+        0.03586552
+      ],
+      "seed_unit_vector": [
+        0.704416,
+        0.704416,
+        -0.087156
+      ],
+      "seed_lat_lon": [
+        -5.0,
+        45.0
+      ]
+    },
+    {
+      "code": "sr",
+      "name": "Sur",
+      "tier": "MORVEL25",
+      "parent_morvel25": "sr",
+      "euler_pole": {
+        "lat_deg": -32.4957,
+        "lon_deg": -111.3224,
+        "omega_deg_per_ma": 0.1072,
+        "omega_rad_per_myr": 0.00187099
+      },
+      "rotation_unit_axis": [
+        -0.306685,
+        -0.785698,
+        -0.537236
+      ],
+      "pole_vector": [
+        -0.306685,
+        -0.785698,
+        -0.537236,
+        0.00187099
+      ],
+      "area_steradians": 0.02706424,
+      "area_percent": 0.2154,
+      "area_km2": 1098527.8,
+      "rotation_matrix_Q": [
+        0.01868534,
+        0.02650513,
+        0.00893801,
+        0.00195509,
+        0.01224966,
+        -0.0029572
+      ],
+      "seed_unit_vector": [
+        0.271654,
+        -0.582563,
+        -0.766044
+      ],
+      "seed_lat_lon": [
+        -50.0,
+        -65.0
+      ]
+    },
+    {
+      "code": "su",
+      "name": "Sunda",
+      "tier": "MORVEL25",
+      "parent_morvel25": "su",
+      "euler_pole": {
+        "lat_deg": 50.0558,
+        "lon_deg": -95.0218,
+        "omega_deg_per_ma": 0.3368,
+        "omega_rad_per_myr": 0.00587827
+      },
+      "rotation_unit_axis": [
+        -0.056201,
+        -0.639577,
+        0.76667
+      ],
+      "pole_vector": [
+        -0.056201,
+        -0.639577,
+        0.76667,
+        0.00587827
+      ],
+      "area_steradians": 0.21966725,
+      "area_percent": 1.7481,
+      "area_km2": 8916214.8,
+      "rotation_matrix_Q": [
+        0.18884693,
+        0.03632337,
+        0.2141642,
+        0.06910399,
+        0.00654429,
+        -0.01683142
+      ],
+      "seed_unit_vector": [
+        -0.340719,
+        0.936117,
+        0.087156
+      ],
+      "seed_lat_lon": [
+        5.0,
+        110.0
+      ]
+    },
+    {
+      "code": "sw",
+      "name": "Sandwich",
+      "tier": "MORVEL25",
+      "parent_morvel25": "sw",
+      "euler_pole": {
+        "lat_deg": -29.942,
+        "lon_deg": -36.8671,
+        "omega_deg_per_ma": 1.3616,
+        "omega_rad_per_myr": 0.0237644
+      },
+      "rotation_unit_axis": [
+        0.69325,
+        -0.519885,
+        -0.499123
+      ],
+      "pole_vector": [
+        0.69325,
+        -0.519885,
+        -0.499123,
+        0.0237644
+      ],
+      "area_steradians": 0.00454357,
+      "area_percent": 0.0362,
+      "area_km2": 184421.9,
+      "rotation_matrix_Q": [
+        0.00352612,
+        0.00427021,
+        0.00129081,
+        0.00052682,
+        0.0018165,
+        -0.00094054
+      ],
+      "seed_unit_vector": [
+        0.476288,
+        -0.232301,
+        -0.848048
+      ],
+      "seed_lat_lon": [
+        -58.0,
+        -26.0
+      ]
+    },
+    {
+      "code": "yz",
+      "name": "Yangtze",
+      "tier": "MORVEL25",
+      "parent_morvel25": "yz",
+      "euler_pole": {
+        "lat_deg": 63.0285,
+        "lon_deg": -116.618,
+        "omega_deg_per_ma": 0.3335,
+        "omega_rad_per_myr": 0.00582067
+      },
+      "rotation_unit_axis": [
+        -0.203207,
+        -0.405477,
+        0.891232
+      ],
+      "pole_vector": [
+        -0.203207,
+        -0.405477,
+        0.891232,
+        0.00582067
+      ],
+      "area_steradians": 0.05424784,
+      "area_percent": 0.4317,
+      "area_km2": 2201900.4,
+      "rotation_matrix_Q": [
+        0.04568561,
+        0.01995885,
+        0.04285122,
+        0.01664384,
+        0.00964841,
+        -0.01952764
+      ],
+      "seed_unit_vector": [
+        -0.365998,
+        0.784886,
+        0.5
+      ],
+      "seed_lat_lon": [
+        30.0,
+        115.0
+      ]
+    },
+    {
+      "code": "SL",
+      "name": "Shetland",
+      "tier": "Bird31",
+      "parent_morvel25": "an",
+      "euler_pole": {
+        "lat_deg": 50.7058,
+        "lon_deg": -143.4675,
+        "omega_deg_per_ma": 0.2677,
+        "omega_rad_per_myr": 0.00467225
+      },
+      "rotation_unit_axis": [
+        -0.508871,
+        -0.376991,
+        0.773904
+      ],
+      "pole_vector": [
+        -0.508871,
+        -0.376991,
+        0.773904,
+        0.00467225
+      ],
+      "area_steradians": 0.00177911,
+      "area_percent": 0.0142,
+      "area_km2": 72213.6,
+      "rotation_matrix_Q": [
+        0.00167393,
+        0.00148929,
+        0.00039501,
+        0.00017402,
+        0.00038028,
+        -0.00063334
+      ],
+      "seed_unit_vector": [
+        0.241796,
+        -0.402416,
+        -0.882948
+      ],
+      "seed_lat_lon": [
+        -62.0,
+        -59.0
+      ]
+    },
+    {
+      "code": "BH",
+      "name": "Birds Head",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": -39.9983,
+        "lon_deg": 100.4994,
+        "omega_deg_per_ma": 0.7988,
+        "omega_rad_per_myr": 0.01394169
+      },
+      "rotation_unit_axis": [
+        -0.139596,
+        0.753237,
+        -0.642765
+      ],
+      "pole_vector": [
+        -0.139596,
+        0.753237,
+        -0.642765,
+        0.01394169
+      ],
+      "area_steradians": 0.01294939,
+      "area_percent": 0.103,
+      "area_km2": 525611.1,
+      "rotation_matrix_Q": [
+        0.00715718,
+        0.00580744,
+        0.01293416,
+        0.00639068,
+        -0.00019404,
+        0.00020137
+      ],
+      "seed_unit_vector": [
+        -0.681894,
+        0.731242,
+        -0.017452
+      ],
+      "seed_lat_lon": [
+        -1.0,
+        133.0
+      ]
+    },
+    {
+      "code": "MO",
+      "name": "Maoke",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": 14.248,
+        "lon_deg": 92.6656,
+        "omega_deg_per_ma": 0.7742,
+        "omega_rad_per_myr": 0.01351234
+      },
+      "rotation_unit_axis": [
+        -0.045076,
+        0.968191,
+        0.246119
+      ],
+      "pole_vector": [
+        -0.045076,
+        0.968191,
+        0.246119,
+        0.01351234
+      ],
+      "area_steradians": 0.00284102,
+      "area_percent": 0.0226,
+      "area_km2": 115316.0,
+      "rotation_matrix_Q": [
+        0.00127049,
+        0.00158044,
+        0.00283111,
+        0.00140519,
+        -0.00012581,
+        0.00011264
+      ],
+      "seed_unit_vector": [
+        -0.729572,
+        0.680337,
+        -0.069756
+      ],
+      "seed_lat_lon": [
+        -4.0,
+        137.0
+      ]
+    },
+    {
+      "code": "SS",
+      "name": "Solomon Sea",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": -2.8685,
+        "lon_deg": 130.6236,
+        "omega_deg_per_ma": 1.7029,
+        "omega_rad_per_myr": 0.02972121
+      },
+      "rotation_unit_axis": [
+        -0.650271,
+        0.758052,
+        -0.050044
+      ],
+      "pole_vector": [
+        -0.650271,
+        0.758052,
+        -0.050044,
+        0.02972121
+      ],
+      "area_steradians": 0.00316995,
+      "area_percent": 0.0252,
+      "area_km2": 128667.1,
+      "rotation_matrix_Q": [
+        0.00071538,
+        0.00250538,
+        0.00311914,
+        0.00127463,
+        -0.00035227,
+        0.00018295
+      ],
+      "seed_unit_vector": [
+        -0.880037,
+        0.448401,
+        -0.156434
+      ],
+      "seed_lat_lon": [
+        -9.0,
+        153.0
+      ]
+    },
+    {
+      "code": "WL",
+      "name": "Woodlark",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": 0.105,
+        "lon_deg": 128.5186,
+        "omega_deg_per_ma": 1.7444,
+        "omega_rad_per_myr": 0.03044552
+      },
+      "rotation_unit_axis": [
+        -0.622768,
+        0.782405,
+        0.001833
+      ],
+      "pole_vector": [
+        -0.622768,
+        0.782405,
+        0.001833,
+        0.03044552
+      ],
+      "area_steradians": 0.0111619,
+      "area_percent": 0.0888,
+      "area_km2": 453057.7,
+      "rotation_matrix_Q": [
+        0.00349229,
+        0.00783549,
+        0.01099603,
+        0.00496569,
+        -0.00107384,
+        0.00066007
+      ],
+      "seed_unit_vector": [
+        -0.892539,
+        0.416198,
+        -0.173648
+      ],
+      "seed_lat_lon": [
+        -10.0,
+        155.0
+      ]
+    },
+    {
+      "code": "CR",
+      "name": "Conway Reef",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": -20.3985,
+        "lon_deg": 170.5303,
+        "omega_deg_per_ma": 3.9232,
+        "omega_rad_per_myr": 0.06847276
+      },
+      "rotation_unit_axis": [
+        -0.924518,
+        0.154209,
+        -0.348548
+      ],
+      "pole_vector": [
+        -0.924518,
+        0.154209,
+        -0.348548,
+        0.06847276
+      ],
+      "area_steradians": 0.00355896,
+      "area_percent": 0.0283,
+      "area_km2": 144457.1,
+      "rotation_matrix_Q": [
+        0.00041404,
+        0.00353188,
+        0.00317201,
+        0.00028871,
+        -0.00109945,
+        0.00010121
+      ],
+      "seed_unit_vector": [
+        -0.923656,
+        0.080809,
+        -0.374607
+      ],
+      "seed_lat_lon": [
+        -22.0,
+        175.0
+      ]
+    },
+    {
+      "code": "FT",
+      "name": "Futuna",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": -16.3322,
+        "lon_deg": 178.0679,
+        "omega_deg_per_ma": 5.1006,
+        "omega_rad_per_myr": 0.08902226
+      },
+      "rotation_unit_axis": [
+        -0.959102,
+        0.032355,
+        -0.281206
+      ],
+      "pole_vector": [
+        -0.959102,
+        0.032355,
+        -0.281206,
+        0.08902226
+      ],
+      "area_steradians": 0.00078837,
+      "area_percent": 0.0063,
+      "area_km2": 31999.7,
+      "rotation_matrix_Q": [
+        5.383e-05,
+        0.00078759,
+        0.00073532,
+        -2.739e-05,
+        -0.00019654,
+        -7.5e-06
+      ],
+      "seed_unit_vector": [
+        -0.970148,
+        -0.016934,
+        -0.241922
+      ],
+      "seed_lat_lon": [
+        -14.0,
+        -179.0
+      ]
+    },
+    {
+      "code": "KE",
+      "name": "Kermadec",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": 39.9929,
+        "lon_deg": 6.4584,
+        "omega_deg_per_ma": 2.3474,
+        "omega_rad_per_myr": 0.04096986
+      },
+      "rotation_unit_axis": [
+        0.761262,
+        0.086175,
+        0.642693
+      ],
+      "pole_vector": [
+        0.761262,
+        0.086175,
+        0.642693,
+        0.04096986
+      ],
+      "area_steradians": 0.01244892,
+      "area_percent": 0.0991,
+      "area_km2": 505297.4,
+      "rotation_matrix_Q": [
+        0.00374942,
+        0.01243186,
+        0.00871657,
+        -0.00012289,
+        -0.00558923,
+        -3.543e-05
+      ],
+      "seed_unit_vector": [
+        -0.856645,
+        -0.029915,
+        -0.515038
+      ],
+      "seed_lat_lon": [
+        -31.0,
+        -178.0
+      ]
+    },
+    {
+      "code": "NI",
+      "name": "Niuafo'ou",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": -3.2883,
+        "lon_deg": -174.4882,
+        "omega_deg_per_ma": 3.3136,
+        "omega_rad_per_myr": 0.05783323
+      },
+      "rotation_unit_axis": [
+        -0.993738,
+        -0.095893,
+        -0.05736
+      ],
+      "pole_vector": [
+        -0.993738,
+        -0.095893,
+        -0.05736,
+        0.05783323
+      ],
+      "area_steradians": 0.00306205,
+      "area_percent": 0.0244,
+      "area_km2": 124287.5,
+      "rotation_matrix_Q": [
+        0.00027056,
+        0.00304551,
+        0.00280803,
+        -0.00021169,
+        -0.00083898,
+        -6.35e-05
+      ],
+      "seed_unit_vector": [
+        -0.96066,
+        -0.075606,
+        -0.267238
+      ],
+      "seed_lat_lon": [
+        -15.5,
+        -175.5
+      ]
+    },
+    {
+      "code": "TO",
+      "name": "Tonga",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": 25.8737,
+        "lon_deg": 4.4767,
+        "omega_deg_per_ma": 8.9417,
+        "omega_rad_per_myr": 0.15606211
+      },
+      "rotation_unit_axis": [
+        0.897013,
+        0.070229,
+        0.436389
+      ],
+      "pole_vector": [
+        0.897013,
+        0.070229,
+        0.436389,
+        0.15606211
+      ],
+      "area_steradians": 0.00624861,
+      "area_percent": 0.0497,
+      "area_km2": 253629.0,
+      "rotation_matrix_Q": [
+        0.00075908,
+        0.00619373,
+        0.00554442,
+        -0.00053612,
+        -0.00194714,
+        -0.00018587
+      ],
+      "seed_unit_vector": [
+        -0.930028,
+        -0.081367,
+        -0.358368
+      ],
+      "seed_lat_lon": [
+        -21.0,
+        -175.0
+      ]
+    },
+    {
+      "code": "PM",
+      "name": "Panama",
+      "tier": "Bird31",
+      "parent_morvel25": "ca",
+      "euler_pole": {
+        "lat_deg": 31.351,
+        "lon_deg": -113.9038,
+        "omega_deg_per_ma": 0.3171,
+        "omega_rad_per_myr": 0.00553444
+      },
+      "rotation_unit_axis": [
+        -0.346041,
+        -0.780746,
+        0.520279
+      ],
+      "pole_vector": [
+        -0.346041,
+        -0.780746,
+        0.520279,
+        0.00553444
+      ],
+      "area_steradians": 0.00674377,
+      "area_percent": 0.0537,
+      "area_km2": 273727.0,
+      "rotation_matrix_Q": [
+        0.00657531,
+        0.00033255,
+        0.00657967,
+        0.00099958,
+        -0.00015854,
+        0.00102104
+      ],
+      "seed_unit_vector": [
+        0.171741,
+        -0.97399,
+        0.147809
+      ],
+      "seed_lat_lon": [
+        8.5,
+        -80.0
+      ]
+    },
+    {
+      "code": "AS",
+      "name": "Aegean Sea",
+      "tier": "Bird31",
+      "parent_morvel25": "eu",
+      "euler_pole": {
+        "lat_deg": 19.4251,
+        "lon_deg": 122.8665,
+        "omega_deg_per_ma": 0.1239,
+        "omega_rad_per_myr": 0.00216246
+      },
+      "rotation_unit_axis": [
+        -0.511792,
+        0.792126,
+        0.332574
+      ],
+      "pole_vector": [
+        -0.511792,
+        0.792126,
+        0.332574,
+        0.00216246
+      ],
+      "area_steradians": 0.00793005,
+      "area_percent": 0.0631,
+      "area_km2": 321877.9,
+      "rotation_matrix_Q": [
+        0.00377999,
+        0.00701718,
+        0.00506293,
+        -0.00193825,
+        -0.00344522,
+        -0.00161001
+      ],
+      "seed_unit_vector": [
+        0.71418,
+        0.333028,
+        0.615661
+      ],
+      "seed_lat_lon": [
+        38.0,
+        25.0
+      ]
+    },
+    {
+      "code": "AT",
+      "name": "Anatolia",
+      "tier": "Bird31",
+      "parent_morvel25": "ar",
+      "euler_pole": {
+        "lat_deg": 40.1121,
+        "lon_deg": 26.6585,
+        "omega_deg_per_ma": 1.2105,
+        "omega_rad_per_myr": 0.02112721
+      },
+      "rotation_unit_axis": [
+        0.683486,
+        0.343138,
+        0.644285
+      ],
+      "pole_vector": [
+        0.683486,
+        0.343138,
+        0.644285,
+        0.02112721
+      ],
+      "area_steradians": 0.01418131,
+      "area_percent": 0.1129,
+      "area_km2": 575614.1,
+      "rotation_matrix_Q": [
+        0.00802132,
+        0.01158541,
+        0.00875588,
+        -0.00397013,
+        -0.00576658,
+        -0.00373307
+      ],
+      "seed_unit_vector": [
+        0.659057,
+        0.411825,
+        0.62932
+      ],
+      "seed_lat_lon": [
+        39.0,
+        32.0
+      ]
+    },
+    {
+      "code": "GP",
+      "name": "Galapagos",
+      "tier": "Bird31",
+      "parent_morvel25": "co",
+      "euler_pole": {
+        "lat_deg": 2.5287,
+        "lon_deg": 81.1806,
+        "omega_deg_per_ma": 5.4868,
+        "omega_rad_per_myr": 0.09576273
+      },
+      "rotation_unit_axis": [
+        0.153171,
+        0.987214,
+        0.04412
+      ],
+      "pole_vector": [
+        0.153171,
+        0.987214,
+        0.04412,
+        0.09576273
+      ],
+      "area_steradians": 0.00036033,
+      "area_percent": 0.0029,
+      "area_km2": 14625.7,
+      "rotation_matrix_Q": [
+        0.00034551,
+        1.515e-05,
+        0.00036,
+        -7.137e-05,
+        2.38e-06,
+        1.15e-05
+      ],
+      "seed_unit_vector": [
+        -0.20788,
+        -0.977999,
+        0.017452
+      ],
+      "seed_lat_lon": [
+        1.0,
+        -102.0
+      ]
+    },
+    {
+      "code": "EA",
+      "name": "Easter",
+      "tier": "Bird31",
+      "parent_morvel25": "nz",
+      "euler_pole": {
+        "lat_deg": 24.9729,
+        "lon_deg": 67.5269,
+        "omega_deg_per_ma": 11.3343,
+        "omega_rad_per_myr": 0.19782085
+      },
+      "rotation_unit_axis": [
+        0.346512,
+        0.837667,
+        0.42219
+      ],
+      "pole_vector": [
+        0.346512,
+        0.837667,
+        0.42219,
+        0.19782085
+      ],
+      "area_steradians": 0.0041137,
+      "area_percent": 0.0327,
+      "area_km2": 166973.6,
+      "rotation_matrix_Q": [
+        0.00355352,
+        0.00127237,
+        0.00340151,
+        -0.00126025,
+        -0.0006304,
+        -0.00142019
+      ],
+      "seed_unit_vector": [
+        -0.356951,
+        -0.840923,
+        -0.406737
+      ],
+      "seed_lat_lon": [
+        -24.0,
+        -113.0
+      ]
+    },
+    {
+      "code": "JZ",
+      "name": "Juan Fernandez",
+      "tier": "Bird31",
+      "parent_morvel25": "an",
+      "euler_pole": {
+        "lat_deg": 34.2507,
+        "lon_deg": 70.7429,
+        "omega_deg_per_ma": 22.3676,
+        "omega_rad_per_myr": 0.39038827
+      },
+      "rotation_unit_axis": [
+        0.272613,
+        0.780334,
+        0.562815
+      ],
+      "pole_vector": [
+        0.272613,
+        0.780334,
+        0.562815,
+        0.39038827
+      ],
+      "area_steradians": 0.00240646,
+      "area_percent": 0.0192,
+      "area_km2": 97677.3,
+      "rotation_matrix_Q": [
+        0.0021922,
+        0.00094143,
+        0.00167929,
+        -0.00055969,
+        -0.00039417,
+        -0.00103157
+      ],
+      "seed_unit_vector": [
+        -0.283548,
+        -0.77904,
+        -0.559193
+      ],
+      "seed_lat_lon": [
+        -34.0,
+        -110.0
+      ]
+    },
+    {
+      "code": "OK",
+      "name": "Okhotsk",
+      "tier": "Bird31",
+      "parent_morvel25": "na",
+      "euler_pole": {
+        "lat_deg": 30.3022,
+        "lon_deg": -92.2813,
+        "omega_deg_per_ma": 0.229,
+        "omega_rad_per_myr": 0.0039968
+      },
+      "rotation_unit_axis": [
+        -0.034367,
+        -0.862692,
+        0.504561
+      ],
+      "pole_vector": [
+        -0.034367,
+        -0.862692,
+        0.504561,
+        0.0039968
+      ],
+      "area_steradians": 0.07482459,
+      "area_percent": 0.5954,
+      "area_km2": 3037103.4,
+      "rotation_matrix_Q": [
+        0.053439,
+        0.06641111,
+        0.02979908,
+        0.01295413,
+        0.03032113,
+        -0.01787022
+      ],
+      "seed_unit_vector": [
+        -0.496732,
+        0.286788,
+        0.819152
+      ],
+      "seed_lat_lon": [
+        55.0,
+        150.0
+      ]
+    },
+    {
+      "code": "NB",
+      "name": "North Bismarck",
+      "tier": "Bird31",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": -45.0406,
+        "lon_deg": 127.637,
+        "omega_deg_per_ma": 0.8563,
+        "omega_rad_per_myr": 0.01494525
+      },
+      "rotation_unit_axis": [
+        -0.431493,
+        0.559558,
+        -0.707608
+      ],
+      "pole_vector": [
+        -0.431493,
+        0.559558,
+        -0.707608,
+        0.01494525
+      ],
+      "area_steradians": 0.00956246,
+      "area_percent": 0.0761,
+      "area_km2": 388136.8,
+      "rotation_matrix_Q": [
+        0.00262351,
+        0.00696188,
+        0.00953953,
+        0.00420926,
+        -0.00036023,
+        0.00021112
+      ],
+      "seed_unit_vector": [
+        -0.855993,
+        0.514332,
+        -0.052336
+      ],
+      "seed_lat_lon": [
+        -3.0,
+        149.0
+      ]
+    },
+    {
+      "code": "SB",
+      "name": "South Bismarck",
+      "tier": "Bird31",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": 6.8767,
+        "lon_deg": -31.8883,
+        "omega_deg_per_ma": 8.1107,
+        "omega_rad_per_myr": 0.14155842
+      },
+      "rotation_unit_axis": [
+        0.842971,
+        -0.524465,
+        0.119733
+      ],
+      "pole_vector": [
+        0.842971,
+        -0.524465,
+        0.119733,
+        0.14155842
+      ],
+      "area_steradians": 0.00761478,
+      "area_percent": 0.0606,
+      "area_km2": 309081.2,
+      "rotation_matrix_Q": [
+        0.00210134,
+        0.00557494,
+        0.00755328,
+        0.00334126,
+        -0.0005711,
+        0.00034594
+      ],
+      "seed_unit_vector": [
+        -0.852472,
+        0.512217,
+        -0.104528
+      ],
+      "seed_lat_lon": [
+        -6.0,
+        149.0
+      ]
+    },
+    {
+      "code": "MN",
+      "name": "Manus",
+      "tier": "Bird31",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": -3.6699,
+        "lon_deg": 150.2676,
+        "omega_deg_per_ma": 51.569,
+        "omega_rad_per_myr": 0.90004884
+      },
+      "rotation_unit_axis": [
+        -0.866571,
+        0.494933,
+        -0.064008
+      ],
+      "pole_vector": [
+        -0.866571,
+        0.494933,
+        -0.064008,
+        0.90004884
+      ],
+      "area_steradians": 0.00020252,
+      "area_percent": 0.0016,
+      "area_km2": 8220.0,
+      "rotation_matrix_Q": [
+        4.97e-05,
+        0.00015359,
+        0.00020174,
+        8.646e-05,
+        -1.082e-05,
+        6.12e-06
+      ],
+      "seed_unit_vector": [
+        -0.864839,
+        0.499315,
+        -0.052336
+      ],
+      "seed_lat_lon": [
+        -3.0,
+        150.0
+      ]
+    },
+    {
+      "code": "NH",
+      "name": "New Hebrides",
+      "tier": "Bird31",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": 0.5684,
+        "lon_deg": -6.6018,
+        "omega_deg_per_ma": 2.4688,
+        "omega_rad_per_myr": 0.04308869
+      },
+      "rotation_unit_axis": [
+        0.99332,
+        -0.114963,
+        0.00992
+      ],
+      "pole_vector": [
+        0.99332,
+        -0.114963,
+        0.00992,
+        0.04308869
+      ],
+      "area_steradians": 0.01585346,
+      "area_percent": 0.1262,
+      "area_km2": 643486.3,
+      "rotation_matrix_Q": [
+        0.00193116,
+        0.01544154,
+        0.01433422,
+        0.00234509,
+        -0.00454676,
+        0.00075854
+      ],
+      "seed_unit_vector": [
+        -0.941169,
+        0.217286,
+        -0.258819
+      ],
+      "seed_lat_lon": [
+        -15.0,
+        167.0
+      ]
+    },
+    {
+      "code": "BR",
+      "name": "Balmoral Reef",
+      "tier": "Bird31",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": -63.742,
+        "lon_deg": 142.0636,
+        "omega_deg_per_ma": 0.4898,
+        "omega_rad_per_myr": 0.00854862
+      },
+      "rotation_unit_axis": [
+        -0.348929,
+        0.27199,
+        -0.896811
+      ],
+      "pole_vector": [
+        -0.348929,
+        0.27199,
+        -0.896811,
+        0.00854862
+      ],
+      "area_steradians": 0.00481364,
+      "area_percent": 0.0383,
+      "area_km2": 195383.9,
+      "rotation_matrix_Q": [
+        0.00035281,
+        0.00478651,
+        0.00448796,
+        0.00032196,
+        -0.00120321,
+        8.65e-05
+      ],
+      "seed_unit_vector": [
+        -0.947437,
+        0.08289,
+        -0.309017
+      ],
+      "seed_lat_lon": [
+        -18.0,
+        175.0
+      ]
+    },
+    {
+      "code": "CL",
+      "name": "Caroline",
+      "tier": "Bird31",
+      "parent_morvel25": "pa",
+      "euler_pole": {
+        "lat_deg": -72.7849,
+        "lon_deg": 72.0525,
+        "omega_deg_per_ma": 0.6066,
+        "omega_rad_per_myr": 0.01058717
+      },
+      "rotation_unit_axis": [
+        0.091199,
+        0.281558,
+        -0.9552
+      ],
+      "pole_vector": [
+        0.091199,
+        0.281558,
+        -0.9552,
+        0.01058717
+      ],
+      "area_steradians": 0.03764945,
+      "area_percent": 0.2996,
+      "area_km2": 1528177.9,
+      "rotation_matrix_Q": [
+        0.01534879,
+        0.02248662,
+        0.0374635,
+        0.01819228,
+        0.00158145,
+        -0.0013231
+      ],
+      "seed_unit_vector": [
+        -0.763129,
+        0.640342,
+        0.087156
+      ],
+      "seed_lat_lon": [
+        5.0,
+        140.0
+      ]
+    },
+    {
+      "code": "MA",
+      "name": "Mariana",
+      "tier": "Bird31",
+      "parent_morvel25": "ps",
+      "euler_pole": {
+        "lat_deg": 11.0533,
+        "lon_deg": 137.8404,
+        "omega_deg_per_ma": 1.3061,
+        "omega_rad_per_myr": 0.02279575
+      },
+      "rotation_unit_axis": [
+        -0.727527,
+        0.658747,
+        0.191722
+      ],
+      "pole_vector": [
+        -0.727527,
+        0.658747,
+        0.191722,
+        0.02279575
+      ],
+      "area_steradians": 0.01036751,
+      "area_percent": 0.0825,
+      "area_km2": 420813.5,
+      "rotation_matrix_Q": [
+        0.00401777,
+        0.0073526,
+        0.00936465,
+        0.00436911,
+        0.00247451,
+        -0.00170856
+      ],
+      "seed_unit_vector": [
+        -0.769421,
+        0.559017,
+        0.309017
+      ],
+      "seed_lat_lon": [
+        18.0,
+        144.0
+      ]
+    },
+    {
+      "code": "ND",
+      "name": "North Andes",
+      "tier": "Bird31",
+      "parent_morvel25": "sa",
+      "euler_pole": {
+        "lat_deg": 17.7331,
+        "lon_deg": -122.6815,
+        "omega_deg_per_ma": 0.1162,
+        "omega_rad_per_myr": 0.00202807
+      },
+      "rotation_unit_axis": [
+        -0.514312,
+        -0.801693,
+        0.304583
+      ],
+      "pole_vector": [
+        -0.514312,
+        -0.801693,
+        0.304583,
+        0.00202807
+      ],
+      "area_steradians": 0.02393941,
+      "area_percent": 0.1905,
+      "area_km2": 971692.1,
+      "rotation_matrix_Q": [
+        0.02236312,
+        0.00200152,
+        0.02351418,
+        0.00575531,
+        -0.00073552,
+        0.00248498
+      ],
+      "seed_unit_vector": [
+        0.258189,
+        -0.963573,
+        0.069756
+      ],
+      "seed_lat_lon": [
+        4.0,
+        -75.0
+      ]
+    },
+    {
+      "code": "AP",
+      "name": "Altiplano",
+      "tier": "Bird31",
+      "parent_morvel25": "sa",
+      "euler_pole": {
+        "lat_deg": -6.5763,
+        "lon_deg": -83.9776,
+        "omega_deg_per_ma": 0.4881,
+        "omega_rad_per_myr": 0.00851895
+      },
+      "rotation_unit_axis": [
+        0.104227,
+        -0.987937,
+        -0.114526
+      ],
+      "pole_vector": [
+        0.104227,
+        -0.987937,
+        -0.114526,
+        0.00851895
+      ],
+      "area_steradians": 0.02050021,
+      "area_percent": 0.1631,
+      "area_km2": 832096.0,
+      "rotation_matrix_Q": [
+        0.01816823,
+        0.00417751,
+        0.01865467,
+        0.00609746,
+        0.00205603,
+        -0.00541995
+      ],
+      "seed_unit_vector": [
+        0.354197,
+        -0.87667,
+        -0.325568
+      ],
+      "seed_lat_lon": [
+        -19.0,
+        -68.0
+      ]
+    },
+    {
+      "code": "BU",
+      "name": "Burma",
+      "tier": "Bird31",
+      "parent_morvel25": "su",
+      "euler_pole": {
+        "lat_deg": -6.1254,
+        "lon_deg": -78.1008,
+        "omega_deg_per_ma": 2.2287,
+        "omega_rad_per_myr": 0.03889815
+      },
+      "rotation_unit_axis": [
+        0.205013,
+        -0.972925,
+        -0.106705
+      ],
+      "pole_vector": [
+        0.205013,
+        -0.972925,
+        -0.106705,
+        0.03889815
+      ],
+      "area_steradians": 0.01269755,
+      "area_percent": 0.101,
+      "area_km2": 515389.0,
+      "rotation_matrix_Q": [
+        0.01263242,
+        0.00043553,
+        0.01232715,
+        0.000852,
+        0.00012944,
+        -0.00193602
+      ],
+      "seed_unit_vector": [
+        -0.066708,
+        0.953975,
+        0.292372
+      ],
+      "seed_lat_lon": [
+        17.0,
+        94.0
+      ]
+    },
+    {
+      "code": "MS",
+      "name": "Molucca Sea",
+      "tier": "Bird31",
+      "parent_morvel25": "su",
+      "euler_pole": {
+        "lat_deg": 2.1477,
+        "lon_deg": -56.0916,
+        "omega_deg_per_ma": 3.5655,
+        "omega_rad_per_myr": 0.06222971
+      },
+      "rotation_unit_axis": [
+        0.557475,
+        -0.829348,
+        0.037476
+      ],
+      "pole_vector": [
+        0.557475,
+        -0.829348,
+        0.037476,
+        0.06222971
+      ],
+      "area_steradians": 0.01030032,
+      "area_percent": 0.082,
+      "area_km2": 418086.5,
+      "rotation_matrix_Q": [
+        0.00716518,
+        0.00315034,
+        0.01028513,
+        0.00471979,
+        -0.0001184,
+        0.00016439
+      ],
+      "seed_unit_vector": [
+        -0.587427,
+        0.808524,
+        0.034899
+      ],
+      "seed_lat_lon": [
+        2.0,
+        126.0
+      ]
+    },
+    {
+      "code": "BS",
+      "name": "Banda Sea",
+      "tier": "Bird31",
+      "parent_morvel25": "su",
+      "euler_pole": {
+        "lat_deg": -1.4855,
+        "lon_deg": 121.6413,
+        "omega_deg_per_ma": 2.4753,
+        "omega_rad_per_myr": 0.04320213
+      },
+      "rotation_unit_axis": [
+        -0.524423,
+        0.851063,
+        -0.025924
+      ],
+      "pole_vector": [
+        -0.524423,
+        0.851063,
+        -0.025924,
+        0.04320213
+      ],
+      "area_steradians": 0.01714447,
+      "area_percent": 0.1364,
+      "area_km2": 695887.7,
+      "rotation_matrix_Q": [
+        0.01132226,
+        0.00596084,
+        0.01700583,
+        0.00797675,
+        -0.00085039,
+        0.00117248
+      ],
+      "seed_unit_vector": [
+        -0.599525,
+        0.795596,
+        -0.087156
+      ],
+      "seed_lat_lon": [
+        -5.0,
+        127.0
+      ]
+    },
+    {
+      "code": "TI",
+      "name": "Timor",
+      "tier": "Bird31",
+      "parent_morvel25": "au",
+      "euler_pole": {
+        "lat_deg": -4.4363,
+        "lon_deg": 113.4976,
+        "omega_deg_per_ma": 1.8639,
+        "omega_rad_per_myr": 0.03253119
+      },
+      "rotation_unit_axis": [
+        -0.397516,
+        0.914329,
+        -0.077351
+      ],
+      "pole_vector": [
+        -0.397516,
+        0.914329,
+        -0.077351,
+        0.03253119
+      ],
+      "area_steradians": 0.00870306,
+      "area_percent": 0.0693,
+      "area_km2": 353254.1,
+      "rotation_matrix_Q": [
+        0.00578449,
+        0.00311959,
+        0.00850204,
+        0.00400872,
+        -0.00075119,
+        0.00105213
+      ],
+      "seed_unit_vector": [
+        -0.552308,
+        0.818831,
+        -0.156434
+      ],
+      "seed_lat_lon": [
+        -9.0,
+        124.0
+      ]
+    },
+    {
+      "code": "ON",
+      "name": "Okinawa",
+      "tier": "Bird31",
+      "parent_morvel25": "yz",
+      "euler_pole": {
+        "lat_deg": 36.1163,
+        "lon_deg": 137.9182,
+        "omega_deg_per_ma": 2.5391,
+        "omega_rad_per_myr": 0.04431566
+      },
+      "rotation_unit_axis": [
+        -0.599557,
+        0.541395,
+        0.589426
+      ],
+      "pole_vector": [
+        -0.599557,
+        0.541395,
+        0.589426,
+        0.04431566
+      ],
+      "area_steradians": 0.00800036,
+      "area_percent": 0.0637,
+      "area_km2": 324731.5,
+      "rotation_matrix_Q": [
+        0.00561702,
+        0.00407548,
+        0.00630821,
+        0.00304434,
+        0.00200397,
+        -0.00255197
+      ],
+      "seed_unit_vector": [
+        -0.548558,
+        0.702123,
+        0.45399
+      ],
+      "seed_lat_lon": [
+        27.0,
+        128.0
+      ]
+    }
+  ]
+}

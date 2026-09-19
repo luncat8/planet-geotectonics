@@ -1,0 +1,847 @@
+{
+  "metadata": {
+    "title": "PB2002 Plate Model (Bird 2003)",
+    "author": "Peter Bird",
+    "year": 2003,
+    "citation": "Bird, P. (2003), An updated digital model of plate boundaries, Geochem. Geophys. Geosyst., 4(3), 1027, doi:10.1029/2001GC000252.",
+    "doi": "10.1029/2001GC000252",
+    "source_url": "http://peterbird.name/oldFTP/PB2002/",
+    "github_mirror": "https://github.com/fraxen/tectonicplates",
+    "plate_count": 52,
+    "notes": "52 plates defined as closed spherical polygon outlines. Forty-nine are topologically identical in NNR-MORVEL56."
+  },
+  "plates": [
+    {
+      "code": "AF",
+      "name": "Africa",
+      "description": "Major continental plate, incorporates Nubian and Somalian blocks in PB2002",
+      "bounding_box_lat_lon": [
+        -35.0,
+        -18.0,
+        38.0,
+        52.0
+      ],
+      "seed_lat_lon": [
+        5.0,
+        20.0
+      ],
+      "morvel56_equivalent": "nb/sm/lw"
+    },
+    {
+      "code": "AN",
+      "name": "Antarctica",
+      "description": "Major continental/oceanic plate surrounding South Pole",
+      "bounding_box_lat_lon": [
+        -90.0,
+        -180.0,
+        -60.0,
+        180.0
+      ],
+      "seed_lat_lon": [
+        -80.0,
+        0.0
+      ],
+      "morvel56_equivalent": "an"
+    },
+    {
+      "code": "AR",
+      "name": "Arabia",
+      "description": "Continental plate moving NNE towards Eurasia",
+      "bounding_box_lat_lon": [
+        12.0,
+        32.0,
+        36.0,
+        60.0
+      ],
+      "seed_lat_lon": [
+        24.0,
+        45.0
+      ],
+      "morvel56_equivalent": "ar"
+    },
+    {
+      "code": "AU",
+      "name": "Australia",
+      "description": "Major continental/oceanic plate moving NNE",
+      "bounding_box_lat_lon": [
+        -50.0,
+        110.0,
+        -10.0,
+        160.0
+      ],
+      "seed_lat_lon": [
+        -25.0,
+        135.0
+      ],
+      "morvel56_equivalent": "au/cp/mq"
+    },
+    {
+      "code": "CA",
+      "name": "Caribbean",
+      "description": "Predominantly oceanic/arc plate bordered by subduction and strike-slip faults",
+      "bounding_box_lat_lon": [
+        9.0,
+        -85.0,
+        22.0,
+        -60.0
+      ],
+      "seed_lat_lon": [
+        15.0,
+        -75.0
+      ],
+      "morvel56_equivalent": "ca"
+    },
+    {
+      "code": "CO",
+      "name": "Cocos",
+      "description": "Young oceanic plate subducting beneath Central America along Middle America Trench",
+      "bounding_box_lat_lon": [
+        0.0,
+        -105.0,
+        18.0,
+        -83.0
+      ],
+      "seed_lat_lon": [
+        7.0,
+        -95.0
+      ],
+      "morvel56_equivalent": "co"
+    },
+    {
+      "code": "EU",
+      "name": "Eurasia",
+      "description": "Major continental plate covering Europe and northern Asia",
+      "bounding_box_lat_lon": [
+        35.0,
+        -10.0,
+        80.0,
+        140.0
+      ],
+      "seed_lat_lon": [
+        55.0,
+        60.0
+      ],
+      "morvel56_equivalent": "eu"
+    },
+    {
+      "code": "IN",
+      "name": "India",
+      "description": "Fast-moving continental/oceanic plate colliding with Eurasia (Himalayan orogeny)",
+      "bounding_box_lat_lon": [
+        0.0,
+        65.0,
+        36.0,
+        95.0
+      ],
+      "seed_lat_lon": [
+        18.0,
+        78.0
+      ],
+      "morvel56_equivalent": "in"
+    },
+    {
+      "code": "JF",
+      "name": "Juan de Fuca",
+      "description": "Small oceanic plate subducting beneath Cascadia margin",
+      "bounding_box_lat_lon": [
+        40.0,
+        -130.0,
+        52.0,
+        -123.0
+      ],
+      "seed_lat_lon": [
+        46.0,
+        -128.0
+      ],
+      "morvel56_equivalent": "jf"
+    },
+    {
+      "code": "NA",
+      "name": "North America",
+      "description": "Major continental/oceanic plate covering North America and northwest Atlantic",
+      "bounding_box_lat_lon": [
+        15.0,
+        -170.0,
+        85.0,
+        -10.0
+      ],
+      "seed_lat_lon": [
+        45.0,
+        -100.0
+      ],
+      "morvel56_equivalent": "na"
+    },
+    {
+      "code": "NZ",
+      "name": "Nazca",
+      "description": "Major oceanic plate subducting beneath western South America (Peru-Chile Trench)",
+      "bounding_box_lat_lon": [
+        -50.0,
+        -110.0,
+        5.0,
+        -70.0
+      ],
+      "seed_lat_lon": [
+        -20.0,
+        -85.0
+      ],
+      "morvel56_equivalent": "nz"
+    },
+    {
+      "code": "PA",
+      "name": "Pacific",
+      "description": "Largest tectonic plate on Earth, entirely oceanic, Ring of Fire boundaries",
+      "bounding_box_lat_lon": [
+        -65.0,
+        140.0,
+        60.0,
+        -70.0
+      ],
+      "seed_lat_lon": [
+        0.0,
+        -150.0
+      ],
+      "morvel56_equivalent": "pa"
+    },
+    {
+      "code": "PS",
+      "name": "Philippine Sea",
+      "description": "Oceanic plate surrounded by subduction zones (Izu-Bonin-Mariana, Ryukyu, Philippines)",
+      "bounding_box_lat_lon": [
+        5.0,
+        125.0,
+        35.0,
+        145.0
+      ],
+      "seed_lat_lon": [
+        20.0,
+        135.0
+      ],
+      "morvel56_equivalent": "ps"
+    },
+    {
+      "code": "SA",
+      "name": "South America",
+      "description": "Major continental/oceanic plate covering South America and southwest Atlantic",
+      "bounding_box_lat_lon": [
+        -60.0,
+        -80.0,
+        15.0,
+        -15.0
+      ],
+      "seed_lat_lon": [
+        -20.0,
+        -55.0
+      ],
+      "morvel56_equivalent": "sa/sr"
+    },
+    {
+      "code": "SC",
+      "name": "Scotia",
+      "description": "Oceanic microplate between South America and Antarctic Peninsula",
+      "bounding_box_lat_lon": [
+        -62.0,
+        -60.0,
+        -52.0,
+        -30.0
+      ],
+      "seed_lat_lon": [
+        -57.0,
+        -40.0
+      ],
+      "morvel56_equivalent": "sc"
+    },
+    {
+      "code": "AM",
+      "name": "Amur",
+      "description": "Continental plate in northeastern Asia (Manchuria, Korea, Primorye)",
+      "bounding_box_lat_lon": [
+        35.0,
+        115.0,
+        55.0,
+        142.0
+      ],
+      "seed_lat_lon": [
+        45.0,
+        125.0
+      ],
+      "morvel56_equivalent": "am"
+    },
+    {
+      "code": "AP",
+      "name": "Altiplano",
+      "description": "High-elevation continental microplate in the central Andes",
+      "bounding_box_lat_lon": [
+        -22.0,
+        -71.0,
+        -15.0,
+        -66.0
+      ],
+      "seed_lat_lon": [
+        -19.0,
+        -68.0
+      ],
+      "morvel56_equivalent": "AP (sa)"
+    },
+    {
+      "code": "AS",
+      "name": "Aegean Sea",
+      "description": "Extensional continental microplate in eastern Mediterranean",
+      "bounding_box_lat_lon": [
+        35.0,
+        20.0,
+        42.0,
+        28.0
+      ],
+      "seed_lat_lon": [
+        38.0,
+        25.0
+      ],
+      "morvel56_equivalent": "AS (eu)"
+    },
+    {
+      "code": "AT",
+      "name": "Anatolia",
+      "description": "Continental microplate escaping westward between North and East Anatolian faults",
+      "bounding_box_lat_lon": [
+        36.0,
+        26.0,
+        42.0,
+        44.0
+      ],
+      "seed_lat_lon": [
+        39.0,
+        32.0
+      ],
+      "morvel56_equivalent": "AT (ar)"
+    },
+    {
+      "code": "BH",
+      "name": "Birds Head",
+      "description": "Microplate in western New Guinea (Vogelkop Peninsula)",
+      "bounding_box_lat_lon": [
+        -4.0,
+        130.0,
+        1.0,
+        136.0
+      ],
+      "seed_lat_lon": [
+        -1.0,
+        133.0
+      ],
+      "morvel56_equivalent": "BH (au)"
+    },
+    {
+      "code": "BR",
+      "name": "Balmoral Reef",
+      "description": "Oceanic microplate in the North Fiji Basin",
+      "bounding_box_lat_lon": [
+        -20.0,
+        173.0,
+        -15.0,
+        178.0
+      ],
+      "seed_lat_lon": [
+        -18.0,
+        175.0
+      ],
+      "morvel56_equivalent": "BR (pa)"
+    },
+    {
+      "code": "BS",
+      "name": "Banda Sea",
+      "description": "Complex oceanic basin microplate in eastern Indonesia",
+      "bounding_box_lat_lon": [
+        -9.0,
+        122.0,
+        -3.0,
+        132.0
+      ],
+      "seed_lat_lon": [
+        -5.0,
+        127.0
+      ],
+      "morvel56_equivalent": "BS (su)"
+    },
+    {
+      "code": "BU",
+      "name": "Burma",
+      "description": "Oblique subduction microplate including Andaman Islands and western Myanmar",
+      "bounding_box_lat_lon": [
+        5.0,
+        91.0,
+        25.0,
+        98.0
+      ],
+      "seed_lat_lon": [
+        17.0,
+        94.0
+      ],
+      "morvel56_equivalent": "BU (su)"
+    },
+    {
+      "code": "CL",
+      "name": "Caroline",
+      "description": "Oceanic microplate north of New Guinea, western equatorial Pacific",
+      "bounding_box_lat_lon": [
+        -3.0,
+        132.0,
+        10.0,
+        148.0
+      ],
+      "seed_lat_lon": [
+        5.0,
+        140.0
+      ],
+      "morvel56_equivalent": "CL (pa)"
+    },
+    {
+      "code": "CR",
+      "name": "Conway Reef",
+      "description": "Oceanic microplate southwest of Fiji",
+      "bounding_box_lat_lon": [
+        -25.0,
+        172.0,
+        -20.0,
+        177.0
+      ],
+      "seed_lat_lon": [
+        -22.0,
+        175.0
+      ],
+      "morvel56_equivalent": "CR (au)"
+    },
+    {
+      "code": "EA",
+      "name": "Easter",
+      "description": "Rapidly rotating oceanic microplate at the East Pacific Rise",
+      "bounding_box_lat_lon": [
+        -27.0,
+        -116.0,
+        -22.0,
+        -111.0
+      ],
+      "seed_lat_lon": [
+        -24.0,
+        -113.0
+      ],
+      "morvel56_equivalent": "EA (nz)"
+    },
+    {
+      "code": "FT",
+      "name": "Futuna",
+      "description": "Oceanic microplate near Wallis and Futuna, southwest Pacific",
+      "bounding_box_lat_lon": [
+        -16.0,
+        -180.0,
+        -12.0,
+        -176.0
+      ],
+      "seed_lat_lon": [
+        -14.0,
+        -179.0
+      ],
+      "morvel56_equivalent": "FT (au)"
+    },
+    {
+      "code": "GP",
+      "name": "Galapagos",
+      "description": "Oceanic microplate at Cocos-Nazca-Pacific triple junction",
+      "bounding_box_lat_lon": [
+        -2.0,
+        -104.0,
+        4.0,
+        -99.0
+      ],
+      "seed_lat_lon": [
+        1.0,
+        -102.0
+      ],
+      "morvel56_equivalent": "GP (co)"
+    },
+    {
+      "code": "JZ",
+      "name": "Juan Fernandez",
+      "description": "Oceanic microplate at Nazca-Antarctica-Pacific triple junction",
+      "bounding_box_lat_lon": [
+        -37.0,
+        -112.0,
+        -32.0,
+        -107.0
+      ],
+      "seed_lat_lon": [
+        -34.0,
+        -110.0
+      ],
+      "morvel56_equivalent": "JZ (an)"
+    },
+    {
+      "code": "KE",
+      "name": "Kermadec",
+      "description": "Oceanic trench/arc microplate along Kermadec Ridge",
+      "bounding_box_lat_lon": [
+        -37.0,
+        -180.0,
+        -25.0,
+        -175.0
+      ],
+      "seed_lat_lon": [
+        -31.0,
+        -178.0
+      ],
+      "morvel56_equivalent": "KE (au)"
+    },
+    {
+      "code": "MA",
+      "name": "Mariana",
+      "description": "Oceanic back-arc microplate along the Mariana subduction system",
+      "bounding_box_lat_lon": [
+        11.0,
+        142.0,
+        24.0,
+        147.0
+      ],
+      "seed_lat_lon": [
+        18.0,
+        144.0
+      ],
+      "morvel56_equivalent": "MA (ps)"
+    },
+    {
+      "code": "MN",
+      "name": "Manus",
+      "description": "Ultra-fast rotating oceanic microplate in Bismarck Sea (51 deg/Ma)",
+      "bounding_box_lat_lon": [
+        -4.5,
+        148.5,
+        -2.5,
+        151.5
+      ],
+      "seed_lat_lon": [
+        -3.0,
+        150.0
+      ],
+      "morvel56_equivalent": "MN (pa)"
+    },
+    {
+      "code": "MO",
+      "name": "Maoke",
+      "description": "Continental mountain microplate in central Irian Jaya (New Guinea)",
+      "bounding_box_lat_lon": [
+        -6.0,
+        135.0,
+        -2.0,
+        140.0
+      ],
+      "seed_lat_lon": [
+        -4.0,
+        137.0
+      ],
+      "morvel56_equivalent": "MO (au)"
+    },
+    {
+      "code": "MS",
+      "name": "Molucca Sea",
+      "description": "Complex collision microplate with double subduction zone",
+      "bounding_box_lat_lon": [
+        -2.0,
+        123.0,
+        5.0,
+        128.0
+      ],
+      "seed_lat_lon": [
+        2.0,
+        126.0
+      ],
+      "morvel56_equivalent": "MS (su)"
+    },
+    {
+      "code": "NB",
+      "name": "North Bismarck",
+      "description": "Oceanic microplate in the Bismarck Sea",
+      "bounding_box_lat_lon": [
+        -5.0,
+        142.0,
+        -1.0,
+        153.0
+      ],
+      "seed_lat_lon": [
+        -3.0,
+        149.0
+      ],
+      "morvel56_equivalent": "NB (pa)"
+    },
+    {
+      "code": "ND",
+      "name": "North Andes",
+      "description": "Continental block in Colombia and Ecuador between Nazca, Caribbean, and South America",
+      "bounding_box_lat_lon": [
+        -2.0,
+        -80.0,
+        12.0,
+        -70.0
+      ],
+      "seed_lat_lon": [
+        4.0,
+        -75.0
+      ],
+      "morvel56_equivalent": "ND (sa)"
+    },
+    {
+      "code": "NH",
+      "name": "New Hebrides",
+      "description": "Volcanic arc microplate along New Hebrides Trench (Vanuatu)",
+      "bounding_box_lat_lon": [
+        -22.0,
+        165.0,
+        -11.0,
+        172.0
+      ],
+      "seed_lat_lon": [
+        -15.0,
+        167.0
+      ],
+      "morvel56_equivalent": "NH (pa)"
+    },
+    {
+      "code": "NI",
+      "name": "Niuafo'ou",
+      "description": "Oceanic microplate between Tonga, Samoa, and Lau Basin",
+      "bounding_box_lat_lon": [
+        -17.0,
+        -178.0,
+        -13.0,
+        -173.0
+      ],
+      "seed_lat_lon": [
+        -15.5,
+        -175.5
+      ],
+      "morvel56_equivalent": "NI (au)"
+    },
+    {
+      "code": "OK",
+      "name": "Okhotsk",
+      "description": "Continental/island microplate in Sea of Okhotsk, Kamchatka, Sakhalin",
+      "bounding_box_lat_lon": [
+        43.0,
+        138.0,
+        65.0,
+        165.0
+      ],
+      "seed_lat_lon": [
+        55.0,
+        150.0
+      ],
+      "morvel56_equivalent": "OK (na)"
+    },
+    {
+      "code": "ON",
+      "name": "Okinawa",
+      "description": "Extensional continental back-arc microplate in the Okinawa Trough",
+      "bounding_box_lat_lon": [
+        24.0,
+        122.0,
+        32.0,
+        131.0
+      ],
+      "seed_lat_lon": [
+        27.0,
+        128.0
+      ],
+      "morvel56_equivalent": "ON (yz)"
+    },
+    {
+      "code": "PM",
+      "name": "Panama",
+      "description": "Isthmus block between North Andes, Cocos, and Caribbean plates",
+      "bounding_box_lat_lon": [
+        6.0,
+        -84.0,
+        10.0,
+        -77.0
+      ],
+      "seed_lat_lon": [
+        8.5,
+        -80.0
+      ],
+      "morvel56_equivalent": "PM (ca)"
+    },
+    {
+      "code": "RI",
+      "name": "Rivera",
+      "description": "Small oceanic microplate off Jalisco, Mexico, subducting under North America",
+      "bounding_box_lat_lon": [
+        18.0,
+        -109.0,
+        22.0,
+        -105.0
+      ],
+      "seed_lat_lon": [
+        20.0,
+        -107.0
+      ],
+      "morvel56_equivalent": "ri"
+    },
+    {
+      "code": "SB",
+      "name": "South Bismarck",
+      "description": "Oceanic microplate in southern Bismarck Sea (New Britain arc)",
+      "bounding_box_lat_lon": [
+        -8.0,
+        144.0,
+        -4.0,
+        153.0
+      ],
+      "seed_lat_lon": [
+        -6.0,
+        149.0
+      ],
+      "morvel56_equivalent": "SB (pa)"
+    },
+    {
+      "code": "SL",
+      "name": "Shetland",
+      "description": "Oceanic microplate off Antarctic Peninsula with young active rift",
+      "bounding_box_lat_lon": [
+        -64.0,
+        -63.0,
+        -60.0,
+        -55.0
+      ],
+      "seed_lat_lon": [
+        -62.0,
+        -59.0
+      ],
+      "morvel56_equivalent": "SL (an)"
+    },
+    {
+      "code": "SO",
+      "name": "Somalia",
+      "description": "Continental/oceanic plate splitting from Nubia along East African Rift",
+      "bounding_box_lat_lon": [
+        -30.0,
+        32.0,
+        15.0,
+        60.0
+      ],
+      "seed_lat_lon": [
+        -5.0,
+        45.0
+      ],
+      "morvel56_equivalent": "sm"
+    },
+    {
+      "code": "SS",
+      "name": "Solomon Sea",
+      "description": "Small oceanic microplate subducting beneath New Britain and Solomon arcs",
+      "bounding_box_lat_lon": [
+        -11.0,
+        150.0,
+        -6.0,
+        156.0
+      ],
+      "seed_lat_lon": [
+        -9.0,
+        153.0
+      ],
+      "morvel56_equivalent": "SS (au)"
+    },
+    {
+      "code": "SU",
+      "name": "Sunda",
+      "description": "Continental/oceanic block including Sunda Shelf, Indochina, Sumatra, Java, Borneo",
+      "bounding_box_lat_lon": [
+        -12.0,
+        95.0,
+        22.0,
+        122.0
+      ],
+      "seed_lat_lon": [
+        5.0,
+        110.0
+      ],
+      "morvel56_equivalent": "su"
+    },
+    {
+      "code": "SW",
+      "name": "Sandwich",
+      "description": "Oceanic microplate supporting South Sandwich volcanic arc and trench",
+      "bounding_box_lat_lon": [
+        -61.0,
+        -32.0,
+        -55.0,
+        -22.0
+      ],
+      "seed_lat_lon": [
+        -58.0,
+        -26.0
+      ],
+      "morvel56_equivalent": "sw"
+    },
+    {
+      "code": "TI",
+      "name": "Timor",
+      "description": "Forearc microplate along the Timor Trough",
+      "bounding_box_lat_lon": [
+        -12.0,
+        121.0,
+        -7.0,
+        128.0
+      ],
+      "seed_lat_lon": [
+        -9.0,
+        124.0
+      ],
+      "morvel56_equivalent": "TI (au)"
+    },
+    {
+      "code": "TO",
+      "name": "Tonga",
+      "description": "Oceanic forearc microplate along Tonga Trench",
+      "bounding_box_lat_lon": [
+        -26.0,
+        -177.0,
+        -15.0,
+        -172.0
+      ],
+      "seed_lat_lon": [
+        -21.0,
+        -175.0
+      ],
+      "morvel56_equivalent": "TO (au)"
+    },
+    {
+      "code": "WL",
+      "name": "Woodlark",
+      "description": "Oceanic microplate with young active continental rifting / seafloor spreading",
+      "bounding_box_lat_lon": [
+        -13.0,
+        149.0,
+        -7.0,
+        158.0
+      ],
+      "seed_lat_lon": [
+        -10.0,
+        155.0
+      ],
+      "morvel56_equivalent": "WL (au)"
+    },
+    {
+      "code": "YA",
+      "name": "Yangtze",
+      "description": "Continental plate in southern China (South China Craton)",
+      "bounding_box_lat_lon": [
+        22.0,
+        102.0,
+        35.0,
+        123.0
+      ],
+      "seed_lat_lon": [
+        30.0,
+        115.0
+      ],
+      "morvel56_equivalent": "yz"
+    }
+  ]
+}

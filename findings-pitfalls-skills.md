@@ -1509,3 +1509,26 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	paint decision, the interactivity stays. Generalise: whenever "touching the inactive
 	control activates it" is the design, `disabled` is off the table by construction - dim
 	with styles, gate in the handler.
+
+## continental shelf inversion must follow crustal type, never elevation sign (2026-09-17)
+
+	Flooded continental shelves (e.g. Sunda shelf, North Sea, Grand Banks, Sahul shelf, Arctic
+	margins) represent ~10 % of Earth's continental crust but sit submerged at z = -20 to -200 m.
+	Inverting z < 0 blindly as oceanic crust (hFel = 0) treats shelves as abyssal floor, yielding
+	up to 57 km of mafic basalt under K9 isostasy — destroying density balance, subduction
+	fluxes, and plate boundary dynamics. Always separate continental from oceanic crust using
+	geological crustal type (CRUST1.0 or ocean crust age grid coverage): flooded shelves must be
+	inverted for hFel via Airy isostasy with transitional coupling (ci in [0.2, 1.0]), producing
+	realistic 25-32 km continental crust.
+
+## hierarchical plate models prevent immediate orphan collapse on coarse grids (2026-09-17)
+
+	In global plate models like Bird 2003 (PB2002, 52 plates) or Argus et al. 2011 (NNR-MORVEL56,
+	56 plates), small microplates (Easter, Manus, Futuna, Balmoral Reef) have areas < 50,000 km²,
+	which is <= 1 cell on an L5 icosphere (10,242 cells, ~50,000 km² per cell). If seeded directly,
+	they fall far below minPlateCells (100 cells at L5) and trigger dozens of unforced orphan merges
+	on the very first event cycle. Support a dual-tier plate hierarchy: on coarse grids (L5/L6),
+	collapse microplates into their canonical parent MORVEL plates using the rotation matrix
+	assignment from Argus et al. 2011 Table S3 (25 plates); preserve the full 56-plate model for
+	fine grids (L7/L8).
+
