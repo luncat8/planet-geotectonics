@@ -1,0 +1,23 @@
+========================================================================
+PALEO BAKE REPORT — earth-250Ma (250 Ma) — 2026-09-19T04:53:43.063677Z
+========================================================================
+Resolution: 360 x 180 (1.00° equirectangular)
+Total cells: 64,800
+Target wet fraction: 0.6809
+Achieved wet fraction: 0.6809 (68.09%)
+Calibrated datum shift: 0.00 m
+------------------------------------------------------------------------
+HYPSOMETRY & RELIEF STATISTICS:
+  Global min elevation: -5250.0 m
+  Global max elevation: 2600.0 m
+  Global mean elevation: -2415.9 m
+  Mean land elevation: +970.7 m
+  Mean ocean depth: -4092.3 m
+------------------------------------------------------------------------
+LAYER STATISTICS:
+  Crust age range: 15.0 - 255.0 Myr
+  Sediment thickness range: 1000.0 - 6000.0 m
+  Mean sediment thickness: 1863.7 m
+  Active plates: 9
+========================================================================
+VERIFICATION: K9-consistent by construction (z bank = elevation of the clamped crust); accept if the wet fraction reached its target and no thickness sits at a clamp ceiling

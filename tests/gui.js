@@ -129,7 +129,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 // --- 3. the page, running ----------------------------------------------------------------
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'sim', 'data/earth-1deg', 'earth', 'render'];
+	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma', 'earth', 'render'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the
@@ -766,6 +766,27 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	lEl('step').click();
 	livePage.pump(2, 3000);
 	assert.ok(/2[45] plates/.test(lEl('gaps').textContent), 'the game world steps too');
+
+	// The historical checkpoints (0.4.5): Pangaea (250 Ma) and Gondwana (200 Ma) boot from
+	// their own epoch packs, show the Preset select like the Earth start, and the copy
+	// header names the start. Their packs carry no poles (no NNR model for past epochs), so
+	// the status simply reports the pack's plate count after a step.
+	for (const [start, probeRe, wetRe] of [
+		['pangaea', /^earth-250Ma 360x180 /, /wet 68\.\d\d%/],
+		['gondwana', /^earth-200Ma 360x180 /, /wet 63\.\d\d%/]
+	]) {
+		lEl('start').value = start;
+		lEl('start').dispatch('change');
+		assert.equal(lEl('preset-label').hidden, false, start + ' is an Earth start: the Preset select shows');
+		lEl('reset').click();
+		assert.ok(probeRe.test(lEl('probe').textContent), start + ' boots its own pack: ' + lEl('probe').textContent);
+		assert.ok(wetRe.test(lEl('probe').textContent), start + ' report carries its wet fraction: ' + lEl('probe').textContent);
+		lEl('step').click();
+		livePage.pump(2, 4000);
+		assert.ok(/[89] plates/.test(lEl('gaps').textContent), start + ' status names the pack plates: ' + lEl('gaps').textContent);
+		assert.ok(worldLine(livePage.copy()).includes(' · ' + start + ' start · '),
+			'the copy header names the ' + start + ' start');
+	}
 	lEl('preset').value = 'realistic';
 	lEl('start').value = 'map';
 	lEl('start').dispatch('change');

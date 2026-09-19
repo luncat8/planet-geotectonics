@@ -1,0 +1,14 @@
+[*] paleo-score: earth-250Ma 360x180 (9 plates, epoch 250 Ma) -> modern reference, L5 seed 7, dt 0.1, preset realistic
+    reference modern mask: land 29.02% of 10242 cells
+t 0 Myr ·  · 9 plates · gaps 0 · 2.18 cm/yr · land 31.76% · IoU 0.2477
+t 25 Myr ·  · 9 plates · gaps 128 · 6.09 cm/yr · land 32.72% · IoU 0.2526
+t 50 Myr ·  · 8 plates · gaps 111 · 5.38 cm/yr · land 33.75% · IoU 0.2638
+t 75 Myr ·  · 8 plates · gaps 125 · 5.07 cm/yr · land 33.74% · IoU 0.2681
+t 100 Myr ·  · 8 plates · gaps 130 · 4.84 cm/yr · land 34.23% · IoU 0.2734
+t 125 Myr ·  · 8 plates · gaps 140 · 4.48 cm/yr · land 34.11% · IoU 0.2809
+t 150 Myr ·  · 8 plates · gaps 149 · 4.42 cm/yr · land 33.90% · IoU 0.2821
+t 175 Myr ·  · 8 plates · gaps 134 · 4.84 cm/yr · land 34.03% · IoU 0.2733
+t 200 Myr ·  · 8 plates · gaps 129 · 4.32 cm/yr · land 34.37% · IoU 0.2611
+t 225 Myr ·  · 8 plates · gaps 113 · 3.80 cm/yr · land 34.93% · IoU 0.2536
+t 250 Myr ·  · 8 plates · gaps 108 · 3.71 cm/yr · land 35.33% · IoU 0.2517
+PASS paleo-score: earth-250Ma -> present in 41.676 s · final t 250 Myr · final IoU 0.2517 · best IoU 0.2821 at t 150 Myr · trend decayed

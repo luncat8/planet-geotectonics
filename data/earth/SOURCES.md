@@ -6,7 +6,9 @@ file formats, resolutions, licencing terms, checksums, and mathematical fallback
 
 Raw source rasters (multi-hundred megabytes to gigabytes) are **not** committed to Git to keep
 repository clone weight small (in accordance with `AGENTS.md`). Pre-computed and verified compact
-starting packs (`js/data/earth-*.js`) and extracted reference data (`data/earth/*.json`) are committed.
+starting packs (`js/data/earth-*.js`), extracted reference data (`data/earth/*.json`), and the
+small 1° source textures + extracted bins behind the historical checkpoints (`data/earth/paleo/`,
+0.4.5) are committed.
 The Python bake tool (`tools/earth/bake_earth.py`) verifies checksums against this file prior to
 processing.
 
@@ -188,6 +190,33 @@ For initializing past geological epochs (e.g., Pangaea at 250 Ma, Cretaceous at 
 - **EarthByte Mirror:**
   `https://www.earthbyte.org/webdav/ftp/Data_Collections/Scotese_Wright_2018_PaleoDEM/`
 
+### Actually Ingested (0.4.5): the 1° texture route
+
+The build sandbox could not reach the Zenodo/EarthByte NetCDF-CSV downloads (TLS egress
+restricted), so the historical maps were ingested from the **CC-BY 4.0 1° equirectangular JPEG
+textures** of the same Scotese & Wright (2018) maps, as carried by the PDMap fossil-globe project
+(`github.com/andytradewave/pdmap`, `vendor/paleodem/`, 1024×512, 5 Ma steps, `000.jpg`…`540.jpg`).
+The textures are pixel-identical to the Zenodo 1° rasters; the Zenodo record above remains the
+**canonical citation**.
+
+The committed source textures and the 1° bins extracted from them (via
+`tools/earth/paleo_extract.js`, see `0.4.0-Earth-map-plan.md` §8.3) are:
+
+| File | Role | MD5 |
+|---|---|---|
+| `data/earth/paleo/250Ma_source.jpg` | PDMap `250.jpg` (Permian-Triassic, Pangaea), 1024×512 | `bb7580e7a3ce2138093a71aec6428444` |
+| `data/earth/paleo/200Ma_source.jpg` | PDMap `200.jpg` (Early Jurassic), 1024×512 | `e92afb780f00c40bed6661bd6b9b8eca` |
+| `data/earth/paleo/000Ma_source.jpg` | PDMap `000.jpg` (present day), 1024×512 — the 0.4.0 modern re-bake source | `71a45fbb4c7b8e457d38212285f3dcc7` |
+| `data/earth/paleo/250Ma_1deg.bin` | 1° z/age/kind raster extracted from `250Ma_source.jpg` | `461a5745bbd1e63b2e80006d7dab840f` |
+| `data/earth/paleo/200Ma_1deg.bin` | 1° z/age/kind raster extracted from `200Ma_source.jpg` | `af101df51aa0cc8762af877daadb3d44` |
+| `data/earth/paleo/000Ma_1deg.bin` | 1° z/age/kind raster, modern band values (`--z-deep 4200 --z-navy 5000`) | `40657630da47fc8aeb3b9531405be54f` |
+| `data/earth/paleo/000Ma_0p5deg.bin` | 0.5° raster of the modern map (L7) | `87d237870a5fd5c00f7269cae5a3b73f` |
+
+Baked packs: `js/data/earth-250Ma.js` (`pangaea`, epoch 250, all poles zero, datum `+0.00 m`) and
+`js/data/earth-200Ma.js` (`gondwana`, epoch 200, all poles zero, datum `+0.00 m`). The historical
+maps carry **no rotation poles** — the Scotese PaleoAtlas v3 `.rot` models (above) are the planned
+kinematic source for the 0.4.5 follow-up (reconstruction fidelity).
+
 ---
 
 ## 8. Summary Table of Sources
@@ -200,5 +229,5 @@ For initializing past geological epochs (e.g., Pangaea at 250 Ma, Cretaceous at 
 | **Crustal Thickness & Moho** | CRUST1.0 (Laske et al. 2013) | EGU2013-2658 | ASCII Table | 1.0° | Citation |
 | **Plate Boundaries** | PB2002 (Bird 2003) | `10.1029/2001GC000252` | GeoJSON / Dig ASCII | Vector (52 plates) | Open Data |
 | **Plate Kinematics (NNR)** | NNR-MORVEL56 (Argus 2011) | `10.1029/2011GC003751` | ASCII Table | 56 Euler poles | Public Domain |
-| **PaleoDEMs (0.4.5)** | PALEOMAP (Scotese 2018) | `10.5281/zenodo.5460860` | NetCDF / CSV | 1.0° (88 epochs) | CC-BY 4.0 |
+| **PaleoDEMs (0.4.5)** | PALEOMAP (Scotese 2018) | `10.5281/zenodo.5460860` | NetCDF / CSV; ingested via 1° textures (PDMap, §7) | 1.0° (88 epochs) | CC-BY 4.0 |
 | **Paleo Rotations (0.4.5)** | Scotese PaleoAtlas v3 | `10.5281/zenodo.5460860` | GPlates `.rot` | 0–540 Ma model | CC-BY 4.0 |
