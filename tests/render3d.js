@@ -12,8 +12,10 @@
      5. the CPU z pack: NaN gaps -> the marker, and the scratch is the same object across
         frames - no per-frame allocation;
      6. release and detail change destroy what they replace (the 0.3.4 leak lesson), a
-        borrowed LOOK/cellF is never destroyed, and a z-source re-init rebinds the gather.
-   Run: node tests/render3d.js */
+        borrowed LOOK/cellF is never destroyed, and a z-source re-init rebinds the gather;
+     7. the draft's hard requirement: a 1000-frame loop creates no device object at all -
+        the mesh, the height texture, the target and the scratch are init-time only.
+   Run: node --expose-gc tests/render3d.js */
 'use strict';
 const { assert, Grid, State } = require('./helpers.js');
 const Params = require('../js/params.js');
@@ -228,7 +230,50 @@ assert.equal(r3d.height, height, 'the height texture survives it');
 assert.equal(r3d.uniform, uniform, 'the uniform survives it');
 assert.equal(r3d.vCount, 10 * Math.pow(4, 4) + 2, 'the new mesh is the k4 one');
 
+// --- the draft's hard requirement: a height update never rebuilds the planet --------------
+// A play frame may create no device object at all - the mesh buffers, the height texture,
+// the target and the z scratch are all init-time - so the frame loop is run under counters
+// on the stub's own factories. Exact, where a heap number is only a bound: one stray
+// createTexture per frame is the "rebuilds the entire planet mesh" regression this pins.
+{
+	const dev = r3d.device;
+	let allocs = 0;
+	const mkBuf = dev.createBuffer, mkTex = dev.createTexture;
+	dev.createBuffer = function (d) { allocs++; return mkBuf.call(dev, d); };
+	dev.createTexture = function (d) { allocs++; return mkTex.call(dev, d); };
+	const mesh0 = r3d.mesh, height0 = r3d.height, scratch0 = r3d.zScratch, uniform0 = r3d.uniform;
+	const gc = typeof global.gc === 'function';
+	if (gc) global.gc();
+	const before = process.memoryUsage();
+	for (let i = 0; i < 1000; i++) {
+		r3d.redraw(zSrc);
+		// The stub records every pass descriptor; that is the rig's own bookkeeping, not
+		// the renderer's, so it is dropped each frame to keep the heap number honest.
+		dev.computePasses.length = 0;
+		dev.renderPasses.length = 0;
+	}
+	if (gc) global.gc();
+	const after = process.memoryUsage();
+	dev.createBuffer = mkBuf; dev.createTexture = mkTex;
+	assert.equal(allocs, 0, 'a 1000-frame run allocates no buffer and no texture ('
+		+ allocs + ' created): the mesh and the height texture are built once at init');
+	assert.equal(r3d.mesh, mesh0, 'the mesh is never rebuilt');
+	assert.equal(r3d.height, height0, 'the height texture is rewritten by the gather, not reallocated');
+	assert.equal(r3d.zScratch, scratch0, 'the z scratch is reused');
+	assert.equal(r3d.uniform, uniform0, 'and so is the draw uniform');
+	if (gc) {
+		const heap = after.heapUsed - before.heapUsed, buffers = after.arrayBuffers - before.arrayBuffers;
+		assert.ok(heap < 256 * 1024, 'retained heap growth over 1000 frames exceeds 256 KiB (' + heap + ')');
+		assert.ok(buffers < 64 * 1024, 'retained ArrayBuffer growth exceeds 64 KiB (' + buffers + ')');
+		console.log('PASS render3d frame loop: 1000 frames, 0 device allocations, retained '
+			+ JSON.stringify({ heap: heap, buffers: buffers }));
+	} else {
+		console.log('PASS render3d frame loop: 1000 frames, 0 device allocations '
+			+ '(run with --expose-gc for the retained-memory bound too)');
+	}
+}
+
 console.log('PASS render3d: icosphere counts/winding/dedup, orbit clamps, the frame contract '
 	+ '(gather, land, water, rim into the 3D target; present alone on the canvas), the live '
-	+ 'knob uniform, the gap-safe z pack with a reused scratch, and release/detail-change '
-	+ 'destroying exactly what they own');
+	+ 'knob uniform, the gap-safe z pack with a reused scratch, a 1000-frame loop that '
+	+ 'allocates nothing, and release/detail-change destroying exactly what they own');

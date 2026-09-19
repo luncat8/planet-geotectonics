@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 26 kernel, rig and GUI tests, ~1.5 min here
+node tests/run-all.js		short profile (default): 30 kernel, rig and GUI tests, ~1.5 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 
