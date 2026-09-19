@@ -63,7 +63,8 @@ tests/gpu-parity.js (headless CPU/GPU ensemble; needs the Chromium rig).
 0.3.5-plan-water-level.md - the water level plan: display eustasy, level and volume modes (draft inlined).
 0.4.0-Earth-map-plan.md - the Earth start plan: packs, bake pipeline, staged historical checkpoints.
 0.4.6-plan-plate-history.md - plate positions through time: prescribed kinematics, exact backtracking,
-the reverse-time answer, and what is not possible (needs the PaleoAtlas .rot model).
+the reverse-time answer, and what is not possible. 0.4.6a is in: data/earth/PALEOMAP_PlateModel.rot,
+tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotations.js.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13 is the planned alternate heightmap-lattice mesh.

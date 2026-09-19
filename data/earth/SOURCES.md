@@ -214,8 +214,27 @@ The committed source textures and the 1° bins extracted from them (via
 
 Baked packs: `js/data/earth-250Ma.js` (`pangaea`, epoch 250, all poles zero, datum `+0.00 m`) and
 `js/data/earth-200Ma.js` (`gondwana`, epoch 200, all poles zero, datum `+0.00 m`). The historical
-maps carry **no rotation poles** — the Scotese PaleoAtlas v3 `.rot` models (above) are the planned
-kinematic source for the 0.4.5 follow-up (reconstruction fidelity).
+maps carry **no rotation poles**; the rotation model below supplies them (0.4.6).
+
+### Ingested (0.4.6): the PaleoAtlas v3 rotation model
+
+`data/earth/PALEOMAP_PlateModel.rot` — 79,521 bytes, MD5 `6cc0c0e73c4f516c6069ae1c08d4f3d6`,
+CC-BY 4.0 (`data/earth/License.txt`), extracted by hand from `Scotese_PaleoAtlas_v3.zip`. Its own
+header names the model `m15g60_v2d3` and the plate-polygon set it belongs to,
+`ContOCeanPolyv10u_v2d3` — those polygons are **not** committed, so the model gives real plate
+identity and real plate speeds but not past plate boundaries.
+
+GPlates `.rot` format, 1491 rotation lines, 258 plates, −250…1100 Ma. Columns are
+`moving_plate time_Ma lat lon angle_deg anchor_plate`; every line is a **total reconstruction**
+rotation relative to an anchor plate (identity at 0 Ma), not a stage pole, and a positive angle
+runs present → past. `tools/earth/rot_ingest.js` resolves each plate's anchor chain to the model
+root and emits absolute rotations for 0–540 Ma as `js/data/rot-paleomap.js`
+(MD5 `80428bab20e66fee1f1f53080c5b9d6e`, 258 plates), which `js/rotations.js` serves. The ingest's
+own gates, re-deriving the file's pair rotations from its absolutes, agree to 3.8e-6° over 919
+lines; `tests/rotations.js` pins the composition order and the handedness against present-day
+plate bearings and against NNR-MORVEL56 (§6). The model is discontinuous where a plate changes
+anchor — 42 such instants inside 0–540 Ma, mean jump 11.5°, worst 53.4° at 315 @ 458 Ma — and the
+ingest reports that rather than smoothing it.
 
 ---
 
@@ -230,4 +249,4 @@ kinematic source for the 0.4.5 follow-up (reconstruction fidelity).
 | **Plate Boundaries** | PB2002 (Bird 2003) | `10.1029/2001GC000252` | GeoJSON / Dig ASCII | Vector (52 plates) | Open Data |
 | **Plate Kinematics (NNR)** | NNR-MORVEL56 (Argus 2011) | `10.1029/2011GC003751` | ASCII Table | 56 Euler poles | Public Domain |
 | **PaleoDEMs (0.4.5)** | PALEOMAP (Scotese 2018) | `10.5281/zenodo.5460860` | NetCDF / CSV; ingested via 1° textures (PDMap, §7) | 1.0° (88 epochs) | CC-BY 4.0 |
-| **Paleo Rotations (0.4.5)** | Scotese PaleoAtlas v3 | `10.5281/zenodo.5460860` | GPlates `.rot` | 0–540 Ma model | CC-BY 4.0 |
+| **Paleo Rotations (0.4.6)** | Scotese PaleoAtlas v3 `m15g60_v2d3` | `10.5281/zenodo.5460860` | GPlates `.rot` → `js/data/rot-paleomap.js` | 258 plates, 0–540 Ma | CC-BY 4.0 |
