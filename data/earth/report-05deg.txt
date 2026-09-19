@@ -1,23 +1,23 @@
 ========================================================================
-EARTH MAP BAKE REPORT — 2026-09-19T03:16:50.678264Z
+EARTH MAP BAKE REPORT — 2026-09-19T03:25:02.707370Z
 ========================================================================
-Resolution: 360 x 180 (1.00° equirectangular)
-Total cells: 64,800
+Resolution: 720 x 360 (0.50° equirectangular)
+Total cells: 259,200
 Target wet fraction: 0.7081 (70.81%)
 Achieved wet fraction: 0.7076 (70.76%)
-Calibrated datum shift: -1087.55 m
+Calibrated datum shift: -1088.49 m
 ------------------------------------------------------------------------
 HYPSOMETRY & RELIEF STATISTICS:
-  Global min elevation: -6232.6 m (deep ocean / trench)
-  Global max elevation: 7023.3 m (collisional peak)
-  Global mean elevation: -2774.0 m
-  Mean continental elevation: +696.3 m (real Earth: ~+840 m)
-  Mean ocean depth: -3815.1 m (real Earth: ~-3680 m)
+  Global min elevation: -6232.7 m (deep ocean / trench)
+  Global max elevation: 7029.2 m (collisional peak)
+  Global mean elevation: -2775.0 m
+  Mean continental elevation: +695.8 m (real Earth: ~+840 m)
+  Mean ocean depth: -3815.3 m (real Earth: ~-3680 m)
 ------------------------------------------------------------------------
 LAYER STATISTICS:
   Crust age range: 1.0 - 500.0 Myr
-  Sediment thickness range: 20.0 - 19893.7 m
-  Mean sediment thickness: 1986.2 m
+  Sediment thickness range: 20.0 - 19937.1 m
+  Mean sediment thickness: 1985.9 m
   Active plates: 25
 ========================================================================
 VERIFICATION STATUS: ACCEPTED (RMS < 150m, hypsometry matches Earth hypsometric curve)
