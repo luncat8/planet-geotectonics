@@ -129,7 +129,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 // --- 3. the page, running ----------------------------------------------------------------
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'sim', 'render'];
+	'extract', 'sim', 'data/earth-1deg', 'earth', 'render'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the
@@ -744,6 +744,34 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.equal(lEl('tm-value').textContent, '1.00', 'the slider readouts start on the control values');
 	assert.equal(lEl('relief-value').textContent, '6.5 km');
 	assert.equal(groupOf(lEl('play')), null, 'the transport buttons are outside both groups');
+	assert.equal(groupOf(lEl('preset')) && groupOf(lEl('preset')).id, 'startup', '#preset lives in the Startup group');
+
+	// The Earth start (0.4.0): the Preset select shows only for the Earth start, Reset world
+	// rebuilds onto the decoded pack and reports its hypsometry, the status line names the
+	// pack's 25 plates after a step, and the copy header carries the start.
+	assert.equal(lEl('preset-label').hidden, true, 'the Preset select is hidden for procedural starts');
+	lEl('start').value = 'earth';
+	lEl('start').dispatch('change');
+	assert.equal(lEl('preset-label').hidden, false, 'it appears when Start names the Earth');
+	lEl('reset').click();
+	assert.ok(/^earth 360x180 /.test(lEl('probe').textContent), 'the probe reports the pack: ' + lEl('probe').textContent);
+	assert.ok(/wet 7[01]\.\d\d%/.test(lEl('probe').textContent), 'the pack report carries the wet fraction');
+	lEl('step').click();
+	livePage.pump(2, 2000);
+	assert.ok(/2[45] plates/.test(lEl('gaps').textContent), 'the status names the pack plates: ' + lEl('gaps').textContent);
+	assert.ok(worldLine(livePage.copy()).includes(' · earth start · '), 'the copy header names the Earth start');
+	lEl('preset').value = 'game';
+	lEl('reset').click();
+	assert.ok(/^earth 360x180 /.test(lEl('probe').textContent), 'the game preset rebuilds the same pack');
+	lEl('step').click();
+	livePage.pump(2, 3000);
+	assert.ok(/2[45] plates/.test(lEl('gaps').textContent), 'the game world steps too');
+	lEl('preset').value = 'realistic';
+	lEl('start').value = 'map';
+	lEl('start').dispatch('change');
+	assert.equal(lEl('preset-label').hidden, true, 'and it hides again for the map start');
+	lEl('reset').click();
+	assert.equal(lEl('probe').textContent, 'Click the map to inspect a column; drag it to pan.', 'the procedural world is back');
 
 	// The slow-on-CPU warning: L7 on the CPU flags the Resolution control, more than one
 	// step per frame flags Steps/frame too, the GPU engine clears both, and the boot

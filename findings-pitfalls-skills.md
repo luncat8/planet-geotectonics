@@ -1532,3 +1532,39 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	assignment from Argus et al. 2011 Table S3 (25 plates); preserve the full 56-plate model for
 	fine grids (L7/L8).
 
+## Earth packs: three coordinate traps and the K9 envelope (0.4.0b, 2026-09-19)
+
+	the sim grid is y-up (x = cosφcosλ, y = sinφ, z = cosφsinλ) while geographic data is
+	z-up: pack seeds/poles need the swizzle (x, y, z)geo -> (x, z, y)sim at decode time,
+	once. Forgetting it rotates every Euler pole to the wrong hemisphere and the world's
+	plates spin around the equator instead of their poles.
+	the pack raster is cell-centred (row r centre at -90 + (r+0.5)·180/H): sampling coords
+	are u = ((λ+π)/2π)·W - 0.5 wrapped mod W, v = ((φ+π/2)/π)·H - 0.5 clamped to [0, H-1].
+	Scaling to W-1 instead of W puts a half-cell seam bias at the antimeridian and a
+	quarter-degree shift everywhere.
+	Water.fromElevations(z, 1).level is identically 0 for ANY hypsometry (the solver
+	inverts its own volumeAt at scale 1), so it can never verify a datum. The meaningful
+	runtime datum check is the wet fraction of the derived z against the pack's ocean
+	field; the level test stays only as a water-solver smoke test.
+
+## Earth packs: the datum shift and the K9 envelope form a fixed point (0.4.0b)
+
+	K9 oceanic crust can only carry z between ~-6.3 km (hMaf 2 km, age >= 80) and ~+0.4 km
+	(hMaf 35 km, age 0). Two bake bugs followed from ignoring the envelope. (1) A datum
+	shift of d metres moves every oceanic thickness requirement by d·3300/350 ≈ 2.9d metres
+	at load time: calibrating a -1.08 km shift after the consistency pass pushed every cell
+	thinner than ~12 km through the 2 km floor (2116 columns, up to 1.1 km elevation drift,
+	RMS 358 m). The fix is to alternate datum calibration and the K9 consistency pass
+	(recompute z from the clamped thicknesses) until both hold together - the clamps only
+	touch the envelope fringe, so the wet fraction barely moves and it converges in 2-3
+	rounds. (2) Interpolating the banks: bilinear (z, age) crosses the envelope between
+	cells, so the loader inverts every raster cell once at decode (the bake's exact clamps)
+	and interpolates the thickness banks. Age travels as sqrt(min(age, 80)): K9's ocean
+	elevation is linear in that coordinate, so interpolating raw age sags up to ~800 m
+	across ridge-flank gradients; in sqrtAge the derived elevation sits on the pack surface
+	(RMS 907 -> 30 m at L5). Mixed-crust coastal columns (hFel+hMaf both nonzero) are a
+	feature: rifted margins with thinned crust and mafic underplate, which is why the
+	runtime wet fraction lands ~0.4 pp above the raster's cosine-weighted number.
+	A synthesized raster has no crustal-type grid, so elevation is the type proxy: cells
+	above -200 m must be continental regardless of the IDW heuristic, or a +3 km island
+	inverts to a ~90 km basalt slab (the shelf/island rule in the plan's §1.1 spirit).

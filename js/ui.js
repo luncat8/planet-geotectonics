@@ -10,6 +10,11 @@
 	// One writer for the view mode: click, keyboard and hover all land here.
 	function setLayer(value) { if (currentLayer === value) return; currentLayer = value; dirty = true; }
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
+	var presetInput = document.getElementById('preset'), presetLabel = document.getElementById('preset-label');
+	var earthScore = null;
+	// The Preset select belongs to the Earth start only; the Start select shows/hides it.
+	function paintStart() { presetLabel.hidden = startInput.value !== 'earth'; }
+	startInput.addEventListener('change', paintStart);
 	var followInput = document.getElementById('follow');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
 	var coolingInput = document.getElementById('cooling'), tmInput = document.getElementById('tm');
@@ -362,7 +367,23 @@
 	if (prefilled('seavol', seaVolInput) && !seaPrefilled) waterActive = 'volume';
 	Params.seaVolScale = +seaVolInput.value;
 	if (query.get('cool')) coolingInput.checked = query.get('cool') !== '0';
-	state.cooling = coolingInput.checked ? 1 : 0;
+	// ?start=earth&preset=game boots straight onto the real-Earth columns (0.4.0), the same
+	// world the Startup fieldset rebuilds; a missing pack falls back to the map start.
+	if (query.get('start')) startInput.value = query.get('start');
+	if (query.get('preset')) presetInput.value = query.get('preset');
+	paintStart();
+	if (startInput.value === 'earth') {
+		var bootPack = Earth.pick(Params.level);
+		if (bootPack) {
+			Earth.apply(state, bootPack, { realistic: presetInput.value === 'realistic' });
+			earthScore = Earth.score(state, bootPack);
+			probe.textContent = Earth.describe(earthScore);
+		} else {
+			startInput.value = 'map';
+			paintStart();
+		}
+	}
+	state.cooling = state.prescribedOmega ? 0 : (coolingInput.checked ? 1 : 0);
 	applyTm();
 	applyAdjust();
 	Sim.raster(state);
@@ -435,14 +456,28 @@
 	// One world rebuild, shared by the Resolution select, Reset world and Load: the columns are
 	// Lagrangian on one grid, so a different level is a different world and there is nothing to
 	// carry over. `after` runs once the engine is ready on the new world.
-	function rebuildWorld(level, seed, hot, after) {
+	function rebuildWorld(level, seed, start, after) {
 		Params.level = level;
 		grid = new Grid(level, seed).build();
-		state = new State(grid, seed, hot);
+		state = new State(grid, seed, start === 'hot');
+		// The Earth start (0.4.0) replaces the procedural columns with the decoded pack:
+		// the realistic preset pins the NNR-MORVEL poles and the thermal budget, the game
+		// preset lets the procedural mantle drive the real continents.
+		earthScore = null;
+		if (start === 'earth') {
+			var pack = Earth.pick(level);
+			if (pack) {
+				Earth.apply(state, pack, { realistic: presetInput.value === 'realistic' });
+				earthScore = Earth.score(state, pack);
+			} else {
+				start = 'map';
+			}
+		}
 		// A fresh world starts on its own start temperature and the Tm slider follows it; the
 		// cooling switch is the user's and carries over, as the Params knobs (friction,
-		// erosion, relief) do - they are global settings, not world state.
-		state.cooling = coolingInput.checked ? 1 : 0;
+		// erosion, relief) do - they are global settings, not world state. The realistic
+		// Earth preset pins the budget instead (prescribedOmega worlds run cooling-free).
+		state.cooling = state.prescribedOmega ? 0 : (coolingInput.checked ? 1 : 0);
 		syncAdjust();
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
@@ -451,7 +486,8 @@
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
 		paintGrid();
-		probe.textContent = 'Click the map to inspect a column; drag it to pan.';
+		probe.textContent = earthScore ? Earth.describe(earthScore)
+			: 'Click the map to inspect a column; drag it to pan.';
 		Perf.reset();
 		resetViewStats();
 		bootEngine(function () {
@@ -459,9 +495,9 @@
 			if (after) after();
 		});
 	}
-	function rebuildWhenIdle(level, seed, hot, after) {
+	function rebuildWhenIdle(level, seed, start, after) {
 		setPlaying(false); runTarget = Infinity;
-		whenGpuIdle(function () { rebuildWorld(level, seed, hot, after); });
+		whenGpuIdle(function () { rebuildWorld(level, seed, start, after); });
 	}
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
@@ -600,7 +636,7 @@
 	});
 	document.getElementById('reset').addEventListener('click', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
-		rebuildWhenIdle(grid.level, +seedInput.value, startInput.value === 'hot');
+		rebuildWhenIdle(grid.level, +seedInput.value, startInput.value);
 	});
 	// A new resolution is a new world: same seed and start, rebuilt from scratch, because the
 	// crust lives on columns of one particular grid and nothing carries across grids.
@@ -610,7 +646,7 @@
 		// The CPU engine is the calibrated L5 path (design 0.1.5 §1); it runs L6-L7 too, at a
 		// few frames per second, and saying so once beats looking like a hang.
 		var slow = level > 5 && engineInput.value === 'cpu';
-		rebuildWhenIdle(level, +seedInput.value, startInput.value === 'hot', slow ? function () {
+		rebuildWhenIdle(level, +seedInput.value, startInput.value, slow ? function () {
 			probe.textContent = 'L' + level + ' on the CPU engine runs at a few frames/s; L6-L7 are the WebGPU path.';
 		} : null);
 	});
@@ -624,7 +660,7 @@
 			var blob = new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' });
 		var link = document.createElement('a');
 		link.href = URL.createObjectURL(blob);
-			link.download = 'planet-' + (startInput.value === 'hot' ? 'hot' : 'map') + '-' + Math.round(state.t) + 'myr.pgt';
+			link.download = 'planet-' + startInput.value + '-' + Math.round(state.t) + 'myr.pgt';
 			link.click();
 			URL.revokeObjectURL(link.href);
 		}
@@ -660,10 +696,13 @@
 			// The blob carries the level and seed it was written at, so the world is rebuilt to
 			// match and then restored into it: with a Resolution select a mismatch is the normal
 			// case, not a corrupt file, and "checkpoint level 5" is not an instruction.
-			rebuildWhenIdle(head.level, head.seed, startInput.value === 'hot', function () {
+			rebuildWhenIdle(head.level, head.seed, startInput.value, function () {
 				try {
 					Checkpoint.load(state, bytes);
 					// The blob owns the temperature and the cooling flag; the sliders follow it.
+					// prescribedOmega is not a checkpoint scalar, so an Earth world keeps the
+					// rebuild's preset (realistic holds the poles, game lets the mantle drive).
+					if (startInput.value === 'earth') state.prescribedOmega = presetInput.value === 'realistic' ? 1 : 0;
 					syncAdjust();
 					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
 						+ state.t.toFixed(1) + ' Myr.';

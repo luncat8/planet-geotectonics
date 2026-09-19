@@ -40,7 +40,8 @@
 			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
 				<label>Resolution<select id="level"><option value="5" selected>L5 · 10,242 cells</option><option value="6">L6 · 40,962 cells</option><option value="7">L7 · 163,842 cells</option></select></label>
-				<label>Start<select id="start"><option value="map" selected>Map start</option><option value="hot">Hot start</option></select></label>
+				<label>Start<select id="start"><option value="map" selected>Map start</option><option value="hot">Hot start</option><option value="earth">Earth · present day</option></select></label>
+				<label id="preset-label" hidden title="Earth start only: Realistic holds the real NNR-MORVEL poles and pins the thermal budget; Game lets the procedural mantle drive the real continents">Preset<select id="preset"><option value="realistic" selected>Realistic · real poles</option><option value="game">Game · mantle-driven</option></select></label>
 				<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
 				<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
 			</fieldset>
@@ -67,6 +68,9 @@
 	<script src="js/clipboard.js"></script>
 	<script src="js/extract.js"></script>
 	<script src="js/sim.js"></script>
+	<script src="js/data/earth-1deg.js"></script>
+	<script src="js/data/earth-05deg.js"></script>
+	<script src="js/earth.js"></script>
 	<script src="js/gpu/wgsl-common.js"></script>
 	<script src="js/gpu/wgsl-plates.js"></script>
 	<script src="js/gpu/wgsl-mantle.js"></script>
