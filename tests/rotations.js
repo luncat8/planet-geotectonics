@@ -15,9 +15,12 @@ const angle = (a, p, b, q) => Quat.angleBetween(a, p, b, q) * DEG;
 // --- the table -----------------------------------------------------------------------------
 assert.equal(Rotations.count, 258, 'every plate in the .rot is carried');
 assert.equal(Rotations.tMin, 0);
-assert.equal(Rotations.tMax, 515);
-assert.equal(Rotations.plates.filter((p) => p.n > 1).length, 122, 'plates with a history');
-assert.equal(Rotations.plates.filter((p) => p.n < 2).length, 136, 'present-day microplates');
+assert.equal(Rotations.tMax, 1100, 'the model\'s own range, not a truncated one');
+// Every plate has at least two samples once the table is not truncated. The 136 that looked
+// like present-day microplates with no history were an artifact of cutting the model at
+// 540 Ma: they all carry a 1100 Ma sample too.
+assert.equal(Rotations.plates.filter((p) => p.n > 1).length, 258, 'every plate has a history');
+assert.equal(Rotations.plates.filter((p) => p.n < 2).length, 0);
 for (const p of Rotations.plates) {
 	assert.equal(p.n, p.t.length);
 	assert.equal(p.n * 4, p.q.length);
@@ -36,10 +39,9 @@ const checks = Rotations.metadata.checks;
 assert.ok(checks.chainRederivedDeg < 1e-3, 'chain re-derivation ' + checks.chainRederivedDeg);
 assert.ok(checks.chainPairs > 900, 'the check covers the file, not a sample of it');
 assert.deepEqual(checks.identityNon, ['198:83.70'], 'one microplate is not at identity today');
-assert.ok(checks.anchorCycleMinT > Rotations.tMax, 'cut anchor cycles are outside the emitted range');
-
-// A plate with no history has no rate, and 136 of them exist - a NaN here would poison s.omega
-// and every column riding that plate.
+// A plate with no rate has to return zero rather than NaN - a NaN omega poisons s.q and every
+// column riding that plate. No plate needs it today, and the loop below is the reason it stays
+// that way.
 const scratchW = new Float64Array(3), scratchLL = new Float64Array(2);
 for (const p of Rotations.plates) {
 	for (const t of [0, 10, 50, 100, 250, 500]) {
@@ -139,7 +141,7 @@ for (const p of Rotations.plates) {
 		if (eMid > worstMid) worstMid = eMid;
 	}
 }
-assert.equal(stages, 583, 'every stage in the table');
+assert.equal(stages, 883, 'every stage in the table');
 assert.ok(worstEnd < 1e-3, 'stage end agrees to ' + worstEnd.toExponential(2) + ' deg at ' + where);
 assert.ok(worstMid < 1e-2, 'mid-stage agrees to ' + worstMid.toExponential(2) + ' deg');
 
@@ -169,26 +171,33 @@ for (const code of ['NAM', 'IND', 'AUS', 'AFR']) {
 	assert.ok(Math.abs(home[0] - 20) < 1e-6 && Math.abs(home[1] - 40) < 1e-6, code + ' round trip');
 }
 
-// --- existence windows: the model is silent about plates that were not distinct yet ---------
-// at() clamps past the end of a plate's samples instead of failing, so a caller that
-// reconstructs an epoch has to ask first - otherwise it silently rotates South America by its
-// 143.8 Ma rotation and calls the result Pangaea.
-const window = [['NAM', 515], ['EUR', 515], ['AFR', 515], ['IND', 206], ['ANT', 166],
-	['SAM', 143.8], ['AUS', 94], ['PAC', 84]];
-for (const [code, oldest] of window) {
-	const p = Rotations.find(code);
-	assert.equal(p.t[p.n - 1], oldest, code + ' oldest sample');
-	assert.ok(Rotations.has(p, 0), code + ' exists today');
-	assert.ok(Rotations.has(p, oldest), code + ' exists at its oldest sample');
-	assert.ok(!Rotations.has(p, oldest + 1), code + ' has nothing older than ' + oldest + ' Ma');
+// --- how coarse is the model at an epoch we care about? ------------------------------------
+// The bracketing gap at 250 Ma, and the property that makes the long ones harmless: where a
+// plate's pair rotation is identical at both ends of a stage, the plate is welded to its anchor
+// and the stage is exact rather than interpolated. Truncating the table hides this and turns
+// those intervals into clamps.
+const gaps = [['AFR', 15], ['EUR', 80], ['NAM', 131], ['IND', 894], ['ANT', 934],
+	['SAM', 956], ['AUS', 1006], ['PAC', 1016]];
+for (const [code, gap] of gaps) {
+	const p = Rotations.find(code), i = Rotations.bracket(p, 250);
+	assert.ok(i >= 0 && p.t[i] <= 250 && p.t[i + 1] > 250, code + ' brackets 250 Ma');
+	assert.equal(Math.round(p.t[i + 1] - p.t[i]), gap, code + ' gap across 250 Ma');
 }
-assert.ok(!Rotations.has(Rotations.find('AUS'), 250), 'Australia is undefined at 250 Ma');
-assert.ok(Rotations.has(Rotations.find('AFR'), 250), 'Africa is defined at 250 Ma');
-// The coarsest sample gaps, which bound the interpolation error at an epoch: NAM 175 -> 306 Ma
-// and EUR 255 -> 425 Ma both straddle 250 Ma, so a 250 Ma reconstruction of those two is an
-// arc across a 131 and an 80 Myr gap respectively.
-assert.equal(Rotations.find('NAM').t[Rotations.bracket(Rotations.find('NAM'), 250)], 175);
-assert.equal(Rotations.find('EUR').t[Rotations.bracket(Rotations.find('EUR'), 250)], 175);
+// Australia was part of Antarctica, South America part of Africa, India part of Madagascar:
+// over those thousand-million-year stages the child and its anchor take the SAME rotation, so
+// reconstructing across the gap is the model's own answer and not an approximation.
+for (const [child, parent, t0, t1] of [['AUS', 'ANT', 94, 1100], ['SAM', 'AFR', 143.8, 1100],
+	['IND', 'MAD', 206, 1100]]) {
+	const rc = new Float64Array(4), rp = new Float64Array(4);
+	Rotations.relative(Rotations.find(child), t1, t0, rc, 0);
+	Rotations.relative(Rotations.find(parent), t1, t0, rp, 0);
+	// 1e-3 deg is 111 m and 20x looser than the 2.1e-5 deg that composing a 131 deg rotation
+	// costs in double precision; tighter would test the cosine, not the model.
+	assert.ok(angle(rc, 0, rp, 0) < 1e-3, child + ' moved exactly with ' + parent + ' from '
+		+ t0 + ' to ' + t1 + ' Ma');
+}
+assert.ok(Rotations.has(Rotations.find('AUS'), 250), 'Australia is defined at 250 Ma');
+assert.ok(!Rotations.has(Rotations.find('AUS'), 1200), 'nothing is defined past the model');
 
 // --- the geography those rotations imply ---------------------------------------------------
 // Australia was against Antarctica 50 Ma ago; North America was 50 degrees closer to Africa.

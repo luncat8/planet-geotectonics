@@ -224,6 +224,16 @@ header names the model `m15g60_v2d3` and the plate-polygon set it belongs to,
 `ContOCeanPolyv10u_v2d3` — those polygons are **not** committed, so the model gives real plate
 identity and real plate speeds but not past plate boundaries.
 
+`data/earth/PALEOMAP_PlatePolygons.gpml` — 5,287,072 bytes, MD5
+`d782fab51dd1a5496656f212914eb427`, CC-BY 4.0, from the same folder of the same archive and
+matched to the rotation model ("for use with Plate Polygons ContOCeanPolyv10u_v2d3"). 471
+features, 503 rings, 26,936 vertices, each ring tagged with the plate id it rides and a
+`[DISAPPEARA, APPEARANCE]` window in Ma-ago. `tools/earth/gpml_plates.js` reconstructs the
+rings with the rotations above and rasterizes them onto the bake lattice, which is how a pack
+gets a real plate id per cell instead of a Voronoi guess. 223 plates today (94 % of cells),
+85 at 250 Ma (24 %, continental crust only — the ocean floor of 250 Ma is subducted and is not
+in the file). `tests/gpml-plates.js` pins the identity and the Pangaea sutures.
+
 GPlates `.rot` format, 1491 rotation lines, 258 plates, −250…1100 Ma. Columns are
 `moving_plate time_Ma lat lon angle_deg anchor_plate`; every line is a **total reconstruction**
 rotation relative to an anchor plate (identity at 0 Ma), not a stage pole, and a positive angle
@@ -249,4 +259,5 @@ ingest reports that rather than smoothing it.
 | **Plate Boundaries** | PB2002 (Bird 2003) | `10.1029/2001GC000252` | GeoJSON / Dig ASCII | Vector (52 plates) | Open Data |
 | **Plate Kinematics (NNR)** | NNR-MORVEL56 (Argus 2011) | `10.1029/2011GC003751` | ASCII Table | 56 Euler poles | Public Domain |
 | **PaleoDEMs (0.4.5)** | PALEOMAP (Scotese 2018) | `10.5281/zenodo.5460860` | NetCDF / CSV; ingested via 1° textures (PDMap, §7) | 1.0° (88 epochs) | CC-BY 4.0 |
-| **Paleo Rotations (0.4.6)** | Scotese PaleoAtlas v3 `m15g60_v2d3` | `10.5281/zenodo.5460860` | GPlates `.rot` → `js/data/rot-paleomap.js` | 258 plates, 0–540 Ma | CC-BY 4.0 |
+| **Paleo Rotations (0.4.6)** | Scotese PaleoAtlas v3 `m15g60_v2d3` | `10.5281/zenodo.5460860` | GPlates `.rot` → `js/data/rot-paleomap.js` | 258 plates, 0–1100 Ma | CC-BY 4.0 |
+| **Paleo Plate Polygons (0.4.6)** | Scotese PaleoAtlas v3 `ContOCeanPolyv10u_v2d3` | `10.5281/zenodo.5460860` | GPlates `.gpml` | 503 rings, 241 plate ids | CC-BY 4.0 |

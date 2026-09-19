@@ -29,7 +29,7 @@
 
    Usage (flags take =value or a following argument):
      node tools/earth/rot_ingest.js [--rot=data/earth/PALEOMAP_PlateModel.rot]
-                                    [--out=js/data/rot-paleomap.js] [--tmin=0] [--tmax=540]
+                                    [--out=js/data/rot-paleomap.js] [--tmin=0] [--tmax=1100]
 */
 'use strict';
 const fs = require('node:fs');
@@ -45,7 +45,12 @@ const arg = (name, def) => {
 };
 const ROT = arg('rot', 'data/earth/PALEOMAP_PlateModel.rot');
 const OUT = arg('out', 'js/data/rot-paleomap.js');
-const TMIN = +arg('tmin', 0), TMAX = +arg('tmax', 540);   // the PaleoDEM maps stop at 540 Ma
+// Emit the model's full range. Truncating it is a trap that looks harmless: the deep samples
+// are what bracket the epochs anyone reconstructs, and where a plate's pair rotation is
+// identical at both ends of a 1000 Myr stage - Australia at 33.82 deg relative to Antarctica at
+// both 94 and 1100 Ma - that stage is exact, not a coarse interpolation. Cutting the table at
+// 540 Ma turns those into clamps and makes the model look coarser than it is.
+const TMIN = +arg('tmin', 0), TMAX = +arg('tmax', 1100);
 const DEG = Math.PI / 180, ROOTS = new Set(['000', '001']);
 
 // --- parse ---------------------------------------------------------------------------------

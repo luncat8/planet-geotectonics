@@ -83,10 +83,13 @@ var Rotations = {
 	// they were not distinct plates yet. at() clamps past the end rather than failing, so
 	// callers reconstructing an epoch must check this first and merge or drop the plate.
 	has: function (p, t) { return p.n > 1 && t >= p.t[0] && t <= p.t[p.n - 1]; },
-	// Reconstruction rotation R(t): present-day position -> position at time t. Slerped between
-	// the model's samples, which is the same curve a fractional stage rotation traces. Beyond
-	// either end the nearest sample is held, which is a constant-rotation extrapolation, not a
-	// model value - see has().
+	// Reconstruction rotation R(t): present-day position -> position at time t, taken as a
+	// fraction of the bracketing stage applied in the plate's own frame at the younger end.
+	// Slerping the two samples would look simpler and is wrong here: a slerp takes the shortest
+	// arc, so a stage that rotates a plate past 180 deg (plate 222 turns 186.5 deg between 79.1
+	// and 1100 Ma) would be interpolated the wrong way round. Exponentiating the stage is exact
+	// at both ends for any angle. Beyond either end the nearest sample is held, which is a
+	// constant-rotation extrapolation, not a model value - see has().
 	at: function (p, t, out, o) {
 		var ts = p.t, i = Rotations.bracket(p, t);
 		if (i < 0 || i >= p.n - 1) {
@@ -95,12 +98,21 @@ var Rotations = {
 			return out;
 		}
 		var f = (t - ts[i]) / (ts[i + 1] - ts[i]);
-		if (f <= 0) {
-			var b = i * 4;
+		if (f <= 0 || f >= 1) {
+			var b = (f >= 1 ? i + 1 : i) * 4;
 			out[o] = p.q[b]; out[o + 1] = p.q[b + 1]; out[o + 2] = p.q[b + 2]; out[o + 3] = p.q[b + 3];
 			return out;
 		}
-		return RotationsQuat.slerp(out, o, p.q, i * 4, p.q, (i + 1) * 4, f);
+		var T = Rotations.TMP, a = i * 4, c = (i + 1) * 4;
+		T[8] = -p.q[a]; T[9] = -p.q[a + 1]; T[10] = -p.q[a + 2]; T[11] = p.q[a + 3];
+		RotationsQuat.mul(T, 8, T, 8, p.q, c);            // the stage, in the plate's frame at t[i]
+		var s = Math.hypot(T[8], T[9], T[10]);
+		if (s < 1e-15) {
+			out[o] = p.q[a]; out[o + 1] = p.q[a + 1]; out[o + 2] = p.q[a + 2]; out[o + 3] = p.q[a + 3];
+			return out;
+		}
+		RotationsQuat.fromAxisAngle(T, 12, T[8] / s, T[9] / s, T[10] / s, 2 * Math.atan2(s, T[11]) * f);
+		return RotationsQuat.mul(out, o, p.q, a, T, 12);
 	},
 	// Motion rotation from epoch t0 to epoch t, i.e. what s.q holds for a pack baked at t0.
 	relative: function (p, t, t0, out, o) {
@@ -137,7 +149,10 @@ var Rotations = {
 		RotationsQuat.mul(T, 8, p.q, i * 4, T, 8);
 		var s = Math.hypot(T[8], T[9], T[10]);
 		if (s < 1e-15) { out[o] = 0; out[o + 1] = 0; out[o + 2] = 0; return out; }
-		var rate = 2 * Math.atan2(s, Math.abs(T[11])) / dt / s;
+		// The signed scalar part, not its absolute value: a thousand-Myr stage can rotate a
+		// plate past 180 deg, and |w| would fold that back to 2pi - angle about the same axis,
+		// reversing the stage. atan2(s, w) covers the whole [0, 2pi).
+		var rate = 2 * Math.atan2(s, T[11]) / dt / s;
 		out[o] = T[8] * rate; out[o + 1] = T[9] * rate; out[o + 2] = T[10] * rate;
 		return out;
 	},
