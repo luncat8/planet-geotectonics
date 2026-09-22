@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+/* tools/earth/crosswalk.js - MORVEL25 pack plate index -> PALEOMAP plate id (0.4.6).
+
+   The modern pack numbers its plates 0..24 with no record of which plate each index is; the
+   order is "the i-th sorted unique parent_morvel25 code" from nnr-morvel56.json, which is a
+   bake-time secret today. Mode K needs the reverse: to rotate a pack to an epoch it has to
+   know which rotation-model plate each index is.
+
+   So this emits that mapping as a classic script, and it does not trust the ordering story -
+   it re-derives it and checks it against the committed pack's own Euler poles, which are
+   copied straight from NNR-MORVEL56. If the order ever changes, the assert fires here rather
+   than silently rotating the wrong continent.
+
+   Merges are explicit because PALEOMAP splits further than MORVEL does: Lwandle is part of
+   PALEOMAP's Africa, Capricorn and Macquarie part of Australia. Where no PALEOMAP plate can
+   be justified the entry is null and reconstruct leaves those columns alone - the tool counts
+   the cells that costs so it is a number, not a shrug.
+
+   Usage: node tools/earth/crosswalk.js [--out js/data/plate-crosswalk.js]
+*/
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+
+const arg = (name, def) => {
+	const eq = process.argv.find((x) => x.startsWith('--' + name + '='));
+	if (eq !== undefined) return eq.slice(name.length + 3);
+	const at = process.argv.indexOf('--' + name);
+	if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1];
+	return def;
+};
+const OUT = arg('out', 'js/data/plate-crosswalk.js');
+
+// MORVEL25 parent code -> PALEOMAP plate id, with the reason for every merge and every gap.
+const MAP = {
+	am: { id: '628', note: 'Amuria' },
+	an: { id: '802', note: 'East Antarctic craton; MORVEL Antarctica also spans PALEOMAP 803/897' },
+	ar: { id: '531', note: 'East Arabian; PALEOMAP splits Arabia into 530 west / 531 east' },
+	au: { id: '801', note: 'Australian craton' },
+	ca: { id: '224', note: 'Caribbean ocean floor' },
+	co: { id: '909', note: 'Cocos' },
+	cp: { id: '801', note: 'MERGE - Capricorn is part of PALEOMAP Australia' },
+	eu: { id: '301', note: 'Europe; MORVEL Eurasia also spans PALEOMAP 401 Siberia / 402 Kazakh' },
+	in: { id: '501', note: 'India' },
+	jf: { id: '910', note: 'Juan de Fuca' },
+	lw: { id: '701', note: 'MERGE - Lwandle is part of PALEOMAP Africa' },
+	mq: { id: '801', note: 'MERGE - Macquarie is part of PALEOMAP Australia' },
+	na: { id: '101', note: 'North America; PALEOMAP also has 124 Cordillera, 999 Greenland' },
+	nb: { id: '701', note: 'Nubia, the main African plate' },
+	nz: { id: '902', note: 'Nazca' },
+	pa: { id: '901', note: 'Pacific' },
+	ps: { id: null, note: 'GAP - PALEOMAP splits the Philippine Sea into basins 655/656, no single plate' },
+	ri: { id: null, note: 'GAP - no Rivera plate in PALEOMAP' },
+	sa: { id: '201', note: 'South America' },
+	sc: { id: '822', note: 'Scotia' },
+	sm: { id: '709', note: 'Somalia' },
+	sr: { id: null, note: 'GAP - no Shetland plate in PALEOMAP; MORVEL puts it with Antarctica' },
+	su: { id: '616', note: 'Sibumasu, the western part of MORVEL Sunda' },
+	sw: { id: null, note: 'GAP - no Sandwich plate in PALEOMAP' },
+	yz: { id: '611', note: 'South China / Yangtze' }
+};
+
+const nnr = JSON.parse(fs.readFileSync('data/earth/nnr-morvel56.json', 'utf8'));
+const byCode = {};
+for (const r of nnr.plates) byCode[r.code] = r;
+const codes = [...new Set(nnr.plates.map((r) => r.parent_morvel25))].sort();
+
+// Prove the index order against the committed modern pack's own poles.
+global.window = undefined;
+const packs = require(path.resolve('js/data/earth-1deg.js'));
+const pack = packs.find((p) => p.name === 'earth') || packs[0];
+if (!pack) throw new Error('no modern pack in js/data/earth-1deg.js');
+const poles = pack.plates.poles;
+if (poles.length !== codes.length) {
+	throw new Error('pack has ' + poles.length + ' plates but NNR-MORVEL56 has ' + codes.length
+		+ ' parent codes - the index order assumption is wrong');
+}
+for (let i = 0; i < codes.length; i++) {
+	const want = byCode[codes[i]].pole_vector;
+	for (let k = 0; k < 4; k++) {
+		if (Math.abs(poles[i][k] - want[k]) > 5e-5) {
+			throw new Error('pack plate ' + i + ' does not carry the NNR pole of ' + codes[i]
+				+ ' - the index order assumption is wrong');
+		}
+	}
+}
+console.log('[*] verified: pack plate index i carries the NNR-MORVEL56 pole of the i-th sorted parent code');
+
+const model = require(path.resolve('js/data/rot-paleomap.js'));
+const known = new Set(model.plates.map((p) => p.id));
+const ids = codes.map((c) => (MAP[c] ? MAP[c].id : null));
+let gaps = 0;
+for (let i = 0; i < codes.length; i++) {
+	if (!MAP[codes[i]]) throw new Error(codes[i] + ' has no crosswalk entry at all');
+	if (ids[i] === null) { gaps++; continue; }
+	if (!known.has(ids[i])) throw new Error(codes[i] + ' -> ' + ids[i] + ' is not a plate in the rotation model');
+}
+
+const body = '// js/data/plate-crosswalk.js - generated by tools/earth/crosswalk.js, do not edit\n'
+	+ '(function () {\n'
+	+ '\tvar globalObject = typeof window !== \'undefined\' ? window : (typeof global !== \'undefined\' ? global : this);\n'
+	+ '\tglobalObject.PlateCrosswalk = ' + JSON.stringify({
+		morvel: 'NNR-MORVEL56 parent codes, sorted - the modern pack plate index order',
+		paleomap: 'PALEOMAP Plate Model m15g60_v2d3 plate ids, null where no plate can be justified',
+		codes: codes, ids: ids, notes: codes.map((c) => MAP[c].note)
+	}) + ';\n'
+	+ '\tif (typeof module !== \'undefined\' && module.exports) module.exports = globalObject.PlateCrosswalk;\n'
+	+ '}());\n';
+fs.writeFileSync(OUT, body);
+console.log('[+] ' + OUT + ' (' + body.length + ' bytes, ' + codes.length + ' plates, ' + gaps + ' gaps)');
+console.log('    gaps: ' + codes.filter((c) => !MAP[c].id).join(', '));

@@ -156,6 +156,14 @@ var Rotations = {
 		out[o] = T[8] * rate; out[o + 1] = T[9] * rate; out[o + 2] = T[10] * rate;
 		return out;
 	},
+	// The table is geographic z-up (toXYZ above); the sim grid is y-up (js/earth.js coords:
+	// lat=asin(y), lon=atan2(z,x)). The frames differ by a reflection, so carrying a rotation
+	// across negates its vector part and swaps y/z, which preserves its sense. Checked against
+	// place() over 5 continents: 0.0000 deg, where the unconverted quaternion is off by 131.6.
+	toSim: function (q, out, o) {
+		out[o] = -q[0]; out[o + 1] = -q[2]; out[o + 2] = -q[1]; out[o + 3] = q[3];
+		return out;
+	},
 	toXYZ: function (lat, lon, out, o) {
 		var la = lat * Math.PI / 180, lo = lon * Math.PI / 180, cl = Math.cos(la);
 		out[o] = cl * Math.cos(lo); out[o + 1] = cl * Math.sin(lo); out[o + 2] = Math.sin(la);

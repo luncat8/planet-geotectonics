@@ -129,7 +129,8 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 // --- 3. the page, running ----------------------------------------------------------------
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma', 'earth', 'render'];
+	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'data/rot-paleomap', 'rotations', 'data/plate-crosswalk', 'earth', 'render'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the

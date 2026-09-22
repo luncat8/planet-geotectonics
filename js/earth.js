@@ -13,6 +13,8 @@
 var EarthParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var EarthGrid = typeof module !== 'undefined' && module.exports ? require('./geodesics.js') : Grid;
 var EarthSim = typeof module !== 'undefined' && module.exports ? require('./sim.js') : Sim;
+var EarthRotations = typeof module !== 'undefined' && module.exports ? require('./rotations.js') : Rotations;
+var EarthCrosswalk = typeof module !== 'undefined' && module.exports ? require('./data/plate-crosswalk.js') : PlateCrosswalk;
 var Earth = {
 	packs: function () {
 		var g = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this);
@@ -187,11 +189,44 @@ var Earth = {
 		s.omegaTarget[wb] = s.omega[wb]; s.omegaTarget[wb + 1] = s.omega[wb + 1]; s.omegaTarget[wb + 2] = s.omega[wb + 2];
 	}
 	s.prescribedOmega = prescribe ? 1 : 0;
+	s.epoch0 = pack.epoch || 0;
 	if (opts.realistic) s.cooling = 0;
 	EarthSim.raster(s);
 	s.rebase();
 	return s;
 },
+	// Mode K (0.4.6): put every column where the rotation model says it was at `epoch`, by
+	// exact rigid rotation. No dt, no physics, and nothing is advected on the grid - each
+	// column's world direction is recomputed from its body direction and its plate's quaternion,
+	// which is why the transform is reversible to floating-point error.
+	//
+	// The plate's quaternion becomes the MOTION rotation from the pack's own epoch to `epoch`,
+	// not the file's reconstruction rotation: Columns.move does world = rotate(body, q) and
+	// body is the pack's geography at its bake epoch, so q has to be R(epoch) ∘ R(epoch0)^-1.
+	// Plates the crosswalk cannot justify (4 of the modern 25, all small ocean plates) keep the
+	// identity and are counted, so the cost of a gap is a number rather than a shrug.
+	reconstruct: function (s, epoch) {
+		var q = new Float64Array(4), moved = 0, stuck = 0, stuckPlates = 0;
+		var counts = s.reconCounts || (s.reconCounts = new Int32Array(s.plateCap));
+		counts.fill(0);
+		for (var i = 0; i < s.n; i++) if (s.alive[i]) counts[s.plate[i]]++;
+		for (var p = 0; p < s.plateCount; p++) {
+			var pb = p * 4, id = EarthCrosswalk.ids[p];
+			var plate = id ? EarthRotations.of(id) : null;
+			if (!plate) {
+				s.q[pb] = 0; s.q[pb + 1] = 0; s.q[pb + 2] = 0; s.q[pb + 3] = 1;
+				stuck += counts[p];
+				if (counts[p]) stuckPlates++;
+				continue;
+			}
+			EarthRotations.relative(plate, epoch, s.epoch0, q, 0);
+			EarthRotations.toSim(q, s.q, pb);
+			moved += counts[p];
+		}
+		s.reconEpoch = epoch;
+		EarthSim.raster(s);
+		return { epoch: epoch, moved: moved, stuck: stuck, stuckPlates: stuckPlates };
+	},
 	// Wet fraction, mean land/ocean and the round-trip RMS of derived z vs the pack's z bank,
 	// resampled at the same cell positions (plan §7 acceptance).
 	score: function (s, pack) {

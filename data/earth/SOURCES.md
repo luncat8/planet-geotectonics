@@ -234,6 +234,39 @@ gets a real plate id per cell instead of a Voronoi guess. 223 plates today (94 %
 85 at 250 Ma (24 %, continental crust only — the ocean floor of 250 Ma is subducted and is not
 in the file). `tests/gpml-plates.js` pins the identity and the Pangaea sutures.
 
+### Available, assessed, not ingested: PaleoCoastlines v7 (0.4.6)
+
+`archive/paleocoastlines_v7_shapefiles.zip` — 17,481,632 bytes, from Zenodo record
+`10.5281/zenodo.7994000`. Two layers, `CS` (coastlines) and `CM` (continental margins), each as
+81 epochs from 0 to 535 Ma in shapefile + GPML form. `archive/paleomap_global_plate_model_v3.zip`
+is the same two files already vendored above, byte-identical (MD5s match), kept as the canonical
+provenance archive.
+
+Assessed rather than assumed, because the first reading of it is misleading:
+
+- **The geometries are already reconstructed per epoch** — the 0 Ma and 250 Ma masks differ on
+  half the sphere — so no rotation model is needed and none is referenced.
+- **They carry no plate identity.** `PLATEID1` is `0` on every record, so this dataset can
+  supply a land mask but never a plate id; plate identity stays with the PALEOMAP polygons.
+- **The 250 Ma `CM` layer is 10 polygons with no holes**, one of which is a single 489-vertex
+  ring spanning the whole globe (lat −89.9…82.0, lon span 360°). Read as land it covers 63.1 %
+  of a 1° sphere and agrees with the committed 250 Ma PaleoDEM continental mask at
+  **IoU 0.442**, covering 20,097 of its 24,687 cells (81 %) and missing 4,590; read as ocean it
+  scores 0.104, so the orientation is not in doubt. The remaining 9 rings are 66 cells of
+  islands. For comparison the PALEOMAP plate polygons cover 44 % of the same cells at IoU
+  0.372 — the coastline layer is the better land mask and the worse identity source, which is
+  what each dataset is for.
+- A naive parse that treats every `gml:posList` as an exterior ring silently produces plausible
+  numbers here; the 63 % figure is only meaningful once the globe-spanning ring and the absent
+  holes are understood. `CS` at some epochs also ships a near-empty GPML stub (250 Ma is 342
+  bytes) with the real geometry in the `.shp`, and some of its `.dbf` attribute columns are
+  asterisk-filled placeholders.
+
+Not ingested: the packs keep the Scotese PaleoDEM as their land mask so that the map, the
+rotation model and the checkpoints stay one vintage. The value of this dataset is as an
+**independent** land mask at 81 epochs — the cross-check that would tell us how much of the
+0.372 IoU above is vintage and how much is flooded continental crust.
+
 GPlates `.rot` format, 1491 rotation lines, 258 plates, −250…1100 Ma. Columns are
 `moving_plate time_Ma lat lon angle_deg anchor_plate`; every line is a **total reconstruction**
 rotation relative to an anchor plate (identity at 0 Ma), not a stage pole, and a positive angle
@@ -261,3 +294,4 @@ ingest reports that rather than smoothing it.
 | **PaleoDEMs (0.4.5)** | PALEOMAP (Scotese 2018) | `10.5281/zenodo.5460860` | NetCDF / CSV; ingested via 1° textures (PDMap, §7) | 1.0° (88 epochs) | CC-BY 4.0 |
 | **Paleo Rotations (0.4.6)** | Scotese PaleoAtlas v3 `m15g60_v2d3` | `10.5281/zenodo.5460860` | GPlates `.rot` → `js/data/rot-paleomap.js` | 258 plates, 0–1100 Ma | CC-BY 4.0 |
 | **Paleo Plate Polygons (0.4.6)** | Scotese PaleoAtlas v3 `ContOCeanPolyv10u_v2d3` | `10.5281/zenodo.5460860` | GPlates `.gpml` | 503 rings, 241 plate ids | CC-BY 4.0 |
+| **PaleoCoastlines (assessed)** | PaleoCoastlines v7 | `10.5281/zenodo.7994000` | Shapefile + `.gpml` | 81 epochs, 0–535 Ma, no plate ids | CC-BY 4.0 |

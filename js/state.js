@@ -182,6 +182,8 @@ State.prototype.reset = function (seed) {
 	this.t = 0; this.frame = 0; this.n = this.grid.V;
 	this.plateCount = Math.min(StateParams.plateCount, this.n);
 	this.gaps = 0; this.maxClimb = 0; this.fixedOmega = 0; this.prescribedOmega = 0; this.finite = 1;
+	// The epoch the pack was baked at, and the epoch Mode K last reconstructed to (0.4.6).
+	this.epoch0 = 0; this.reconEpoch = 0;
 	this.meanSpeed = 0; this.maxSpeed = 0; this.typeChanges = 0;
 	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
 	// Tm0 is the cooling baseline: the exponential always decays from the world's own start
