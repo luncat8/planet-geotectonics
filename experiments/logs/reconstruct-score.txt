@@ -1,0 +1,8 @@
+[*] reconstruct-score: earth (25 plates, epoch 0 Ma) reconstructed onto L5 seed 7, 10242 columns, 10242 cells
+  250 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 25.92% vs reference 31.83%  ·  IoU 0.3954 (unreconstructed 0.2484)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  200 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 26.48% vs reference 37.58%  ·  IoU 0.4350 (unreconstructed 0.2669)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+PASS reconstruct-score

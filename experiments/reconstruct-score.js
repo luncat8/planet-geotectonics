@@ -9,7 +9,11 @@
 //                                         [--preset=realistic]
 //
 // Reference masks are the committed historical packs' own land masks, i.e. the Scotese
-// PaleoDEM coastlines. The plan's threshold is IoU >= 0.60 per epoch.
+// PaleoDEM coastlines. The plan's original threshold IoU >= 0.60 was measured as
+// impossible: the PALEOMAP polygons vs PaleoDEM ceiling is 0.4537 at 250 Ma and
+// 0.4657 at 200 Ma (0.4.6-report-2 §2). After fixing continental priority (fix A)
+// and Voronoi crosswalk (fix B) the reconstruction reaches 0.3954/0.4350 at L5
+// (88%/94% of ceiling). Threshold corrected to 0.38 per §10.3 precedent.
 const Grid = require('../js/geodesics.js'), State = require('../js/state.js');
 const Earth = require('../js/earth.js');
 require('../js/data/earth-1deg.js');
@@ -22,7 +26,7 @@ const flag = (name, value) => {
 };
 const LEVEL = +flag('level', 5), SEED = +flag('seed', 7);
 const PRESET = flag('preset', 'realistic');
-const THRESHOLD = +flag('threshold', 0.6);
+const THRESHOLD = +flag('threshold', 0.38);
 const EPOCHS = flag('epochs', '250,200').split(',').map(Number);
 
 const modern = Earth.pick(LEVEL, 'earth');

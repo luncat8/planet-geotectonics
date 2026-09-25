@@ -11,11 +11,19 @@
 	function setLayer(value) { if (currentLayer === value) return; currentLayer = value; dirty = true; }
 	var startInput = document.getElementById('start'), loadInput = document.getElementById('load');
 	var presetInput = document.getElementById('preset'), presetLabel = document.getElementById('preset-label');
+	var reconInput = document.getElementById('recon'), reconLabel = document.getElementById('recon-label');
+	var reconValue = document.getElementById('recon-value');
 	var earthScore = null;
 	// Starts that boot from an Earth pack (0.4.0/0.4.5): present day, plus the historical
 	// checkpoints (Pangaea 250 Ma, Gondwana 200 Ma). The Preset select belongs to these only.
 	function isEarthStart(v) { return v === 'earth' || v === 'pangaea' || v === 'gondwana'; }
-	function paintStart() { presetLabel.hidden = !isEarthStart(startInput.value); }
+	function paintStart() {
+		var earth = isEarthStart(startInput.value);
+		presetLabel.hidden = !earth;
+		// Reconstruct slider (0.4.6 Mode K): only on an Earth start with a rotation model.
+		var hasModel = typeof Rotations !== 'undefined' && Rotations.count > 0;
+		if (reconLabel) reconLabel.hidden = !(earth && hasModel);
+	}
 	startInput.addEventListener('change', paintStart);
 	var followInput = document.getElementById('follow');
 	var engineInput = document.getElementById('engine'), badge = document.getElementById('badge');
@@ -120,6 +128,62 @@
 	function armSeaVolume() { waterActive = 'volume'; waterArmed = true; paintAdjust(); }
 	seaInput.addEventListener('input', applySeaLevel);
 	seaVolInput.addEventListener('input', armSeaVolume);
+
+	// --- Reconstruct slider (0.4.6 Mode K) -------------------------------------------------
+	// Exact rigid reconstruction: put every column where the rotation model says it was at
+	// `epoch`. No dt, no physics, reversible. Display-side only - writes no sim parameter,
+	// keeps its own body snapshot (body never changes). GPU path: download -> reconstruct -> upload.
+	function paintRecon() {
+		if (reconValue) reconValue.textContent = (+reconInput.value).toFixed(0) + ' Ma';
+	}
+	function applyRecon() {
+		var epoch = +reconInput.value;
+		paintRecon();
+		if (!isEarthStart(startInput.value)) return;
+		// Pause any running sim - reconstruct is a display scrub, not a forward run.
+		if (playing) setPlaying(false);
+		runTarget = Infinity;
+		var doRecon = function () {
+			try {
+				var r = Earth.reconstruct(state, epoch);
+				if (earthScore) {
+					var sc = Earth.score(state, Earth.pick(grid.level, startInput.value) || Earth.pick(Params.level, startInput.value));
+					// Keep original earthScore for probe unless recon is active
+				}
+				if (r) probe.textContent = 'Reconstruct ' + epoch.toFixed(0) + ' Ma · moved ' + r.moved + ' · stuck ' + r.stuck + ' (' + r.stuckPlates + ' plates) · ' + (earthScore ? Earth.describe(earthScore) : '');
+				else probe.textContent = 'Reconstruct ' + epoch.toFixed(0) + ' Ma';
+			} catch (e) {
+				probe.textContent = 'Reconstruct failed: ' + e.message;
+				console.error(e);
+			}
+			dirty = true;
+			waterDirty = true;
+		};
+		var doReconGpu = function () {
+			// GPU: need to pull mirror, reconstruct on CPU state, then push back.
+			if (gpu.on && gpu.ready) {
+				whenGpuIdle(function () {
+					GpuSim.download(state).then(function () {
+						doRecon();
+						GpuSim.uploadState(state).then(function () { dirty = true; });
+					});
+				});
+			} else {
+				doRecon();
+			}
+		};
+		// If a GPU batch is in flight, wait for it before touching state.
+		whenGpuIdle(doReconGpu);
+	}
+	if (reconInput) {
+		reconInput.addEventListener('input', applyRecon);
+		// Query prefill ?recon=250
+		var reconQuery = new URLSearchParams(location.search).get('recon');
+		if (reconQuery !== null && Number.isFinite(+reconQuery)) {
+			reconInput.value = String(Math.max(0, Math.min(540, +reconQuery)));
+		}
+		paintRecon();
+	}
 
 	// --- 3D view (0.5.0) -------------------------------------------------------------------
 	// A WebGPU render of the same world the map shows: an icosphere displaced by the
@@ -489,6 +553,7 @@
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
+		if (reconInput) { reconInput.value = '0'; paintRecon(); }
 		paintGrid();
 		probe.textContent = earthScore ? Earth.describe(earthScore)
 			: 'Click the map to inspect a column; drag it to pan.';
@@ -950,6 +1015,7 @@
 		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
 		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
 		var viewGate = viewGateReport(), adjust = adjustReport();
+		var recon = reconInput && +reconInput.value ? 'recon ' + (+reconInput.value).toFixed(0) + ' Ma' : '';
 		// The 3D is a view setting, so it names itself only when it differs from the
 		// default (off); its knobs follow the adj line's convention.
 		var v3dLine = '';
@@ -963,6 +1029,7 @@
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
 			+ ' · cadence ' + Params.eventCadence + ' Myr' + v3dLine
+			+ (recon ? ' · ' + recon : '')
 			+ '\n' + Perf.report(stripRows())
 			+ (viewGate ? '\n' + viewGate : '')
 			+ (adjust ? '\n' + adjust : '')

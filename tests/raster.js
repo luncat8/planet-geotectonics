@@ -6,11 +6,13 @@ for (const dt of [0.1, 0.01]) {
 	s.n = 0; s.plateCount = 1; s.q.fill(0); s.q[3] = 1; s.omega.fill(0); s.fixedOmega = 1;
 	s.omega[2] = 50000 / 6371000;
 	s.alive.fill(0);
+	s.hFel.fill(0); s.hMaf.fill(7000);
 	for (let c = 0; c < g.V; c++) {
 		if (g.pos[c * 3] < cosCap) continue;
 		const i = s.n++;
 		s.body.set(g.pos.subarray(c * 3, c * 3 + 3), i * 3);
 		s.cell[i] = c; s.plate[i] = 0; s.alive[i] = 1;
+		s.hFel[i] = 0; s.hMaf[i] = 7000;
 	}
 	const start = performance.now();
 	Sim.advance(s, dt, 10000);
@@ -30,9 +32,12 @@ for (const dt of [0.1, 0.01]) {
 	assert.ok(iou >= 0.95); assert.equal(gaps, 0); assert.ok(p99 <= 3);
 }
 // BIN has no small occupancy limit; distance ties choose the lowest column index.
+// With continental priority (0.4.6 fix A), ties among same crust type still choose lowest index,
+// so set all columns to same type for this check.
 const s = new State(g, 7);
 s.n = 20;
-for (let i = 0; i < s.n; i++) { s.cell[i] = 0; s.world.set(g.pos.subarray(0, 3), i * 3); }
+s.hFel.fill(0); s.hMaf.fill(7000);
+for (let i = 0; i < s.n; i++) { s.cell[i] = 0; s.world.set(g.pos.subarray(0, 3), i * 3); s.hFel[i] = 0; s.hMaf[i] = 7000; s.alive[i] = 1; }
 Columns.bin(s); Columns.raster(s);
 assert.equal(s.count[0], 20); assert.equal(s.owner[0], 0);
 console.log('PASS raster: transport, crowded bins, deterministic ties');

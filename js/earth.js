@@ -15,6 +15,9 @@ var EarthGrid = typeof module !== 'undefined' && module.exports ? require('./geo
 var EarthSim = typeof module !== 'undefined' && module.exports ? require('./sim.js') : Sim;
 var EarthRotations = typeof module !== 'undefined' && module.exports ? require('./rotations.js') : Rotations;
 var EarthCrosswalk = typeof module !== 'undefined' && module.exports ? require('./data/plate-crosswalk.js') : PlateCrosswalk;
+var EarthQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : (typeof Quat !== 'undefined' ? Quat : null);
+var EarthColumns = typeof module !== 'undefined' && module.exports ? require('./columns.js') : (typeof Columns !== 'undefined' ? Columns : null);
+var EarthSurface = typeof module !== 'undefined' && module.exports ? require('./surface.js') : (typeof Surface !== 'undefined' ? Surface : null);
 var Earth = {
 	packs: function () {
 		var g = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this);
@@ -206,25 +209,99 @@ var Earth = {
 	// Plates the crosswalk cannot justify (4 of the modern 25, all small ocean plates) keep the
 	// identity and are counted, so the cost of a gap is a number rather than a shrug.
 	reconstruct: function (s, epoch) {
-		var q = new Float64Array(4), moved = 0, stuck = 0, stuckPlates = 0;
-		var counts = s.reconCounts || (s.reconCounts = new Int32Array(s.plateCap));
-		counts.fill(0);
-		for (var i = 0; i < s.n; i++) if (s.alive[i]) counts[s.plate[i]]++;
+		var q = new Float64Array(4);
+		var codes = EarthCrosswalk.codes || [];
+		var codeToIdx = {};
+		for (var ci = 0; ci < codes.length; ci++) codeToIdx[codes[ci]] = ci;
+		var naIdx = codeToIdx['na'], saIdx = codeToIdx['sa'];
+		var remap = {};
+		if (naIdx !== undefined) { remap['jf'] = naIdx; remap['ri'] = naIdx; }
+		if (saIdx !== undefined) { remap['ca'] = saIdx; remap['sr'] = saIdx; remap['nz'] = saIdx; }
+		// First, set q for every plate from its crosswalk id (motion from epoch0 -> epoch).
 		for (var p = 0; p < s.plateCount; p++) {
 			var pb = p * 4, id = EarthCrosswalk.ids[p];
 			var plate = id ? EarthRotations.of(id) : null;
 			if (!plate) {
 				s.q[pb] = 0; s.q[pb + 1] = 0; s.q[pb + 2] = 0; s.q[pb + 3] = 1;
-				stuck += counts[p];
-				if (counts[p]) stuckPlates++;
 				continue;
 			}
 			EarthRotations.relative(plate, epoch, s.epoch0, q, 0);
 			EarthRotations.toSim(q, s.q, pb);
-			moved += counts[p];
 		}
 		s.reconEpoch = epoch;
-		EarthSim.raster(s);
+		// Custom MOVE with continental-crust priority for fragmented plates (fix B):
+		// continental columns on jf/ri follow NAM (101), on ca/sr/nz follow SAM (201).
+		// This is the ~480 land columns that the Voronoi bake mis-assigned to ocean
+		// microplates. Oceanic columns on those plates keep their own plate's rotation
+		// (or stay stuck when the crosswalk has no plate).
+		var moved = 0, stuck = 0;
+		var stuckSet = {};
+		var quat = EarthQuat || (typeof Quat !== 'undefined' ? Quat : null);
+		var cols = EarthColumns || (typeof Columns !== 'undefined' ? Columns : null);
+		if (!quat || !cols) {
+			// Fallback: use the old path if Quat/Columns not available (should not happen).
+			for (var i = 0; i < s.n; i++) if (s.alive[i]) {
+				var b = i * 3;
+				quat.rotate(s.world, b, s.q, s.plate[i] * 4, s.body, b);
+				s.cell[i] = cols.climb(s, s.cell[i], s.world[b], s.world[b + 1], s.world[b + 2]);
+			}
+		} else {
+			for (var i = 0; i < s.n; i++) {
+				if (!s.alive[i]) continue;
+				var pIdx = s.plate[i];
+				var code = codes[pIdx];
+				var eff = pIdx;
+				if (s.hFel[i] > 0 && remap[code] !== undefined) eff = remap[code];
+				var effId = EarthCrosswalk.ids[eff];
+				var effPlate = effId ? EarthRotations.of(effId) : null;
+				if (effPlate) moved++; else { stuck++; stuckSet[eff] = 1; }
+				var b = i * 3, qb = eff * 4;
+				quat.rotate(s.world, b, s.q, qb, s.body, b);
+				s.cell[i] = cols.climb(s, s.cell[i], s.world[b], s.world[b + 1], s.world[b + 2]);
+			}
+		}
+		var stuckPlates = 0;
+		for (var k in stuckSet) if (stuckSet.hasOwnProperty(k)) stuckPlates++;
+		// Bin (original) + raster with continental priority (fix A) + elevation.
+		// Fix A is only for reconstruction: oceanic crust always subducts under continental,
+		// so if a continental column falls into a cell/ring it wins over oceanic.
+		// Forward sim keeps original raster (no priority) to preserve split/merge dynamics.
+		var surf = EarthSurface || (typeof Surface !== 'undefined' ? Surface : null);
+		if (cols && cols.bin) cols.bin(s);
+		else if (EarthSim) { /* bin is part of Sim.raster, but we have cols */ }
+		// Custom raster with continental priority
+		(function rasterPriority(s) {
+			var g = s.grid, radius = (EarthParams && EarthParams.radius) ? EarthParams.radius : 6371000;
+			s.gaps = 0;
+			for (var c = 0; c < g.V; c++) {
+				var b = c * 3, bestCont = Infinity, ownerCont = -1, bestOcean = Infinity, ownerOcean = -1;
+				for (var k = -1; k < g.ringN[c]; k++) {
+					var j = k < 0 ? c : g.ring[c * 6 + k];
+					for (var at = s.offset[j]; at < s.offset[j + 1]; at++) {
+						var i = s.entries[at], w = i * 3;
+						var dx = s.world[w] - g.pos[b], dy = s.world[w + 1] - g.pos[b + 1], dz = s.world[w + 2] - g.pos[b + 2];
+						var d = dx * dx + dy * dy + dz * dz;
+						var isCont = s.hFel[i] > 0;
+						if (isCont) {
+							if (d > bestCont || (d === bestCont && ownerCont >= 0 && i > ownerCont)) continue;
+							bestCont = d; ownerCont = i;
+						} else {
+							if (d > bestOcean || (d === bestOcean && ownerOcean >= 0 && i > ownerOcean)) continue;
+							bestOcean = d; ownerOcean = i;
+						}
+					}
+				}
+				var best, owner;
+				if (bestCont <= s.gapLimit2[c]) { best = bestCont; owner = ownerCont; }
+				else if (bestOcean <= s.gapLimit2[c]) { best = bestOcean; owner = ownerOcean; }
+				else { best = Infinity; owner = -1; }
+				if (best > s.gapLimit2[c]) owner = -1;
+				s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
+				s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
+				if (owner < 0) { s.gaps++; s.z[c] = NaN; continue; }
+			}
+		})(s);
+		if (surf && surf.elevation) surf.elevation(s);
 		return { epoch: epoch, moved: moved, stuck: stuck, stuckPlates: stuckPlates };
 	},
 	// Wet fraction, mean land/ocean and the round-trip RMS of derived z vs the pack's z bank,
