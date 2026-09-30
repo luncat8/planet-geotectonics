@@ -44,9 +44,14 @@ assert.equal(Earth.decode(pk), d, 'decode is cached on the pack');
 assert.equal(d.z.length, pk.w * pk.h);
 assert.equal(d.plate.length, pk.w * pk.h);
 assert.equal(d.poles.length, 2 * 4);
-// Geographic z-up -> sim y-up swizzle: pole (0,0,1)geo is the north pole, (0,1,0)sim.
-assert.deepEqual([...d.poles.slice(0, 3)], [0, 1, 0], 'pole axis swizzled to y-up');
-assert.ok(Math.abs(d.poles[3] - 0.002) < 1e-12, 'omega kept');
+// Geographic z-up -> sim y-up is a reflection: positions swizzle (x,y,z)->(x,z,y), but
+// omega is axial and also negates. Pole (0,0,1)geo with a positive rate turns east->west
+// mirrored without the negation; (0,-1,0)sim keeps the geographic sense (a +z geo spin
+// drives eastward motion at lon 0, and the sim's cross product reproduces it).
+const ax0 = [...d.poles.slice(0, 3)];
+assert.ok(ax0[0] === 0 && ax0[1] === -1 && ax0[2] === 0,
+	'pole axis negated-and-swizzled to y-up: ' + ax0.join(','));
+assert.ok(Math.abs(d.poles[3] - 0.002) < 1e-12, 'omega rate kept');
 // The decode-time inversion is the bake's: a synthetic -300 m "oceanic" cell clamps to the
 // hMaf floor, a land cell inverts to felsic crust only.
 for (let i = 0; i < d.z.length; i++) {
@@ -123,14 +128,62 @@ assert.ok(Date.now() - t0 < 5000, 'apply is fast');
 assert.equal(s.plateCount, pack.plates.count);
 assert.equal(s.prescribedOmega, 1, 'realistic holds the poles');
 assert.equal(s.cooling, 0, 'realistic pins the thermal budget');
-// Every plate carries its NNR-MORVEL pole, swizzled to y-up and un-clamped.
-const dp = Earth.decode(pack);
+// Every plate carries its NNR-MORVEL pole from the RAW pack table: omega_sim = (-x, -z, -y)·om
+// (the axial negation the y/z swizzle alone misses - 0.4.6). Comparing against the decoded
+// poles would only pin apply(); this pins decode + apply against the committed data.
 for (let p = 0; p < s.plateCount; p++) {
-	const wb = p * 3, pb = p * 4, om = dp.poles[pb + 3];
+	const wb = p * 3, raw = pack.plates.poles[p], om = raw[3];
 	assert.ok(om > 0, 'plate ' + p + ' has a pole');
-	assert.ok(Math.abs(s.omega[wb] - dp.poles[pb] * om) < 1e-12
-		&& Math.abs(s.omega[wb + 1] - dp.poles[pb + 1] * om) < 1e-12
-		&& Math.abs(s.omega[wb + 2] - dp.poles[pb + 2] * om) < 1e-12, 'plate ' + p + ' carries the pack pole');
+	assert.ok(Math.abs(s.omega[wb] + raw[0] * om) < 1e-15
+		&& Math.abs(s.omega[wb + 1] + raw[2] * om) < 1e-15
+		&& Math.abs(s.omega[wb + 2] + raw[1] * om) < 1e-15, 'plate ' + p + ' carries the pack pole, negated and swizzled');
+}
+
+// The handedness gate, end to end (0.4.6): the sim's own prescribed omega, read back as a
+// geographic surface velocity RELATIVE TO NUBIA, must agree with the PALEOMAP model's
+// relative velocity - the same comparison tests/rotations.js makes on the raw files, here
+// made on the state the loader produced. The two models sit in different absolute frames
+// (NNR vs Africa-rooted), so only the relative motion is physical; a mirrored decode flips
+// it and fails every row, while every absolute-frame check above still passes.
+const Crosswalk = require('../js/data/plate-crosswalk.js');
+const Rotations = require('../js/rotations.js');
+function simEastNorth(pIdx, latDeg, lonDeg) {
+	// v = omega x r in sim coords, relabelled to geographic, projected on east/north.
+	const la = latDeg * Math.PI / 180, lo = lonDeg * Math.PI / 180;
+	const r = [Math.cos(la) * Math.cos(lo), Math.sin(la), Math.cos(la) * Math.sin(lo)];
+	const w = [s.omega[pIdx * 3], s.omega[pIdx * 3 + 1], s.omega[pIdx * 3 + 2]];
+	const v = [w[1] * r[2] - w[2] * r[1], w[2] * r[0] - w[0] * r[2], w[0] * r[1] - w[1] * r[0]];
+	const vg = [v[0], v[2], v[1]];
+	const east = [-Math.sin(lo), Math.cos(lo), 0];
+	const north = [-Math.sin(la) * Math.cos(lo), -Math.sin(la) * Math.sin(lo), Math.cos(la)];
+	return [(vg[0] * east[0] + vg[1] * east[1] + vg[2] * east[2]) * 6371 * 0.1,
+		(vg[0] * north[0] + vg[1] * north[1] + vg[2] * north[2]) * 6371 * 0.1];
+}
+function paleoEastNorth(id, latDeg, lonDeg) {
+	const rec = Rotations.of(id), w = new Float64Array(3);
+	Rotations.pole(rec, 0, w, 0);
+	const la = latDeg * Math.PI / 180, lo = lonDeg * Math.PI / 180;
+	const r = [Math.cos(la) * Math.cos(lo), Math.cos(la) * Math.sin(lo), Math.sin(la)];
+	const v = [w[1] * r[2] - w[2] * r[1], w[2] * r[0] - w[0] * r[2], w[0] * r[1] - w[1] * r[0]];
+	const east = [-Math.sin(lo), Math.cos(lo), 0];
+	const north = [-Math.sin(la) * Math.cos(lo), -Math.sin(la) * Math.sin(lo), Math.cos(la)];
+	return [(v[0] * east[0] + v[1] * east[1] + v[2] * east[2]) * 6371 * 0.1,
+		(v[0] * north[0] + v[1] * north[1] + v[2] * north[2]) * 6371 * 0.1];
+}
+const nbIdx = Crosswalk.codes.indexOf('nb'), nbId = '701';
+for (const [code, id, lat, lon] of [['sa', '201', -20, -20], ['au', '801', -20, 120],
+	['pa', '901', 0, -150], ['an', '802', -70, 60], ['in', '501', 10, 70]]) {
+	const pIdx = Crosswalk.codes.indexOf(code);
+	const sn = simEastNorth(nbIdx, lat, lon), pn = paleoEastNorth(nbId, lat, lon);
+	const sv = simEastNorth(pIdx, lat, lon), pv = paleoEastNorth(id, lat, lon);
+	const sRel = [sv[0] - sn[0], sv[1] - sn[1]], pRel = [pv[0] - pn[0], pv[1] - pn[1]];
+	const sMag = Math.hypot(sRel[0], sRel[1]), pMag = Math.hypot(pRel[0], pRel[1]);
+	const sDir = (Math.atan2(sRel[0], sRel[1]) * 180 / Math.PI + 360) % 360;
+	const pDir = (Math.atan2(pRel[0], pRel[1]) * 180 / Math.PI + 360) % 360;
+	const d = Math.abs(((sDir - pDir + 540) % 360) - 180);
+	assert.ok(d < 35, code + ' relative bearing sim ' + sDir.toFixed(0) + ' vs PALEOMAP ' + pDir.toFixed(0));
+	assert.ok(Math.abs(sMag - pMag) < 0.4 * pMag,
+		code + ' relative speed sim ' + sMag.toFixed(2) + ' vs PALEOMAP ' + pMag.toFixed(2) + ' cm/yr');
 }
 const distinct = new Set();
 for (let i = 0; i < s.n; i++) {
@@ -184,4 +237,4 @@ let ageDiff = 0;
 for (let i = 0; i < j1.n; i++) if (j1.hMaf[i] > 0) ageDiff += Math.abs(j1.age[i] - plain.age[i]);
 assert.ok(ageDiff > 0, 'jitter perturbs oceanic ages');
 
-console.log('PASS earth: synthetic decode/wrap/poles/determinism, real-pack hypsometry, datum tie-in, presets');
+console.log('PASS earth: synthetic decode/wrap/poles/determinism, real-pack hypsometry, datum tie-in, presets, the axial-pole frame and the relative-motion gate');

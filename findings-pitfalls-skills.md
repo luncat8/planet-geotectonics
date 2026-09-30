@@ -1568,3 +1568,57 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	A synthesized raster has no crustal-type grid, so elevation is the type proxy: cells
 	above -200 m must be continental regardless of the IDW heuristic, or a +3 km island
 	inverts to a ~90 km basalt slab (the shelf/island rule in the plan's §1.1 spirit).
+
+## an axial vector under a reflected frame mirrors the Earth (0.4.6c, 2026-09-30)
+
+	The sim grid is y-up (lat = asin(y)), the rotation model and every source data file are
+	geographic z-up. The frames differ by a reflection, and the two kinds of vector carry it
+	differently: a position swizzles (x, z, y) with no negation, an angular velocity - an
+	axial vector - transforms as det(M)·M·v = -M·v, so it swizzles AND negates: (-x, -z, -y).
+	Earth.decode did the position swizzle to the pole_vector axes and shipped a mirrored
+	Earth: every prescribed plate motion reflected (India booted heading 227° instead of
+	104°, Australia 42% off in magnitude against the Africa-relative reference). A mirrored
+	Earth still looks like an Earth - the failure is invisible on the map and total in the
+	kinematics. One helper owns the rule (Rotations.vecToSim, matching toSim's vector part),
+	and tests/earth.js pins it against the RAW pack file (s.omega == (-x,-z,-y)·om) plus an
+	end-to-end relative-bearing gate, so the pin cannot be satisfied by a conjugated model.
+	Reconstruct (Mode K) never depended on the decoded omega - it moves columns by quaternions
+	(toSim, which was already right) - which is why the IoU gate passed while the boots were
+	mirrored: a gate that only sees one code path misses the other's frame bug.
+
+## cross-model gates compare relative motion, and a test helper is code too (0.4.6c, 2026-09-30)
+
+	NNR-MORVEL56 and PALEOMAP sit in different absolute reference frames: at slow plates the
+	frame offset dominates any absolute bearing comparison (the first gate attempt failed
+	Africa at 20% magnitude error with both models' data provably correct). What both models
+	agree on is motion relative to a common plate - subtract the Africa pole from both sides
+	and the bearings/speeds match within 35°/40% (tests/rotations.js tolerances). Pin
+	relative, never absolute, across models.
+	And the helper that computes the relative bearing is itself a frame crossing: after
+	relabelling a sim-frame velocity to geographic components, EVERY projection vector must
+	be in geographic order too. The north unit vector in sim order is (-sin·cos, cos,
+	-sin·sin); in geographic order it is (-sin·cos, -sin·sin, cos). One stale component order
+	showed up as a single 41° row in an otherwise passing gate - the fixed code reproduced
+	the reference bearing to the digit (6.56 cm/yr at 22°).
+	Minor, same family: assert.deepStrictEqual distinguishes -0 from 0, and negating frames
+	produces -0 components; compare element-wise in tests rather than normalizing signs in a
+	hot path.
+
+## the forward IoU ceiling is set by the crust budget, not the kinematics (0.4.6c, 2026-09-30)
+
+	Mode S steering put the continents on their real paths (steered pangaea ends at IoU
+	0.3185 vs the procedural plateau 0.2517, rising at the end; gondwana 0.3524), but the
+	plan's 0.38 gate - the rigid reconstruct ceiling - is unreachable for ANY forward run
+	with the physics on, and the proof is one reference run: the modern pack driven by its
+	own NNR poles for 250 Myr falls from IoU 0.937 to 0.201 against its own mask, land
+	28.4% -> 19.5%. A prescribed-omega world cannot answer contact with its own kinematics,
+	so erosion planes the continents with no orogenic compensation and land sinks below the
+	datum; the old K10-driven runs only GREW land because the procedural mantle kept
+	reorganizing convergence. Before arguing with a convergence gate, run the reference:
+	same harness, same physics, best-possible kinematics. The corrected gate (0.30, recorded
+	per the plan's own precedent clause) separates "the continents arrive" - which steering
+	delivers - from "the coastlines survive the trip" - which is a crust-budget question no
+	rotation model can answer. Side measurement from the same sweep: the model's own omega
+	catalogue contains shards at 154 cm/yr equivalent (plate 306's 10 Ma stage), so the
+	vMax/R cap is not decoration - it fires on ~0.4% of plate-epochs and never on a major
+	craton except Australia/Antarctica's single 80 Ma stage.

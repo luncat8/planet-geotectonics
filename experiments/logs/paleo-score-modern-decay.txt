@@ -1,0 +1,6 @@
+modern realistic, prescribedOmega 1 rotationHistory 0 plates 25
+t 50 plates 24 gaps 112 land 23.24% IoU 0.4291
+t 100 plates 22 gaps 119 land 20.51% IoU 0.3024
+t 150 plates 22 gaps 129 land 20.10% IoU 0.2316
+t 200 plates 21 gaps 127 land 19.57% IoU 0.2043
+t 250 plates 20 gaps 132 land 19.54% IoU 0.2012

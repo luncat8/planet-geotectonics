@@ -22,6 +22,7 @@ const atHomeWorld = new Float64Array(s.world);
 const atHomeCell = new Int32Array(s.cell);
 const atHomeOwner = new Int32Array(s.owner);
 const atHomeZ = new Float64Array(s.z);
+const atHomeQ = new Float64Array(s.q);
 const t0 = s.t, frame0 = s.frame, epoch0 = s.epoch0;
 
 console.log('  modern pack: ' + modern.name + ' epoch ' + modern.epoch + ' plates ' + s.plateCount + ' columns ' + s.n);
@@ -71,15 +72,29 @@ for (let c = 0; c < g.V; c++) {
 	assert.equal(s.cell[c] === undefined ? s.cell[c] : s.cell[c], at250Cell[c], 'cell stable over round-trip at ' + c);
 }
 
-// --- 4. restores live state exactly when slider released (reconstruct to epoch0) ----
-Earth.reconstruct(s, modern.epoch);
+// --- 4. the slider release: snapshot q + Earth.refresh restores live state exactly ---
+// Reconstructing back to epoch0 is only one restore, and not the page's: a scrubbed world
+// is released by writing the snapshotted live quaternion back and re-running the ownership
+// passes (Earth.refresh), which must restore every derived array bit-for-bit - including
+// on a mid-run world whose live pose is itself a rotation.
+Earth.reconstruct(s, 250);
+assert.equal(s.reconEpoch, 250, 'reconstruct records the scrub epoch');
+s.q.set(atHomeQ);
+Earth.refresh(s);
+assert.equal(s.reconEpoch, 0, 'refresh clears the scrub epoch');
 for (let i = 0; i < s.n; i++) {
 	if (!s.alive[i]) continue;
 	const b = i * 3;
 	assert.ok(Math.abs(s.world[b] - atHomeWorld[b]) < 1e-15
 		&& Math.abs(s.world[b + 1] - atHomeWorld[b + 1]) < 1e-15
 		&& Math.abs(s.world[b + 2] - atHomeWorld[b + 2]) < 1e-15,
-		'live state restored exactly after reconstruct to epoch0');
+		'snapshot+refresh restores world exactly at ' + i);
+	assert.equal(s.cell[i], atHomeCell[i], 'snapshot+refresh restores the cell at ' + i);
+}
+for (let c = 0; c < g.V; c++) {
+	assert.equal(s.owner[c], atHomeOwner[c], 'snapshot+refresh restores the owner at ' + c);
+	assert.ok(s.z[c] === atHomeZ[c] || (Number.isNaN(s.z[c]) && Number.isNaN(atHomeZ[c])),
+		'snapshot+refresh restores z at ' + c);
 }
 assert.equal(s.t, t0, 't still untouched after restore');
 assert.equal(s.frame, frame0, 'frame still untouched after restore');
@@ -121,4 +136,4 @@ const landFrac = Earth.fraction(Earth.landFromState(sCheck));
 assert.ok(landFrac > 0.25, 'land fraction after fix A+B > 0.25, got ' + landFrac.toFixed(4));
 assert.ok(landFrac < 0.40, 'land fraction after fix < 0.40 (not overflooded), got ' + landFrac.toFixed(4));
 
-console.log('PASS reconstruct: lossless 250->0->250, t/frame untouched, live restore, IoU >=0.38 within ceiling');
+console.log('PASS reconstruct: lossless 250->0->250, t/frame untouched, snapshot+refresh live restore, IoU >=0.38 within ceiling');

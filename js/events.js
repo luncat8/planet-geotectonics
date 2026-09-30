@@ -19,6 +19,12 @@ var Events = {
 		if (span === undefined) span = s.t - s.lastEvent;
 		Events.compact(s);
 		Events.census(s);   // also buckets the cells per plate for split/orphans
+		// A steered epoch (0.4.6c Mode S) freezes the topology: no suture, absorb, retire,
+		// split or terrane rebase, because plate identity has to survive the run or the
+		// model-id -> plate mapping breaks mid-epoch. Compaction and the census still run -
+		// subduction keeps killing columns and the HUD keeps counting them. The procedural
+		// game preset keeps the full cycle.
+		if (s.rotationHistory) return;
 		Events.suture(s, span);
 		Events.absorb(s);
 		Events.retire(s);

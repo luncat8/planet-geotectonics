@@ -42,6 +42,11 @@ function State(grid, seed, hot) {
 	this.q = new Float64Array(this.plateCap * 4);
 	this.omega = new Float64Array(this.plateCap * 3);
 	this.omegaTarget = new Float64Array(this.plateCap * 3);
+	// Rotation-model tables (0.4.6), bound once per world by Earth.bindRotations: the
+	// plate's PALEOMAP record (null when the model does not speak for it) and fix B's
+	// continental mother remap for the modern pack's Voronoi mis-assignments (-1 = none).
+	this.rotRec = new Array(this.plateCap).fill(null);
+	this.rotRemap = new Int32Array(this.plateCap).fill(-1);
 	this.M = new Float64Array(this.plateCap * 9);
 	this.rhs = new Float64Array(this.plateCap * 3);
 	this.seeds = new Float64Array(this.plateCap * 3);
@@ -183,7 +188,9 @@ State.prototype.reset = function (seed) {
 	this.plateCount = Math.min(StateParams.plateCount, this.n);
 	this.gaps = 0; this.maxClimb = 0; this.fixedOmega = 0; this.prescribedOmega = 0; this.finite = 1;
 	// The epoch the pack was baked at, and the epoch Mode K last reconstructed to (0.4.6).
-	this.epoch0 = 0; this.reconEpoch = 0;
+	// rotationHistory (Mode S, 0.4.6c): omega comes from the model per step, not from K10.
+	this.epoch0 = 0; this.reconEpoch = 0; this.rotationHistory = 0;
+	this.rotRec.fill(null); this.rotRemap.fill(-1);
 	this.meanSpeed = 0; this.maxSpeed = 0; this.typeChanges = 0;
 	this.rigidError = 0; this.quatError = 0; this.histI = 0; this.histN = 0;
 	// Tm0 is the cooling baseline: the exponential always decays from the world's own start

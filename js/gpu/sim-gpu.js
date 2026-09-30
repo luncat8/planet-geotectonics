@@ -1072,6 +1072,12 @@ var GpuSim = {
 		if (events) {
 			// The span is taken at the due date, exactly as Sim.step's cycle sees it.
 			Events.cycle(state, state.t - state.lastEvent);
+			// Mode S rides the cadence round trip (0.4.6c): the cycle is a topology no-op
+			// while steered, but the mirror is here anyway, so the next window's omega is
+			// read from the rotation model and shipped in the same plateF push. The device
+			// holds it constant within the window, exactly like a prescribed-pole world;
+			// a stage boundary inside a window is late by at most one cadence.
+			if (state.rotationHistory) GpuSim.Plates.steer(state);
 			state.lastEvent = state.t;
 		}
 		var t2 = GpuPerf ? GpuPerf.clock() : 0;
@@ -1207,9 +1213,11 @@ if (typeof module !== 'undefined' && module.exports) {
 	GpuSim.Events = require('../events.js');
 	GpuSim.Checkpoint = require('../checkpoint.js');
 	GpuSim.Params = require('../params.js');
+	GpuSim.Plates = require('../plates.js');
 } else {
 	// Browser globals from the classic script tags; step() callers may still override.
 	GpuSim.Events = typeof Events !== 'undefined' ? Events : null;
 	GpuSim.Checkpoint = typeof Checkpoint !== 'undefined' ? Checkpoint : null;
 	GpuSim.Params = typeof Params !== 'undefined' ? Params : null;
+	GpuSim.Plates = typeof Plates !== 'undefined' ? Plates : null;
 }

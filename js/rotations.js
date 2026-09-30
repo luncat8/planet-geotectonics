@@ -164,6 +164,14 @@ var Rotations = {
 		out[o] = -q[0]; out[o + 1] = -q[2]; out[o + 2] = -q[1]; out[o + 3] = q[3];
 		return out;
 	},
+	// The same reflection carried by an axial (pseudo) vector: an angular velocity transforms
+	// as det(M)·M·v = -M·v under the y/z swap, matching toSim's vector part. Pack poles and
+	// Rotations.pole output both ride this into the sim frame (0.4.6: swizzle alone mirrored
+	// every prescribed plate motion).
+	vecToSim: function (v, i, out, o) {
+		out[o] = -v[i]; out[o + 1] = -v[i + 2]; out[o + 2] = -v[i + 1];
+		return out;
+	},
 	toXYZ: function (lat, lon, out, o) {
 		var la = lat * Math.PI / 180, lo = lon * Math.PI / 180, cl = Math.cos(la);
 		out[o] = cl * Math.cos(lo); out[o + 1] = cl * Math.sin(lo); out[o + 2] = Math.sin(la);

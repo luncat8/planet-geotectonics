@@ -1,9 +1,36 @@
 var PlateQuat = typeof module !== 'undefined' && module.exports ? require('./quat.js') : Quat;
 var PlateParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var PlateEdges = typeof module !== 'undefined' && module.exports ? require('./edges.js') : Edges;
+// bench.html does not load the rotation model; steering is unreachable there (only an
+// Earth pack with model codes sets rotationHistory), so the null stands for "never called".
+var PlateRotations = typeof module !== 'undefined' && module.exports ? require('./rotations.js') : (typeof Rotations !== 'undefined' ? Rotations : null);
+var PlateSteerW = new Float64Array(3);
 var Plates = {
 	integrate: function (s, dt) {
+		if (s.rotationHistory) Plates.steer(s);
 		for (var p = 0; p < s.plateCount; p++) PlateQuat.integrate(s.q, p * 4, s.omega, p * 3, dt);
+	},
+	// Mode S (0.4.6c): omega comes from the rotation model, not from K10. The model speaks
+	// in epochs (Ma before present), the sim clock runs forward from the pack's epoch0, so
+	// the stage is read at epoch0 - t; pole() is piecewise-constant per stage, which makes
+	// the per-step read exact rather than an interpolation. The rate is carried into the sim
+	// frame by the same axial map decode uses and capped by vMax/R exactly as K10's reduce
+	// caps, so a model stage cannot inject a supersonic plate. Plates with no record (an
+	// epoch pack's oceanic Voronoi) keep the omega apply gave them - zero: the continents
+	// travel their real paths while the subducted super-ocean floor stays put.
+	steer: function (s) {
+		var cap = PlateParams.vMax / PlateParams.radius, epoch = s.epoch0 - s.t;
+		for (var p = 0; p < s.plateCount; p++) {
+			var rec = s.rotRec[p];
+			if (!rec) continue;
+			PlateRotations.pole(rec, epoch, PlateSteerW, 0);
+			PlateRotations.vecToSim(PlateSteerW, 0, s.omega, p * 3);
+			var w = p * 3, m = Math.hypot(s.omega[w], s.omega[w + 1], s.omega[w + 2]);
+			if (m > cap) {
+				var k = cap / m;
+				s.omega[w] *= k; s.omega[w + 1] *= k; s.omega[w + 2] *= k;
+			}
+		}
 	},
 	// Equivalent basal velocities w (design §6.3): every force except drag, expressed as the
 	// mantle speed that would push as hard. Divided by cD(Tm) = exp(Ea(1/Tm − 1)), so a cooling

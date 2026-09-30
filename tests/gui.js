@@ -30,6 +30,10 @@
 //      the volume drag defers one histogram solve to the frame loop, ?sea=/?seavol= pre-fill
 //      and activate their own slider (level wins the tie), the header names whichever control
 //      is active, and the probe's wet/land follows Params.sea.
+//  11. the Reconstruct slider (0.4.6) appears only on an Earth start with a rotation model,
+//      the steered boot names itself in the copy header, a scrub is display-only (the header
+//      records it, no sim parameter is written), and the release restores the live pose
+//      exactly and returns the jog control to 0.
 //
 // js/ui.js runs as a classic script against tests/dom-stub.js, which is built by parsing the
 // real index.html, and a recorded fake GpuSim: the device side of the engine is
@@ -127,10 +131,13 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 }
 
 // --- 3. the page, running ----------------------------------------------------------------
-const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
+// The index.html script order, minus the GPU files and ui.js itself. The rotation model
+// loads before plates.js because Plates.steer resolves Rotations at load time (0.4.6c).
+const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
+	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
-	'data/rot-paleomap', 'rotations', 'data/plate-crosswalk', 'earth', 'render'];
+	'data/plate-crosswalk', 'earth', 'render'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the
@@ -768,13 +775,13 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	livePage.pump(2, 3000);
 	assert.ok(/2[45] plates/.test(lEl('gaps').textContent), 'the game world steps too');
 
-	// The historical checkpoints (0.4.5): Pangaea (250 Ma) and Gondwana (200 Ma) boot from
-	// their own epoch packs, show the Preset select like the Earth start, and the copy
-	// header names the start. Their packs carry no poles (no NNR model for past epochs), so
-	// the status simply reports the pack's plate count after a step.
-	for (const [start, probeRe, wetRe] of [
-		['pangaea', /^earth-250Ma 360x180 /, /wet 68\.\d\d%/],
-		['gondwana', /^earth-200Ma 360x180 /, /wet 63\.\d\d%/]
+	// The historical checkpoints (0.4.5, re-baked 0.4.6c): Pangaea (250 Ma) and Gondwana
+	// (200 Ma) boot from their own epoch packs, show the Preset select like the Earth start,
+	// and the copy header names the start. Under the game preset their model ids stay
+	// unused: K10 drives, and the status reports the re-baked pack's plate count.
+	for (const [start, probeRe, wetRe, platesRe, clock] of [
+		['pangaea', /^earth-250Ma 360x180 /, /wet 68\.\d\d%/, /\b92 plates/, 4000],
+		['gondwana', /^earth-200Ma 360x180 /, /wet 63\.\d\d%/, /\b111 plates/, 4600]
 	]) {
 		lEl('start').value = start;
 		lEl('start').dispatch('change');
@@ -783,8 +790,10 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.ok(probeRe.test(lEl('probe').textContent), start + ' boots its own pack: ' + lEl('probe').textContent);
 		assert.ok(wetRe.test(lEl('probe').textContent), start + ' report carries its wet fraction: ' + lEl('probe').textContent);
 		lEl('step').click();
-		livePage.pump(2, 4000);
-		assert.ok(/[89] plates/.test(lEl('gaps').textContent), start + ' status names the pack plates: ' + lEl('gaps').textContent);
+		// Each case pumps its own clock: the strip rewrites its text at 2 Hz, and a repeated
+		// timestamp would leave the previous case's plate count on the status line.
+		livePage.pump(2, clock);
+		assert.ok(platesRe.test(lEl('gaps').textContent), start + ' status names the pack plates: ' + lEl('gaps').textContent);
 		assert.ok(worldLine(livePage.copy()).includes(' · ' + start + ' start · '),
 			'the copy header names the ' + start + ' start');
 	}
@@ -856,6 +865,45 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	livePage.pump(4, 32000);
 	assert.ok(liveT() > 0, 'the sim advances on the CPU engine: t ' + liveT());
 	lEl('play').click();
+
+	// --- the Reconstruct slider (0.4.6): visibility, a display-only scrub, exact restore ---
+	// The steered header marker rides a Pangaea boot (realistic + model ids = Mode S); the
+	// scrub pins ride the modern Earth start, where "recon 250 Ma" is a full displacement.
+	const steerPage = loadPage('?start=pangaea&preset=realistic');
+	steerPage.pump(2, 1000);
+	assert.equal(steerPage.el('recon-label').hidden, false, 'the slider appears on an Earth start with a model');
+	assert.ok(worldLine(steerPage.copy()).includes(' · steered'),
+		'the steered header names the mode: ' + worldLine(steerPage.copy()));
+	const reconPage = loadPage('?start=earth&preset=realistic');
+	const kEl = reconPage.el;
+	const kMap = kEl('map');
+	const ktLine = () => reconPage.copy().split('\n').pop();
+	assert.equal(kEl('recon-label').hidden, false, 'the slider appears on the Earth start too');
+	kEl('step').click();
+	reconPage.pump(2, 1000);
+	assert.ok(/^t 0\.1 Myr/.test(ktLine()), 'the world stepped: ' + ktLine());
+	reconPage.pump(1, 2000);
+	const livePaint = kMap.lastImage.data.slice();
+	kEl('recon').value = '250';
+	kEl('recon').dispatch('input');
+	reconPage.pump(1, 3000);
+	assert.ok(countChanged(livePaint, kMap.lastImage.data) > 10000,
+		'the scrub moved the paint: ' + countChanged(livePaint, kMap.lastImage.data) + ' pixels');
+	assert.equal(kEl('recon-value').textContent, '250 Ma', 'the readout follows the slider');
+	const scrubReport = reconPage.copy();
+	assert.ok(/ · recon 250 Ma/.test(scrubReport), 'the copy header records the scrub');
+	assert.ok(/^t 0\.1 Myr/.test(scrubReport.split('\n').pop()),
+		'the scrub writes no sim parameter: ' + scrubReport.split('\n').pop());
+	kEl('recon').dispatch('change');
+	reconPage.pump(1, 4000);
+	assert.equal(countChanged(livePaint, kMap.lastImage.data), 0, 'release restores the live paint exactly');
+	assert.equal(kEl('recon').value, '0', 'the slider is a jog control: release returns it to 0');
+	assert.ok(!/ · recon /.test(reconPage.copy()), 'and the header no longer claims a scrub');
+	kEl('step').click();
+	reconPage.pump(2, 5000);
+	assert.ok(/^t 0\.2 Myr/.test(ktLine()), 'the sim resumes after the restore: ' + ktLine());
+	const procPage = loadPage('');
+	assert.equal(procPage.el('recon-label').hidden, true, 'a procedural start hides the slider');
 
 	// --- 0.3.5: the sea controls - two sliders, one active, no checkbox ----------------------
 	// The mode bit is gone: whichever slider the user last touched takes the level, and the
@@ -1164,5 +1212,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' no-adapter path disables the toggle with the reason, ?v3d/?disp/?k3d pre-fill, the'
 		+ ' on path swaps the canvases and greys the layers, the orbit and wheel move only the'
 		+ ' camera, the knobs apply live, the header and the strip\'s V3D slot name the session,'
-		+ ' a detail change rebuilds the session without a world rebuild, and off restores the map');
+		+ ' a detail change rebuilds the session without a world rebuild, and off restores the map;'
+		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
+		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
 })().catch((error) => { console.error(error); process.exit(1); });

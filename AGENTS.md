@@ -3,25 +3,25 @@
 
 ## style
 
-use a single tab indentation. LF end
+- use a single tab indentation. LF end
 
-avoid deep nesting of braces { } and long if-else.
-flatten with early returns, helper functions, or flat data tables.
+- avoid deep nesting of braces { } and long if-else.
+- flatten with early returns, helper functions, or flat data tables.
 
-avoid duplication of code.
+- avoid duplication of code.
 
-avoid allocations in the hot path (per-frame loop, sim, render).
-	no new {}, [], object literals, closures, or string concat
-	inside the frame loop.
-	reuse preallocated buffers / typed arrays / scratch objects.
-	allocate once at setup, mutate in place per frame.
-	these are not strict rules, use best.
+- avoid allocations in the hot path (per-frame loop, sim, render).
+- no new {}, [], object literals, closures, or string concat
+- inside the frame loop.
+- reuse preallocated buffers / typed arrays / scratch objects.
+- allocate once at setup, mutate in place per frame.
+- these are not strict rules, use best.
 
-plan*.md is NOT the implementation log. if need - update/improve plan, but keep final plan as artifact for possible fork or reimplementation without referring of what was and what done, without referring chat, etc.
+- plan*.md is NOT the implementation log. if need - update/improve plan, but keep final plan as artifact for possible fork or reimplementation without referring of what was and what done, without referring chat, etc.
 
-only essential concise comments in code that really helpful i.e. explain why and decision. prefer descriptive naming.
+- only essential concise comments in code that really helpful i.e. explain why and decision. prefer descriptive naming.
 
-no legacy support, no old versions, no outdated browsers, no leftovers and no over protecting from unreal edge cases. we need clean architecture.
+- no legacy support, no old versions, no outdated browsers, no leftovers and no over protecting from unreal edge cases. we need clean architecture.
 
 ## runtime
 

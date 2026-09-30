@@ -80,19 +80,25 @@ Open `index.html` directly in a browser.
 bit-identical, and 1000-frame CPU-vs-GPU ensembles stay within predeclared statistical
 bounds (`node tests/gpu-parity.js 1000 --ensemble`; boot/parity/determinism modes in the
 same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIBS`).
-- Earth start (0.4.0/0.4.5): the Startup fieldset can boot the real Earth instead of the
+- Earth start (0.4.0/0.4.5/0.4.6): the Startup fieldset can boot the real Earth instead of the
   procedural land mask. `?start=earth` is present-day Earth, baked from the PALEOMAP 0 Ma map
   plus the NNR-MORVEL56 plate model (true sea level, 70.8 % wet, real 25 plates, 1° and 0.5°
   packs); `?start=pangaea` and `?start=gondwana` boot the 250 Ma and 200 Ma reconstructions
-  (Scotese & Wright 2018) as pole-less packs. An Earth start shows a Preset select:
-  `realistic` pins the thermal budget and, for the modern start, the NNR Euler poles
-  (`prescribedOmega`), while `game` hands the rotations to the procedural mantle — on a
-  pole-less historical pack, `realistic` is a frozen-pole game run. The sea controls ride the
-  true hypsometry. `experiments/paleo-score.js` steps a checkpoint forward to the present and
-  scores its land mask against the modern one: both full-epoch runs are stable (~42 s for the
-  250 Myr Pangaea run at L5), but the IoU plateaus around 0.25–0.32 — the procedural mantle does
-  not yet reproduce Phanerozoic kinematics, so that reconstruction fidelity is the next
-  milestone, and older checkpoints (150 → 20 Ma) are gated on it (see
+  (Scotese & Wright 2018), whose re-baked packs carry the PALEOMAP rotation model's own plate
+  ids per cell. An Earth start shows a Preset select: `realistic` pins the thermal budget and
+  prescribes the rotations — constant NNR Euler poles (`prescribedOmega`) on the modern start,
+  ω(t) steered per step from the rotation model with the topology frozen on an epoch pack
+  (Mode S) — while `game` hands the rotations to the procedural mantle. The sea controls ride
+  the true hypsometry. The Reconstruct slider (Mode K) scrubs an Earth start to any past
+  epoch through the committed rotation model: exact rigid rotations, reversible, display-only,
+  and the release restores the live pose. `experiments/reconstruct-score.js` gates the
+  kinematics (IoU 0.3954 at 250 Ma / 0.4350 at 200 Ma against measured ceilings of
+  0.4537/0.4657); `experiments/paleo-score.js` steps a checkpoint forward to the present: the
+  steered runs converge (Pangaea ends at IoU 0.319 vs the procedural plateau of 0.252,
+  Gondwana at 0.352, both rising at the end), and the gate is corrected to that measurement —
+  a forward run cannot reach the rigid ceiling because any prescribed-ω world erodes its land
+  over hundreds of Myr (the modern pack falls to IoU 0.20 against its own mask in 250 Myr;
+  see the 0.4.6 plan §10.3). Older checkpoints (150 → 20 Ma) are now bake-only staging (see
   `0.4.0-Earth-map-plan.md` §8).
 
 See `0.2-plan.md`, `0.1.5-final-design.md` and `0.4.0-Earth-map-plan.md`.

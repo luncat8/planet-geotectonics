@@ -131,8 +131,14 @@
 
 	// --- Reconstruct slider (0.4.6 Mode K) -------------------------------------------------
 	// Exact rigid reconstruction: put every column where the rotation model says it was at
-	// `epoch`. No dt, no physics, reversible. Display-side only - writes no sim parameter,
-	// keeps its own body snapshot (body never changes). GPU path: download -> reconstruct -> upload.
+	// `epoch`. No dt, no physics, reversible. Display-side only - writes no sim parameter.
+	// The scrub owns the plates' q while it lasts: the first input snapshots the live q and
+	// the release ('change') puts it back and re-rasters through the sim's own ownership
+	// passes, so leaving the slider returns to the live sim state (plan §5) - on a steered
+	// world that snapshot IS the model pose at the sim's own epoch.
+	// GPU path: download -> reconstruct -> upload; the restore skips the download because
+	// the mirror already holds the scrubbed columns and only q changes.
+	var reconSnap = new Float64Array(Params.plateCap * 4), reconLive = false;
 	function paintRecon() {
 		if (reconValue) reconValue.textContent = (+reconInput.value).toFixed(0) + ' Ma';
 	}
@@ -145,11 +151,8 @@
 		runTarget = Infinity;
 		var doRecon = function () {
 			try {
+				if (!reconLive) { reconLive = true; reconSnap.set(state.q); }
 				var r = Earth.reconstruct(state, epoch);
-				if (earthScore) {
-					var sc = Earth.score(state, Earth.pick(grid.level, startInput.value) || Earth.pick(Params.level, startInput.value));
-					// Keep original earthScore for probe unless recon is active
-				}
 				if (r) probe.textContent = 'Reconstruct ' + epoch.toFixed(0) + ' Ma · moved ' + r.moved + ' · stuck ' + r.stuck + ' (' + r.stuckPlates + ' plates) · ' + (earthScore ? Earth.describe(earthScore) : '');
 				else probe.textContent = 'Reconstruct ' + epoch.toFixed(0) + ' Ma';
 			} catch (e) {
@@ -175,8 +178,33 @@
 		// If a GPU batch is in flight, wait for it before touching state.
 		whenGpuIdle(doReconGpu);
 	}
+	function restoreRecon() {
+		if (!reconLive) return;
+		reconLive = false;
+		// The slider is a jog control: it returns to 0 the moment the world does, so the
+		// copy header (which reads the slider) never claims a scrub the map is not showing.
+		reconInput.value = '0';
+		paintRecon();
+		var apply = function () {
+			state.q.set(reconSnap);
+			Earth.refresh(state);
+			dirty = true;
+			waterDirty = true;
+			probe.textContent = earthScore ? Earth.describe(earthScore)
+				: 'Click the map to inspect a column; drag it to pan.';
+		};
+		if (gpu.on && gpu.ready) {
+			whenGpuIdle(function () {
+				apply();
+				GpuSim.uploadState(state).then(function () { dirty = true; });
+			});
+		} else {
+			apply();
+		}
+	}
 	if (reconInput) {
 		reconInput.addEventListener('input', applyRecon);
+		reconInput.addEventListener('change', restoreRecon);
 		// Query prefill ?recon=250
 		var reconQuery = new URLSearchParams(location.search).get('recon');
 		if (reconQuery !== null && Number.isFinite(+reconQuery)) {
@@ -527,10 +555,10 @@
 		grid = new Grid(level, seed).build();
 		state = new State(grid, seed, start === 'hot');
 		// An Earth start (0.4.0/0.4.5) replaces the procedural columns with the decoded
-		// pack: the realistic preset pins the NNR-MORVEL poles and the thermal budget, the
-		// game preset lets the procedural mantle drive the continents. Historical packs
-		// carry no poles, so the loader's zero-pole guard makes realistic a frozen-pole
-		// game run (thermal pin kept, K10 driven).
+		// pack: the realistic preset pins the poles and the thermal budget - the modern
+		// pack's constant NNR poles, or, on an epoch pack carrying model ids (0.4.6c),
+		// omega(t) steered from the rotation model with the topology frozen - and the
+		// game preset lets the procedural mantle drive the continents.
 		earthScore = null;
 		if (isEarthStart(start)) {
 			var pack = Earth.pick(level, start);
@@ -553,6 +581,7 @@
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
+		reconLive = false;       // a new world owns its q again; the scrub snapshot is void
 		if (reconInput) { reconInput.value = '0'; paintRecon(); }
 		paintGrid();
 		probe.textContent = earthScore ? Earth.describe(earthScore)
@@ -769,11 +798,11 @@
 				try {
 					Checkpoint.load(state, bytes);
 					// The blob owns the temperature and the cooling flag; the sliders follow it.
-					// prescribedOmega is not a checkpoint scalar, so an Earth world keeps the
-					// rebuild's preset (realistic holds the poles, game lets the mantle drive).
-					// Historical packs have no poles: only the present-day pack is prescribed.
-					if (isEarthStart(startInput.value))
-						state.prescribedOmega = (startInput.value === 'earth' && presetInput.value === 'realistic') ? 1 : 0;
+					// prescribedOmega and rotationHistory are not checkpoint scalars: the
+					// rebuild's Earth.apply re-derived both from the start pack and the preset
+					// select (realistic holds the poles - and steers an epoch pack that carries
+					// model ids - game lets the mantle drive), and Checkpoint.load leaves the
+					// flags and the rotRec tables untouched.
 					syncAdjust();
 					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
 						+ state.t.toFixed(1) + ' Myr.';
@@ -1028,7 +1057,8 @@
 			+ '\nengine ' + engine + ' · L' + grid.level
 			+ ' · dt ' + dtInput.value + ' · ' + speedInput.value + ' steps/frame · view ' + layerValue()
 			+ ' · ' + startInput.value + ' start · seed ' + seedInput.value
-			+ ' · cadence ' + Params.eventCadence + ' Myr' + v3dLine
+			+ ' · cadence ' + Params.eventCadence + ' Myr'
+			+ (state.rotationHistory ? ' · steered' : '') + v3dLine
 			+ (recon ? ' · ' + recon : '')
 			+ '\n' + Perf.report(stripRows())
 			+ (viewGate ? '\n' + viewGate : '')

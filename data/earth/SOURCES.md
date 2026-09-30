@@ -211,18 +211,40 @@ The committed source textures and the 1° bins extracted from them (via
 | `data/earth/paleo/200Ma_1deg.bin` | 1° z/age/kind raster extracted from `200Ma_source.jpg` | `af101df51aa0cc8762af877daadb3d44` |
 | `data/earth/paleo/000Ma_1deg.bin` | 1° z/age/kind raster, modern band values (`--z-deep 4200 --z-navy 5000`) | `40657630da47fc8aeb3b9531405be54f` |
 | `data/earth/paleo/000Ma_0p5deg.bin` | 0.5° raster of the modern map (L7) | `87d237870a5fd5c00f7269cae5a3b73f` |
+| `data/earth/paleo/plates-250Ma.bin` | per-cell plate ids + stage ω from `gpml_plates.js --epoch=250` (85 plates) | `724fd05731e075c987ee0cd78a533a71` |
+| `data/earth/paleo/plates-200Ma.bin` | the same at `--epoch=200` (125 plates) | `e774d07ee2c4a9df62bf6ad5446e3a59` |
 
-Baked packs: `js/data/earth-250Ma.js` (`pangaea`, epoch 250, all poles zero, datum `+0.00 m`) and
-`js/data/earth-200Ma.js` (`gondwana`, epoch 200, all poles zero, datum `+0.00 m`). The historical
-maps carry **no rotation poles**; the rotation model below supplies them (0.4.6).
+Baked packs: `js/data/earth-250Ma.js` (`pangaea`, epoch 250, 84 PALEOMAP model plates + 8 oceanic
+Voronoi, datum `+0.00 m`) and `js/data/earth-200Ma.js` (`gondwana`, epoch 200, 103 + 8, datum
+`+0.00 m`). The 0.4.5 bake gave them nine anonymous land components and zero poles; the 0.4.6c
+re-bake gives them the rotation model's own plate ids (`plates.codes`) and its stage ω at the
+pack epoch, with the z/age/sed/kind banks bit-identical to the 0.4.5 bake — only the plate
+table changed. Commands:
+
+```
+python3 tools/earth/bake_earth.py --paleo data/earth/paleo/250Ma_1deg.bin --name earth-250Ma \
+    --out js/data/earth-250Ma.js --report data/earth/report-250Ma.txt \
+    --plate-ids data/earth/paleo/plates-250Ma.bin --ids-min-cells 1
+python3 tools/earth/bake_earth.py --paleo data/earth/paleo/200Ma_1deg.bin --name earth-200Ma \
+    --out js/data/earth-200Ma.js --report data/earth/report-200Ma.txt \
+    --plate-ids data/earth/paleo/plates-200Ma.bin --ids-min-cells 10
+```
+
+`--ids-min-cells` absorbs model plates smaller than the threshold into the neighbour with the
+most shared border (200 Ma: 125 → 103, headroom for plateCap 128 including the oceanic
+plates); continental cells no polygon claims (56 % at 250 Ma — the polygons and the PaleoDEM
+are not the same vintage) follow their majority model neighbour; the remaining ocean gets the
+same k=8 farthest-point Voronoi as the 0.4.5 bake, with no code and no pole — dead ocean
+floor, honest about not knowing its kinematics.
 
 ### Ingested (0.4.6): the PaleoAtlas v3 rotation model
 
 `data/earth/PALEOMAP_PlateModel.rot` — 79,521 bytes, MD5 `6cc0c0e73c4f516c6069ae1c08d4f3d6`,
 CC-BY 4.0 (`data/earth/License.txt`), extracted by hand from `Scotese_PaleoAtlas_v3.zip`. Its own
 header names the model `m15g60_v2d3` and the plate-polygon set it belongs to,
-`ContOCeanPolyv10u_v2d3` — those polygons are **not** committed, so the model gives real plate
-identity and real plate speeds but not past plate boundaries.
+`ContOCeanPolyv10u_v2d3`, committed as the `.gpml` below: model plus polygons give real plate
+identity, real plate speeds and a per-cell plate table, but past plate boundaries enter a pack
+only as the bake-time rasterization, never as dynamic boundaries in the forward sim.
 
 `data/earth/PALEOMAP_PlatePolygons.gpml` — 5,287,072 bytes, MD5
 `d782fab51dd1a5496656f212914eb427`, CC-BY 4.0, from the same folder of the same archive and
@@ -231,8 +253,9 @@ features, 503 rings, 26,936 vertices, each ring tagged with the plate id it ride
 `[DISAPPEARA, APPEARANCE]` window in Ma-ago. `tools/earth/gpml_plates.js` reconstructs the
 rings with the rotations above and rasterizes them onto the bake lattice, which is how a pack
 gets a real plate id per cell instead of a Voronoi guess. 223 plates today (94 % of cells),
-85 at 250 Ma (24 %, continental crust only — the ocean floor of 250 Ma is subducted and is not
-in the file). `tests/gpml-plates.js` pins the identity and the Pangaea sutures.
+85 at 250 Ma (24 % of cells), 125 at 200 Ma (29 %) — continental crust only at the epochs,
+because the ocean floor of 250 Ma is subducted and is not in the file.
+`tests/gpml-plates.js` pins the identity and the Pangaea sutures.
 
 ### Available, assessed, not ingested: PaleoCoastlines v7 (0.4.6)
 

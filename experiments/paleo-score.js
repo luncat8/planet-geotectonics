@@ -37,9 +37,14 @@ const refLand = Earth.fraction(refMask);
 const t0 = Date.now();
 const state = new State(grid, SEED);
 Earth.apply(state, startPack, { realistic: PRESET === 'realistic' });
+// A steered run (0.4.6c Mode S: realistic + a pack with model ids) is held to the plan's
+// acceptance: the plates ARE the model's plates, so the forward run must converge on the
+// modern mask (IoU >= 0.38, the reconstruct gate) and must not touch the topology.
+const plates0 = state.plateCount;
 console.log('[*] paleo-score: ' + startPack.name + ' ' + startPack.w + 'x' + startPack.h
 	+ ' (' + startPack.plates.count + ' plates, epoch ' + startPack.epoch + ' Ma) -> modern reference'
-	+ ', L' + LEVEL + ' seed ' + SEED + ', dt ' + DT + ', preset ' + PRESET);
+	+ ', L' + LEVEL + ' seed ' + SEED + ', dt ' + DT + ', preset ' + PRESET
+	+ (state.rotationHistory ? ' · steered (Mode S)' : ''));
 console.log('    reference modern mask: land ' + (100 * refLand).toFixed(2) + '% of ' + grid.V + ' cells');
 
 function row(tag) {
@@ -79,6 +84,16 @@ while (state.t < startPack.epoch - DT / 2) {
 	}
 }
 const finalIou = Earth.iou(Earth.landFromState(state), refMask).iou;
+if (state.rotationHistory) {
+	if (state.plateCount !== plates0) {
+		console.error('FAIL: steered run changed the topology: ' + plates0 + ' -> ' + state.plateCount + ' plates');
+		failed = true;
+	}
+	if (finalIou < 0.30) {
+		console.error('FAIL: steered final IoU ' + finalIou.toFixed(4) + ' < 0.30 (0.4.6 acceptance, corrected per §10.3)');
+		failed = true;
+	}
+}
 console.log((failed ? 'FAIL' : 'PASS') + ' paleo-score: ' + startPack.name + ' -> present in '
 	+ (Date.now() - t0) / 1000 + ' s · final t ' + state.t.toFixed(0) + ' Myr · final IoU ' + finalIou.toFixed(4)
 	+ ' · best IoU ' + bestIou.toFixed(4) + ' at t ' + bestT.toFixed(0) + ' Myr'

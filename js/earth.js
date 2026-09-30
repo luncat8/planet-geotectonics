@@ -5,8 +5,12 @@
  * an initial condition only - the crust stays Lagrangian, nothing is advected on the grid.
  *
  * Two conventions the pack and the sim do NOT share, resolved once at decode/coords time:
- *  - the pack's seeds/poles are geographic z-up unit vectors, the sim is y-up, so decode
- *    swizzles (x, y, z) -> (x, z, y);
+ *  - the pack's seeds/poles are geographic z-up vectors, the sim is y-up. The frames
+ *    differ by a REFLECTION (swap y/z), so positions swizzle (x, y, z) -> (x, z, y) but
+ *    angular velocities are axial and also negate: omega_sim = (-x, -z, -y)geo. Swizzle
+ *    without the negation mirrors every plate's motion - India heads southwest, the
+ *    Pacific east-southeast - with the right speed, which no stability gate catches.
+ *    Rotations.toSim applies the same rule to quaternions, and the reconstruct IoU pins it;
  *  - the pack's raster is cell-centred (row 0 = 90S), so sampling offsets by half a cell
  *    and wraps in longitude instead of scaling to W-1.
  */
@@ -81,7 +85,9 @@ var Earth = {
 		for (var p = 0; p < count; p++) {
 			var s3 = pl.seeds[p], p4 = pl.poles[p], sOff = p * 3, pOff = p * 4;
 			seeds[sOff] = s3[0]; seeds[sOff + 1] = s3[2]; seeds[sOff + 2] = s3[1];
-			poles[pOff] = p4[0]; poles[pOff + 1] = p4[2]; poles[pOff + 2] = p4[1]; poles[pOff + 3] = p4[3];
+			// omega is axial: negate-and-swap, not the seeds' plain swizzle (header comment).
+			EarthRotations.vecToSim(p4, 0, poles, pOff);
+			poles[pOff + 3] = p4[3];
 		}
 		pack._decoded = {
 			z: z, age: age, sed: sed, sqrtAge: sqrtAge, hFel: hFel, hMaf: hMaf, kind: kind,
@@ -193,10 +199,55 @@ var Earth = {
 	}
 	s.prescribedOmega = prescribe ? 1 : 0;
 	s.epoch0 = pack.epoch || 0;
+	// Mode S (0.4.6c): an epoch pack carrying plates.codes names real PALEOMAP plates, so
+	// 'realistic' becomes steered - omega(t) from the rotation model each step instead of
+	// the pack's constant poles - and the topology freezes with it. A steered world is a
+	// prescribed world by definition; the modern pack has no codes and keeps its constant
+	// NNR poles, and the game preset hands the rotations to the procedural mantle either way.
+	var modelPlates = Earth.bindRotations(s, pack);
+	s.rotationHistory = (opts.realistic && modelPlates > 0 && pack.plates.codes) ? 1 : 0;
+	if (s.rotationHistory) s.prescribedOmega = 1;
 	if (opts.realistic) s.cooling = 0;
 	EarthSim.raster(s);
 	s.rebase();
 	return s;
+},
+// Plate -> rotation-model tables, bound once per world (setup-time, not per frame).
+// A pack with plates.codes carries PALEOMAP model ids directly (the re-baked epoch packs,
+// 0.4.6c); the modern pack's morvel-index -> model-id map lives in the crosswalk, together
+// with fix B's continental remap (0.4.6b): land columns the Voronoi bake handed to ocean
+// microplates (jf/ri, ca/sr/nz) follow their mother cratons (na, sa) instead. Returns the
+// number of plates the model speaks for.
+bindRotations: function (s, pack) {
+	var count = pack.plates.count, codes = pack.plates.codes, model = 0, p;
+	for (p = 0; p < s.plateCap; p++) { s.rotRec[p] = null; s.rotRemap[p] = -1; }
+	if (codes) {
+		for (p = 0; p < count; p++) {
+			var rec = codes[p] ? EarthRotations.of(codes[p]) : null;
+			s.rotRec[p] = rec;
+			if (rec) model++;
+		}
+		return model;
+	}
+	var idx = Earth.codeIndex();
+	for (p = 0; p < count; p++) {
+		var id = EarthCrosswalk.ids[p];
+		var rec2 = id ? EarthRotations.of(id) : null;
+		s.rotRec[p] = rec2;
+		if (rec2) model++;
+		var code = EarthCrosswalk.codes[p];
+		if ((code === 'jf' || code === 'ri') && idx.na !== undefined) s.rotRemap[p] = idx.na;
+		if ((code === 'ca' || code === 'sr' || code === 'nz') && idx.sa !== undefined) s.rotRemap[p] = idx.sa;
+	}
+	return model;
+},
+codeIndex: function () {
+	if (!Earth._codeIndex) {
+		Earth._codeIndex = {};
+		var codes = EarthCrosswalk.codes;
+		for (var i = 0; i < codes.length; i++) Earth._codeIndex[codes[i]] = i;
+	}
+	return Earth._codeIndex;
 },
 	// Mode K (0.4.6): put every column where the rotation model says it was at `epoch`, by
 	// exact rigid rotation. No dt, no physics, and nothing is advected on the grid - each
@@ -206,103 +257,87 @@ var Earth = {
 	// The plate's quaternion becomes the MOTION rotation from the pack's own epoch to `epoch`,
 	// not the file's reconstruction rotation: Columns.move does world = rotate(body, q) and
 	// body is the pack's geography at its bake epoch, so q has to be R(epoch) ∘ R(epoch0)^-1.
-	// Plates the crosswalk cannot justify (4 of the modern 25, all small ocean plates) keep the
+	// Plates the model cannot justify (4 of the modern 25, all small ocean plates) keep the
 	// identity and are counted, so the cost of a gap is a number rather than a shrug.
+	// The per-plate records and fix B's mother remap are the tables bindRotations built at
+	// apply time; a scrub allocates nothing (0.4.6c: the slider fires per input event).
 	reconstruct: function (s, epoch) {
-		var q = new Float64Array(4);
-		var codes = EarthCrosswalk.codes || [];
-		var codeToIdx = {};
-		for (var ci = 0; ci < codes.length; ci++) codeToIdx[codes[ci]] = ci;
-		var naIdx = codeToIdx['na'], saIdx = codeToIdx['sa'];
-		var remap = {};
-		if (naIdx !== undefined) { remap['jf'] = naIdx; remap['ri'] = naIdx; }
-		if (saIdx !== undefined) { remap['ca'] = saIdx; remap['sr'] = saIdx; remap['nz'] = saIdx; }
-		// First, set q for every plate from its crosswalk id (motion from epoch0 -> epoch).
+		var q = Earth._reconQ || (Earth._reconQ = new Float64Array(4));
+		var stuckSeen = Earth._reconStuck || (Earth._reconStuck = new Uint8Array(s.plateCap));
+		// First, set q for every plate from its model record (motion from epoch0 -> epoch).
 		for (var p = 0; p < s.plateCount; p++) {
-			var pb = p * 4, id = EarthCrosswalk.ids[p];
-			var plate = id ? EarthRotations.of(id) : null;
-			if (!plate) {
+			var pb = p * 4, rec = s.rotRec[p];
+			if (!rec) {
 				s.q[pb] = 0; s.q[pb + 1] = 0; s.q[pb + 2] = 0; s.q[pb + 3] = 1;
 				continue;
 			}
-			EarthRotations.relative(plate, epoch, s.epoch0, q, 0);
+			EarthRotations.relative(rec, epoch, s.epoch0, q, 0);
 			EarthRotations.toSim(q, s.q, pb);
 		}
 		s.reconEpoch = epoch;
-		// Custom MOVE with continental-crust priority for fragmented plates (fix B):
-		// continental columns on jf/ri follow NAM (101), on ca/sr/nz follow SAM (201).
-		// This is the ~480 land columns that the Voronoi bake mis-assigned to ocean
-		// microplates. Oceanic columns on those plates keep their own plate's rotation
-		// (or stay stuck when the crosswalk has no plate).
-		var moved = 0, stuck = 0;
-		var stuckSet = {};
-		var quat = EarthQuat || (typeof Quat !== 'undefined' ? Quat : null);
-		var cols = EarthColumns || (typeof Columns !== 'undefined' ? Columns : null);
-		if (!quat || !cols) {
-			// Fallback: use the old path if Quat/Columns not available (should not happen).
-			for (var i = 0; i < s.n; i++) if (s.alive[i]) {
-				var b = i * 3;
-				quat.rotate(s.world, b, s.q, s.plate[i] * 4, s.body, b);
-				s.cell[i] = cols.climb(s, s.cell[i], s.world[b], s.world[b + 1], s.world[b + 2]);
-			}
-		} else {
-			for (var i = 0; i < s.n; i++) {
-				if (!s.alive[i]) continue;
-				var pIdx = s.plate[i];
-				var code = codes[pIdx];
-				var eff = pIdx;
-				if (s.hFel[i] > 0 && remap[code] !== undefined) eff = remap[code];
-				var effId = EarthCrosswalk.ids[eff];
-				var effPlate = effId ? EarthRotations.of(effId) : null;
-				if (effPlate) moved++; else { stuck++; stuckSet[eff] = 1; }
-				var b = i * 3, qb = eff * 4;
-				quat.rotate(s.world, b, s.q, qb, s.body, b);
-				s.cell[i] = cols.climb(s, s.cell[i], s.world[b], s.world[b + 1], s.world[b + 2]);
-			}
+		// Custom MOVE with continental-crust priority for fragmented plates (fix B): a land
+		// column the Voronoi bake handed to an ocean microplate rides its mother craton's
+		// rotation (rotRemap); oceanic columns keep their own plate's (or stay stuck).
+		var moved = 0, stuck = 0, stuckPlates = 0;
+		stuckSeen.fill(0, 0, s.plateCount);
+		for (var i = 0; i < s.n; i++) {
+			if (!s.alive[i]) continue;
+			var pIdx = s.plate[i];
+			var eff = (s.hFel[i] > 0 && s.rotRemap[pIdx] >= 0) ? s.rotRemap[pIdx] : pIdx;
+			if (s.rotRec[eff]) moved++;
+			else { stuck++; stuckSeen[eff] = 1; }
+			var b = i * 3;
+			EarthQuat.rotate(s.world, b, s.q, eff * 4, s.body, b);
+			s.cell[i] = EarthColumns.climb(s, s.cell[i], s.world[b], s.world[b + 1], s.world[b + 2]);
 		}
-		var stuckPlates = 0;
-		for (var k in stuckSet) if (stuckSet.hasOwnProperty(k)) stuckPlates++;
-		// Bin (original) + raster with continental priority (fix A) + elevation.
-		// Fix A is only for reconstruction: oceanic crust always subducts under continental,
-		// so if a continental column falls into a cell/ring it wins over oceanic.
-		// Forward sim keeps original raster (no priority) to preserve split/merge dynamics.
-		var surf = EarthSurface || (typeof Surface !== 'undefined' ? Surface : null);
-		if (cols && cols.bin) cols.bin(s);
-		else if (EarthSim) { /* bin is part of Sim.raster, but we have cols */ }
-		// Custom raster with continental priority
-		(function rasterPriority(s) {
-			var g = s.grid, radius = (EarthParams && EarthParams.radius) ? EarthParams.radius : 6371000;
-			s.gaps = 0;
-			for (var c = 0; c < g.V; c++) {
-				var b = c * 3, bestCont = Infinity, ownerCont = -1, bestOcean = Infinity, ownerOcean = -1;
-				for (var k = -1; k < g.ringN[c]; k++) {
-					var j = k < 0 ? c : g.ring[c * 6 + k];
-					for (var at = s.offset[j]; at < s.offset[j + 1]; at++) {
-						var i = s.entries[at], w = i * 3;
-						var dx = s.world[w] - g.pos[b], dy = s.world[w + 1] - g.pos[b + 1], dz = s.world[w + 2] - g.pos[b + 2];
-						var d = dx * dx + dy * dy + dz * dz;
-						var isCont = s.hFel[i] > 0;
-						if (isCont) {
-							if (d > bestCont || (d === bestCont && ownerCont >= 0 && i > ownerCont)) continue;
-							bestCont = d; ownerCont = i;
-						} else {
-							if (d > bestOcean || (d === bestOcean && ownerOcean >= 0 && i > ownerOcean)) continue;
-							bestOcean = d; ownerOcean = i;
-						}
+		for (var p2 = 0; p2 < s.plateCount; p2++) stuckPlates += stuckSeen[p2];
+		EarthColumns.bin(s);
+		Earth.rasterPriority(s);
+		EarthSurface.elevation(s);
+		return { epoch: epoch, moved: moved, stuck: stuck, stuckPlates: stuckPlates };
+	},
+	// Ownership raster with continental priority (fix A), reconstruction-only: oceanic crust
+	// always subducts under continental, so a continental column in a cell's disc wins it
+	// however far an oceanic one sits. The forward sim keeps Columns.raster (no priority)
+	// to preserve split/merge dynamics, so this is a sibling of it, not a replacement.
+	rasterPriority: function (s) {
+		var g = s.grid, radius = EarthParams.radius;
+		s.gaps = 0;
+		for (var c = 0; c < g.V; c++) {
+			var b = c * 3, bestCont = Infinity, ownerCont = -1, bestOcean = Infinity, ownerOcean = -1;
+			for (var k = -1; k < g.ringN[c]; k++) {
+				var j = k < 0 ? c : g.ring[c * 6 + k];
+				for (var at = s.offset[j]; at < s.offset[j + 1]; at++) {
+					var i = s.entries[at], w = i * 3;
+					var dx = s.world[w] - g.pos[b], dy = s.world[w + 1] - g.pos[b + 1], dz = s.world[w + 2] - g.pos[b + 2];
+					var d = dx * dx + dy * dy + dz * dz;
+					if (s.hFel[i] > 0) {
+						if (d > bestCont || (d === bestCont && ownerCont >= 0 && i > ownerCont)) continue;
+						bestCont = d; ownerCont = i;
+					} else {
+						if (d > bestOcean || (d === bestOcean && ownerOcean >= 0 && i > ownerOcean)) continue;
+						bestOcean = d; ownerOcean = i;
 					}
 				}
-				var best, owner;
-				if (bestCont <= s.gapLimit2[c]) { best = bestCont; owner = ownerCont; }
-				else if (bestOcean <= s.gapLimit2[c]) { best = bestOcean; owner = ownerOcean; }
-				else { best = Infinity; owner = -1; }
-				if (best > s.gapLimit2[c]) owner = -1;
-				s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
-				s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
-				if (owner < 0) { s.gaps++; s.z[c] = NaN; continue; }
 			}
-		})(s);
-		if (surf && surf.elevation) surf.elevation(s);
-		return { epoch: epoch, moved: moved, stuck: stuck, stuckPlates: stuckPlates };
+			var best, owner;
+			if (bestCont <= s.gapLimit2[c]) { best = bestCont; owner = ownerCont; }
+			else if (bestOcean <= s.gapLimit2[c]) { best = bestOcean; owner = ownerOcean; }
+			else { best = Infinity; owner = -1; }
+			s.owner[c] = owner; s.distance[c] = Math.sqrt(best) * radius;
+			s.cellPlate[c] = owner < 0 ? 65535 : s.plate[owner];
+			if (owner < 0) { s.gaps++; s.z[c] = NaN; }
+		}
+	},
+	// Re-derive grid ownership and elevation from the q the state carries, through the sim's
+	// OWN raster: the restore tail when a reconstruct scrub is released (0.4.6 plan §5 -
+	// "leaving it returns to the live sim state"). The caller puts q back first.
+	refresh: function (s) {
+		EarthColumns.move(s);
+		EarthColumns.bin(s);
+		EarthColumns.raster(s);
+		EarthSurface.elevation(s);
+		s.reconEpoch = 0;
 	},
 	// Wet fraction, mean land/ocean and the round-trip RMS of derived z vs the pack's z bank,
 	// resampled at the same cell positions (plan §7 acceptance).

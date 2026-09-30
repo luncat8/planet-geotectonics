@@ -52,4 +52,61 @@ for (let p = 0; p < s.plateCount; p++) {
 	}
 }
 assert.equal(worse, 0);
-console.log('PASS plates: rigid-field ω identity and drag-only least squares', { compared });
+
+// --- Mode S (0.4.6c): steer reads the rotation model, the cap binds, integrate is gated ---
+const Rotations = require('../js/rotations.js');
+const Quat = require('../js/quat.js');
+{
+	const w = new State(g, 7);
+	const cap = Params.vMax / Params.radius;
+	const wg = new Float64Array(3), ws = new Float64Array(3);
+	w.plateCount = 3;
+	w.epoch0 = 250;
+	w.rotationHistory = 1;
+	w.rotRec[0] = Rotations.of('701');   // Africa: a slow craton, far under the cap
+	w.rotRec[1] = Rotations.of('306');   // a shard whose 10 Ma stage runs ~154 cm/yr
+	// plate 2 keeps no record: dead ocean floor, steer must leave its omega alone
+	w.omega[6] = 0.001; w.omega[7] = -0.002; w.omega[8] = 0.0005;
+
+	w.t = 20;                            // epoch 230 Ma: both stages under the cap
+	Plates.steer(w);
+	Rotations.pole(w.rotRec[0], 230, wg, 0);
+	Rotations.vecToSim(wg, 0, ws, 0);
+	assert.ok(Math.hypot(ws[0], ws[1], ws[2]) < cap, '701 at 230 Ma is under the cap');
+	assert.ok(w.omega[0] === ws[0] && w.omega[1] === ws[1] && w.omega[2] === ws[2],
+		'steer writes the model omega bit-exact, in the sim frame');
+	Rotations.pole(w.rotRec[1], 230, wg, 0);
+	Rotations.vecToSim(wg, 0, ws, 0);
+	assert.ok(Math.hypot(ws[0], ws[1], ws[2]) < cap, '306 at 230 Ma is under the cap');
+	assert.ok(w.omega[3] === ws[0] && w.omega[4] === ws[1] && w.omega[5] === ws[2],
+		'steer writes the model omega for every plate with a record');
+	assert.ok(w.omega[6] === 0.001 && w.omega[7] === -0.002 && w.omega[8] === 0.0005,
+		'a plate without a record keeps its omega');
+
+	w.t = 240;                           // epoch 10 Ma: the 306 shard is over the cap
+	Plates.steer(w);
+	Rotations.pole(w.rotRec[1], 10, wg, 0);
+	const raw = Math.hypot(wg[0], wg[1], wg[2]);
+	assert.ok(raw > cap, 'the 306 10 Ma stage exceeds the cap (' + (raw * Params.radius / 10000).toFixed(0) + ' cm/yr)');
+	const m = Math.hypot(w.omega[3], w.omega[4], w.omega[5]);
+	assert.ok(Math.abs(m - cap) < 1e-15, 'steer clamps |omega| to vMax/R');
+	Rotations.vecToSim(wg, 0, ws, 0);
+	const k = cap / raw;
+	assert.ok(Math.abs(w.omega[3] - ws[0] * k) < 1e-18 && Math.abs(w.omega[4] - ws[1] * k) < 1e-18
+		&& Math.abs(w.omega[5] - ws[2] * k) < 1e-18, 'the clamp scales the magnitude and keeps the direction');
+
+	// integrate steers first (rotationHistory) and advances q with exactly that omega.
+	const q0 = Float64Array.from(w.q.subarray(0, 12));
+	Plates.integrate(w, 0.1);
+	const qe = Float64Array.from(q0);
+	for (let p = 0; p < 3; p++) Quat.integrate(qe, p * 4, w.omega, p * 3, 0.1);
+	for (let i = 0; i < 12; i++) assert.ok(w.q[i] === qe[i], 'integrate advances q with the steered omega');
+
+	// Without rotationHistory, integrate must not touch omega: K10's world is bit-identical.
+	w.rotationHistory = 0;
+	w.t = 0;
+	const sentinel = Float64Array.from(w.omega.subarray(0, 9));
+	Plates.integrate(w, 0.1);
+	for (let i = 0; i < 9; i++) assert.ok(w.omega[i] === sentinel[i], 'unsteered integrate reads omega, never writes it');
+}
+console.log('PASS plates: rigid-field ω identity and drag-only least squares', { compared }, 'steer: model ω, cap, gated integrate');
