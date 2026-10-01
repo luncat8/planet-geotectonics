@@ -258,7 +258,8 @@ Render3D.NORM_ANALYTIC = `// Per-vertex normals from the height field's own cent
 fn vertexNormal(dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
 	if (abs(dir.y) > 0.9999) { return dir; }
 	let p = vec2<f32>(uv.x * f32(W), uv.y * f32(H)) - vec2<f32>(0.5);
-	let x = i32(floor(p.x));
+	// Wrap the centre before its neighbours: uv.x = 0 starts at texel -1.
+	let x = (i32(floor(p.x)) + i32(W)) % i32(W);
 	let y = clamp(i32(floor(p.y)), 0, i32(H) - 1);
 	let xm = select(x - 1, i32(W) - 1, x <= 0);
 	let xp = select(x + 1, 0, x + 1 >= i32(W));

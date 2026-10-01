@@ -231,6 +231,26 @@ assert.ok(r3dAnalytic.includes('textureLoad(HEIGHT, vec2<i32>(xm, y), 0).x') && 
 	'the analytic normal differences one texel either way, scaled by the true arc lengths');
 assert.ok(r3dAnalytic.includes('max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.001)'),
 	'with a cos(lat) floor, so a pole vertex stays finite');
+assert.ok(r3dAnalytic.includes('let x = (i32(floor(p.x)) + i32(W)) % i32(W);'),
+	'analytic taps wrap the centre before computing neighbours at the longitude seam');
+// Evaluate the shader's integer-index expressions; the stub cannot execute WGSL.
+function analyticTap(name, p, W) {
+	const expression = Render3D.NORM_ANALYTIC.match(new RegExp('let ' + name + ' = ([^;]+);'))[1];
+	const code = expression.replace(/i32\(/g, 'Math.trunc(').replace(/floor\(/g, 'Math.floor(');
+	return Function('p', 'W', 'x', 'select', 'return ' + code)(p, W,
+		name === 'x' ? 0 : analyticTap('x', p, W), (a, b, condition) => condition ? b : a);
+}
+for (const u of [0, 1]) {
+	const p = { x: u * Render3D.TW - 0.5 };
+	assert.deepEqual(['xm', 'x', 'xp'].map(name => analyticTap(name, p, Render3D.TW)),
+		[Render3D.TW - 2, Render3D.TW - 1, 0], 'both seam endpoints use identical valid taps');
+}
+for (const u of [0.0001, 0.25, 0.5, 0.9999]) {
+	for (const name of ['xm', 'x', 'xp']) {
+		const tap = analyticTap(name, { x: u * Render3D.TW - 0.5 }, Render3D.TW);
+		assert.ok(tap >= 0 && tap < Render3D.TW, 'every analytic longitude tap is in bounds');
+	}
+}
 assert.ok(r3dAnalytic.includes('if (abs(dir.y) > 0.9999) { return dir; }'),
 	'pole vertices return radial direction without division by zero');
 

@@ -65,6 +65,9 @@ tests/gpu-parity.js (headless CPU/GPU ensemble; needs the Chromium rig).
 0.4.6-plan-plate-history.md - plate positions through time: prescribed kinematics, exact backtracking,
 the reverse-time answer, and what is not possible. 0.4.6a is in: data/earth/PALEOMAP_PlateModel.rot,
 tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotations.js.
+0.4.8-plan-earth-data.md - modern sediment/provenance improvement and holdout bake gates.
+0.6.x-plan-deposit-prospector.md - deterministic exploration catalogue, instruments, core and economics.
+0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
