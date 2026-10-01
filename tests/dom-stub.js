@@ -76,6 +76,9 @@ Object.defineProperty(El.prototype, 'options', {
 Object.defineProperty(El.prototype, 'lastChild', {
 	get: function () { return this.children[this.children.length - 1] || null; }
 });
+Object.defineProperty(El.prototype, 'firstChild', {
+	get: function () { return this.children[0] || null; }
+});
 El.prototype.setAttribute = function (name, value) { this.attrs[name] = String(value); };
 El.prototype.getAttribute = function (name) {
 	return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null;

@@ -14,6 +14,7 @@ const Plates = require('../js/plates.js');
 const Surface = require('../js/surface.js');
 const Checkpoint = require('../js/checkpoint.js');
 const Renderer = require('../js/render.js');
+const Render3D = require('../js/render3d.js');
 const GpuSim = require('../js/gpu/sim-gpu.js');
 const { makeDom, installGlobals } = require('./dom-stub.js');
 
@@ -260,6 +261,8 @@ const world = (level, seed) => {
 }
 
 // --- 7. The page: the controls write, and the copy header records ---------------------------
+// The page's own script set: render3d.js ships with it (the 3D view), so the stub gets the
+// module the same way js/ui.js will, through the global.
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'sim', 'render'];
@@ -267,7 +270,7 @@ const indexHtml = read('index.html');
 function loadPage(search) {
 	const api = makeDom(indexHtml);
 	api.location.search = search || '';
-	installGlobals(api, {});
+	installGlobals(api, { Render3D: Render3D });
 	for (const file of MODULES) {
 		vm.runInThisContext(read('js/' + file + '.js'), { filename: 'js/' + file + '.js' });
 	}

@@ -30,7 +30,11 @@
 //      the volume drag defers one histogram solve to the frame loop, ?sea=/?seavol= pre-fill
 //      and activate their own slider (level wins the tie), the header names whichever control
 //      is active, and the probe's wet/land follows Params.sea.
-//  11. the Reconstruct slider (0.4.6) appears only on an Earth start with a rotation model,
+//  11. the 3D controls are a session (0.5.0/0.5.5): the mesh and normals selects carry the
+//      module's own vocabulary, the detail list follows the mesh mode, and a mesh, detail or
+//      normals change swaps the live session's buffers or pipelines - never the world, and
+//      since 0.5.5 never the session either;
+//  12. the Reconstruct slider (0.4.6) appears only on an Earth start with a rotation model,
 //      the steered boot names itself in the copy header, a scrub is display-only (the header
 //      records it, no sim parameter is written), and the release restores the live pose
 //      exactly and returns the jog control to 0.
@@ -46,6 +50,7 @@ const vm = require('node:vm');
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Checkpoint = require('../js/checkpoint.js');
 const Water = require('../js/water.js');
+const RealRender3D = require('../js/render3d.js');
 const { makeDom, installGlobals } = require('./dom-stub.js');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -68,6 +73,12 @@ const cadenceOptions = options(indexHtml, 'cadence').map(Number);
 assert.deepEqual(levelOptions, [5, 6, 7], 'the Resolution select offers L5, L6 and L7');
 assert.deepEqual(stepsOptions, [1, 5, 20], 'the Steps/frame select offers 1, 5 and 20');
 assert.deepEqual(cadenceOptions, [1, 5, 10], 'the Event cadence select offers 1, 5 and 10 Myr');
+// The 3D selects ship the module's own vocabulary (it repaints the detail list per mode, so
+// the HTML and the table have to start out agreeing).
+assert.deepEqual(options(indexHtml, 'k3d'), RealRender3D.DETAILS.ico.map((d) => d[0]),
+	'index.html ships the icosphere detail tokens the module offers');
+assert.deepEqual(options(indexHtml, 'mesh3d'), ['ico', 'grid'], 'the mesh select offers both mesh modes');
+assert.deepEqual(options(indexHtml, 'norm3d'), ['deriv', 'analytic'], 'the normals select offers both sources');
 
 // The bench's accepted ranges, read out of its own source: the drift between these numbers and
 // the page's options is what dropped `20` from every bench run taken with the defaults.
@@ -224,19 +235,35 @@ FakeReader.prototype.readAsArrayBuffer = function (file) {
 // loop asked of it, and what it released. The constants the page's orbit handler reads
 // ride along, so a drag test exercises the real clamps.
 const fakeR3ds = [];
+// The real module's detail vocabulary, not a copy of it: the fake must accept exactly the
+// tokens the page offers and count exactly the vertices the real builder would.
+function fakeVerts(mode, detail) {
+	const d = RealRender3D.parseDetail(mode, detail);
+	return d.k !== undefined ? 10 * Math.pow(4, d.k) + 2 : (d.cols + 1) * d.rows;
+}
 function FakeRender3D(canvas) {
 	this.canvas = canvas; this.exag = 10; this.target = { fake: true };
 	this.inits = []; this.orbits = []; this.appends = 0; this.redraws = 0;
 	this.presents = 0; this.releases = 0; this.tsText = '';
+	this.meshes = []; this.norms = [];
 	fakeR3ds.push(this);
 }
 FakeRender3D.PITCH_MAX = 89.5 * Math.PI / 180;
 FakeRender3D.DIST_MIN = 1.5; FakeRender3D.DIST_MAX = 10;
+FakeRender3D.DETAILS = RealRender3D.DETAILS;
+FakeRender3D.DEFAULT_DETAIL = RealRender3D.DEFAULT_DETAIL;
+FakeRender3D.parseDetail = RealRender3D.parseDetail;
 FakeRender3D.prototype.init = function (opts) {
 	this.opts = opts; this.inits.push(opts);
-	this.vCount = 10 * Math.pow(4, opts.k) + 2;
+	this.meshMode = opts.mesh; this.detail = opts.detail; this.norm = opts.norm;
+	this.vCount = fakeVerts(opts.mesh, opts.detail);
 	return this;
 };
+FakeRender3D.prototype.setMesh = function (mode, detail) {
+	this.meshes.push([mode, detail]);
+	this.meshMode = mode; this.detail = detail; this.vCount = fakeVerts(mode, detail);
+};
+FakeRender3D.prototype.setNormals = function (norm) { this.norms.push(norm); this.norm = norm; };
 FakeRender3D.prototype.setOrbit = function (yaw, pitch, dist) { this.orbits.push([yaw, pitch, dist]); };
 FakeRender3D.prototype.append = function () { this.appends++; };
 FakeRender3D.prototype.redraw = function () { this.redraws++; };
@@ -1086,22 +1113,39 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(fakeR3ds.length, 0, 'no 3D session exists at boot');
 		assert.equal(offPage.gpu.inits.length, 0, 'and no device was touched');
 		assert.equal(offPage.el('disp-value').textContent, '10.0×', 'the displacement readout paints its default');
-		assert.equal(offPage.el('k3d').value, '8', 'the detail select ships on k8');
+		assert.equal(offPage.el('k3d').value, 'k8', 'the detail select ships on k8');
+		assert.equal(offPage.el('mesh3d').value, 'ico', 'the mesh select ships on the icosphere');
+		assert.equal(offPage.el('norm3d').value, 'deriv', 'and the normals on the derivative source');
+		assert.equal(offPage.el('k3d').options.map((o) => o.value).join(','), 'k6,k7,k8,k9',
+			'the detail select offers exactly the icosphere tokens');
 
 		// ?v3d=1 with no WebGPU at all: the toggle lands disabled with the reason.
 		const dryPage = loadPage('?v3d=1&disp=12&k3d=5');
 		assert.equal(dryPage.el('v3d').disabled, true, 'no WebGPU: the toggle is disabled');
 		assert.match(dryPage.el('probe').textContent, /WebGPU is not available/, 'and the probe says why');
 		assert.equal(dryPage.el('disp').value, '12', '?disp= pre-fills the slider');
-		assert.equal(dryPage.el('k3d').value, '8', 'an unoffered ?k3d= is ignored, the select stays on its default');
+		assert.equal(dryPage.el('k3d').value, 'k8', 'an unoffered ?k3d= is ignored, the select stays on its default');
 		assert.equal(fakeR3ds.length, 0, 'and no session was attempted');
+
+		// The mesh selects: ?mesh=grid swaps the detail list to the lattice sizes and lands
+		// on its own default; an icosphere k in the wrong namespace is ignored, not fuzzed
+		// onto the first option; ?norm=analytic pre-fills the normals.
+		const gridPage = loadPage('?mesh=grid&norm=analytic&k3d=8');
+		assert.equal(gridPage.el('mesh3d').value, 'grid', '?mesh=grid pre-fills the mesh');
+		assert.equal(gridPage.el('norm3d').value, 'analytic', '?norm=analytic pre-fills the normals');
+		assert.equal(gridPage.el('k3d').value, '1024x512', 'an icosphere k under the lattice mesh lands on its default');
+		assert.equal(gridPage.el('k3d').options.map((o) => o.value).join(','), '512x256,1024x512,2048x1024',
+			'the detail select offers exactly the lattice sizes');
+		const deepPage = loadPage('?mesh=grid&k3d=2048x1024');
+		assert.equal(deepPage.el('k3d').value, '2048x1024', '?k3d=2048x1024 pre-fills the lattice detail');
+		assert.equal(fakeR3ds.length, 0, 'no mesh select booted a session on its own');
 
 		// On: the CPU engine path boots a render-only device and swaps the canvases.
 		const page3 = loadPage('?k3d=7');
 		page3.api.navigator.gpu = {
 			requestAdapter: () => Promise.resolve({ requestDevice: () => Promise.resolve({ of: 'render-only' }) })
 		};
-		assert.equal(page3.el('k3d').value, '7', '?k3d=7 pre-fills the offered detail');
+		assert.equal(page3.el('k3d').value, 'k7', 'the bare ?k3d=7 pre-fills the offered detail');
 		const v3 = page3.el('v3d');
 		v3.checked = true;
 		v3.dispatch('change');
@@ -1109,11 +1153,13 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		const r3 = fakeR3ds[fakeR3ds.length - 1];
 		assert.ok(r3, 'the toggle boots a 3D session');
 		assert.equal(r3.opts.zSource, 'cellZ', 'the CPU engine session uploads z per frame');
-		assert.equal(r3.opts.k, 7, 'the session builds the prefilled detail');
+		assert.equal(r3.opts.mesh, 'ico', 'the session builds the icosphere');
+		assert.equal(r3.opts.detail, 'k7', 'at the prefilled detail');
+		assert.equal(r3.opts.norm, 'deriv', 'with the derivative normals');
 		assert.equal(page3.el('map3d').hidden, false, 'the 3D canvas takes the map slot');
 		assert.equal(page3.el('map').hidden && page3.el('mapgpu').hidden, true, 'the 2D canvases hide');
 		assert.ok(page3.el('layer').classes.includes('off'), 'the layer buttons grey out (the 3D is the look)');
-		assert.match(page3.el('probe').textContent, /3D on · k7 · 163,842 vertices/, 'the probe names the session');
+		assert.match(page3.el('probe').textContent, /3D on · icosphere k7 · 163,842 vertices/, 'the probe names the session');
 		const pumpsBefore = r3.redraws;
 		page3.pump(4, 9000);
 		assert.ok(r3.redraws > pumpsBefore, 'a dirty frame redraws the 3D');
@@ -1158,41 +1204,66 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		page3.pump(40, 10100);
 		assert.equal(page3.strip.children[page3.Perf.SLOT.V3D].textContent, '', 'and empty again when silent');
 
-		// A detail change rebuilds the session, never the world.
+		// A detail change swaps the mesh buffers on the live session: never a world rebuild,
+		// and never (since 0.5.5) a session teardown - one setMesh call, no new device.
 		const rasters = page3.gpu.rasters;
-		const states = r3.opts;
-		page3.el('k3d').value = '9';
+		page3.el('k3d').value = 'k9';
 		page3.el('k3d').dispatch('change');
 		await page3.tick();
-		assert.equal(fakeR3ds.length, 2, 'the detail change built exactly one new session');
-		assert.ok(r3.releases >= 1, 'the old session was released, not abandoned');
+		assert.equal(fakeR3ds.length, 1, 'the detail change kept the one session');
+		assert.equal(r3.releases, 0, 'and released nothing');
+		assert.deepEqual(r3.meshes, [['ico', 'k9']], 'it swapped the mesh buffers in place');
+		assert.equal(r3.vCount, 2621442, 'the live session is the k9 mesh');
 		assert.equal(page3.gpu.rasters, rasters, 'no world rebuild happened under it');
-		assert.equal(fakeR3ds[1].opts.k, 9, 'the new session is the k9 one');
+
+		// The mesh select: the lattice is its own vertex layout, the detail list follows the
+		// mode, and both name themselves in the header once they are off default.
+		page3.el('mesh3d').value = 'grid';
+		page3.el('mesh3d').dispatch('change');
+		assert.deepEqual(r3.meshes[r3.meshes.length - 1], ['grid', '1024x512'], 'the mesh select swapped to the lattice');
+		assert.equal(r3.vCount, 524800, 'the lattice default, 1024x512 vertices');
+		assert.equal(page3.el('k3d').value, '1024x512', 'the detail select followed the mode');
+		page3.el('k3d').value = '512x256';
+		page3.el('k3d').dispatch('change');
+		assert.deepEqual(r3.meshes[r3.meshes.length - 1], ['grid', '512x256'], 'the lattice detail is live too');
+		assert.equal(r3.vCount, 131328, 'the 512x256 lattice');
+		page3.pump(2, 9250);
+		const reportMesh = page3.copy();
+		assert.ok(worldLine(reportMesh).includes(' · 3d on · disp 12x · mesh grid · 512x256'),
+			'the header names the mesh and its detail: ' + worldLine(reportMesh));
+
+		// The normals select is a shader variant: no mesh rebuild, no session rebuild.
+		const meshesBefore = r3.meshes.length;
+		page3.el('norm3d').value = 'analytic';
+		page3.el('norm3d').dispatch('change');
+		assert.deepEqual(r3.norms, ['analytic'], 'the normals select reaches the session');
+		assert.equal(r3.meshes.length, meshesBefore, 'and rebuilt no mesh');
+		page3.pump(2, 9350);
+		const reportNorm = page3.copy();
+		assert.ok(worldLine(reportNorm).includes(' · mesh grid · 512x256 · norm analytic'),
+			'the header names the normals source: ' + worldLine(reportNorm));
 
 		// The inspector works over the 3D view: a hover resolves through the session's
-		// pick, and so does a click that is not an orbit drag. The k9 session above is
-		// the live one.
-		const r3k9 = fakeR3ds[fakeR3ds.length - 1];
+		// pick, and so does a click that is not an orbit drag. The orbit above never had
+		// its canvas click, so the first click here is the one that drag suppressed - the
+		// next one is a real pin, at its own pixel.
+		const r3live = r3;
 		page3.el('probe').textContent = 'pre-pick';
-		console.log('DEBUG', JSON.stringify({ sessions: fakeR3ds.length,
-			picks: fakeR3ds.map(function (s) { return [s.picks || 0, s.releases]; }),
-			checked: page3.el('v3d').checked, disabled: page3.el('v3d').disabled,
-			map3dHidden: page3.el('map3d').hidden, mapHidden: page3.el('map').hidden,
-			follow: page3.el('follow').checked, probe: page3.el('probe').textContent }));
 		page3.el('map3d').dispatch('pointermove', { pointerId: 5, clientX: 120, clientY: 60, currentTarget: page3.el('map3d') });
-		console.log('DEBUG post', JSON.stringify({ picks: fakeR3ds.map(function (s) { return s.picks || 0; }),
-			probe: page3.el('probe').textContent.slice(0, 40) }));
 		assert.ok(/^Cell \d+/.test(page3.el('probe').textContent),
 			'a hover over the 3D view inspects a column: ' + page3.el('probe').textContent);
-		assert.ok(r3k9.picks === 1 && r3k9.pickAt[0] === 120 && r3k9.pickAt[1] === 60,
+		assert.ok(r3live.picks === 1 && r3live.pickAt[0] === 120 && r3live.pickAt[1] === 60,
 			'the hover went through the session pick at the pointer pixel');
 		page3.el('map3d').dispatch('click', { clientX: 120, clientY: 60, currentTarget: page3.el('map3d') });
-		assert.ok(/^Cell \d+/.test(page3.el('probe').textContent), 'a click pins a 3D column too');
+		assert.equal(r3live.picks, 1, 'the click a finished orbit hands the canvas is not a pick');
+		page3.el('map3d').dispatch('click', { clientX: 300, clientY: 100, currentTarget: page3.el('map3d') });
+		assert.ok(r3live.picks === 2 && r3live.pickAt[0] === 300 && r3live.pickAt[1] === 100,
+			'a click with no drag in front of it pins the column through the pick');
 		page3.el('map3d').dispatch('pointerdown', { button: 0, pointerId: 5, clientX: 120, clientY: 60, currentTarget: page3.el('map3d') });
 		page3.el('map3d').dispatch('pointermove', { pointerId: 5, clientX: 200, clientY: 90, currentTarget: page3.el('map3d') });
 		page3.el('map3d').dispatch('pointerup', { pointerId: 5, currentTarget: page3.el('map3d') });
 		page3.el('map3d').dispatch('click', { clientX: 200, clientY: 90, currentTarget: page3.el('map3d') });
-		assert.ok(r3k9.picks === 1, 'a click that ends an orbit drag is not a pick');
+		assert.ok(r3live.picks === 2, 'a click that ends an orbit drag is not a pick');
 
 		// Off again: everything swaps back and the session is released.
 		v3.checked = false;
@@ -1200,7 +1271,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(page3.el('map3d').hidden, true, 'the 3D canvas hides');
 		assert.equal(page3.el('map').hidden, false, 'the 2D map is back');
 		assert.ok(!page3.el('layer').classes.includes('off'), 'the layer buttons are live again');
-		assert.equal(fakeR3ds[1].releases, 1, 'the session released its allocations');
+		assert.equal(r3.releases, 1, 'the session released its allocations');
 	}
 
 	console.log('PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse,'
@@ -1216,10 +1287,11 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' and the sea controls are two sliders enabled by last touch - the level drag recolours,'
 		+ ' the volume drag solves the level, the pre-fill and the header name the active control,'
 		+ ' and the probe follows Params.sea; the 3D view ships off (no session, no device), the'
-		+ ' no-adapter path disables the toggle with the reason, ?v3d/?disp/?k3d pre-fill, the'
-		+ ' on path swaps the canvases and greys the layers, the orbit and wheel move only the'
-		+ ' camera, the knobs apply live, the header and the strip\'s V3D slot name the session,'
-		+ ' a detail change rebuilds the session without a world rebuild, and off restores the map;'
+		+ ' no-adapter path disables the toggle with the reason, ?v3d/?disp/?k3d/?mesh/?norm pre-fill,'
+		+ ' the detail list follows the mesh mode, the on path swaps the canvases and greys the'
+		+ ' layers, the orbit and wheel move only the camera, the knobs apply live, the header and'
+		+ ' the strip\'s V3D slot name the session, a mesh or normals change swaps buffers or pipelines'
+		+ ' on the live session without a world rebuild, and off restores the map;'
 		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
 		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
 })().catch((error) => { console.error(error); process.exit(1); });

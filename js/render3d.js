@@ -1,6 +1,8 @@
-/* render3d.js - the 3D planet view (0.5.0): a dense static icosphere displaced radially
-   from a per-frame height texture, a translucent water shell at the 0.3.5 display sea
-   level, and an additive limb halo. Renderer-only: it takes a device (the page owns the
+/* render3d.js - the 3D planet view (0.5.0): a dense static mesh - the icosphere or the
+   0.5.5 equirectangular lattice - displaced radially from a per-frame height texture, a
+   translucent water shell at the 0.3.5 display sea level, and an additive limb halo.
+   Normals are screen-space derivatives or, on request, per-vertex from the height field
+   (0.5.5). Renderer-only: it takes a device (the page owns the
    adapter), reads the sim's own segment-final heights (the GPU engine's cellF buffer
    directly, or a per-frame cellZ upload on the CPU engine) and never touches sim state.
    The frame contract mirrors GpuRenderer's: append(enc) rides the play segment encoder
@@ -42,6 +44,42 @@ Render3D.TS_NAMES = ['gather', 'land', 'water', 'rim'];
 Render3D.M_GATHER = '// layout constants appended here (W, H, LW, LH, GAP_Z)';
 Render3D.M_Z = '// z binding + read appended here (CELLF | CELLZ)';
 Render3D.M_RENDER = '// layout constants appended here (W, H, R_INV, Z_FLOOR, Z_RIM)';
+Render3D.M_NORMAL = '// normal source appended here (deriv | analytic)';
+
+/* The mesh modes and their detail vocabulary, one table for the Adjust select, the URL,
+   the capture header and the session: the icosphere's subdivision k, or the lattice's
+   columns x rows. parseDetail is the only place a token is accepted or rejected. */
+Render3D.DETAILS = {
+	ico: [['k6', 'k6 · 41k vertices'], ['k7', 'k7 · 164k'], ['k8', 'k8 · 655k'], ['k9', 'k9 · 2.6M']],
+	grid: [['512x256', '512×256 · 131k vertices'], ['1024x512', '1024×512 · 525k'], ['2048x1024', '2048×1024 · 2.1M']]
+};
+Render3D.DEFAULT_DETAIL = { ico: 'k8', grid: '1024x512' };
+// The parsed detail carries its canonical token, so the select, the URL and the header
+// always print the same spelling the table holds. The icosphere also takes the bare '7'
+// the URL has always accepted.
+Render3D.parseDetail = function (mode, token) {
+	var want = String(token), list, i;
+	if (mode === 'grid') {
+		list = Render3D.DETAILS.grid;
+		for (i = 0; i < list.length; i++) {
+			if (list[i][0] === want) {
+				var m = /^(\d+)x(\d+)$/.exec(want);
+				return { token: want, cols: +m[1], rows: +m[2] };
+			}
+		}
+		return null;
+	}
+	if (/^\d+$/.test(want)) want = 'k' + want;
+	list = Render3D.DETAILS.ico;
+	for (i = 0; i < list.length; i++) if (list[i][0] === want) return { token: want, k: +want.slice(1) };
+	return null;
+};
+Render3D.meshFor = function (mode, token) {
+	var m = mode === 'grid' ? 'grid' : 'ico';
+	var d = Render3D.parseDetail(m, token) || Render3D.parseDetail(m, Render3D.DEFAULT_DETAIL[m]);
+	return d.k !== undefined ? Render3D.mesh(d.k) : Render3D.gridMesh(d.cols, d.rows);
+};
+
 
 /* The gather: one thread per height texel, the 2D shader's sourceCell convention (lookup
    row 0 = south, no flip anywhere). The one engine difference - where z comes from - is
@@ -106,7 +144,17 @@ fn heightAt(uv: vec2<f32>) -> f32 {
 	return mix(mix(z00, z10, t.x), mix(z01, z11, t.x), t.y);
 }
 
-struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @location(2) wp: vec3<f32> };
+${Render3D.M_NORMAL}
+
+// The world position rides its own varying: a fragment stage's @builtin(position) is
+// framebuffer coordinates, not the clip position, and the derivative normals need the
+// true interpolated surface point. The normal is a varying too - the derivative source
+// fills it with the radial dir (unused), the analytic one with the height-field normal.
+// The uv must never be a varying: a triangle across the texture cut interpolates u from
+// ~1 to ~0 through the middle of the map, which painted a pole-to-pole strip of
+// wrong-hemisphere texture (the seam bug). Fragments rebuild uv from the interpolated
+// direction instead - exact at every fragment.
+struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @location(1) nrm: vec3<f32>, @location(2) wp: vec3<f32> };
 
 @vertex fn vsLand(@location(0) dirIn: vec3<f32>) -> VOut {
 	let dir = dirIn;
@@ -115,10 +163,13 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @l
 	var o: VOut;
 	o.pos = u.vp * vec4<f32>(dir * r, 1.0);
 	o.dir = dir;
+	o.nrm = vertexNormal(dir, uv);
 	o.wp = dir * r;
 	return o;
 }
 
+// The sea shell sits at the constant display level, so its normal is the radial dir in
+// both normal modes - a flat sea, shaded only by the limb and the glint.
 @vertex fn vsWater(@location(0) dirIn: vec3<f32>) -> VOut {
 	let dir = dirIn;
 	let uv = uvOf(dir);
@@ -126,6 +177,7 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @l
 	var o: VOut;
 	o.pos = u.vp * vec4<f32>(dir * r, 1.0);
 	o.dir = dir;
+	o.nrm = dir;
 	o.wp = dir * r;
 	return o;
 }
@@ -137,20 +189,9 @@ struct VOut { @builtin(position) pos: vec4<f32>, @location(0) dir: vec3<f32>, @l
 	var o: VOut;
 	o.pos = u.vp * vec4<f32>(dir * r, 1.0);
 	o.dir = dir;
+	o.nrm = dir;
 	o.wp = dir * r;
 	return o;
-}
-
-// The world position rides its own varying: a fragment stage's @builtin(position) is
-// framebuffer coordinates, not the clip position, and the derivative normals need the
-// true interpolated surface point. The uv must never be a varying: a triangle across
-// the texture cut interpolates u from ~1 to ~0 through the middle of the map, which
-// painted a pole-to-pole strip of wrong-hemisphere texture (the seam bug). Fragments
-// rebuild uv from the interpolated direction instead - exact at every fragment.
-fn surfaceNormal(wp: vec3<f32>) -> vec3<f32> {
-	var n = normalize(cross(dpdx(wp), dpdy(wp)));
-	if (dot(n, u.eye.xyz - wp) < 0.0) { n = -n; }
-	return n;
 }
 
 // The 2D relief ramp (render.js / render-gpu.js), sea-relative, verbatim.
@@ -166,7 +207,7 @@ fn rampColor(z: f32) -> vec3<f32> {
 struct FOut { @location(0) color: vec4<f32> };
 
 @fragment fn fsLand(in: VOut) -> FOut {
-	let n = surfaceNormal(in.wp);
+	let n = surfaceNormal(in.wp, in.nrm);
 	let col = rampColor(heightAt(uvOf(normalize(in.dir))));
 	let lam = 0.25 + 0.75 * max(0.0, dot(n, LIGHT));
 	let limb = 0.75 + 0.25 * dot(n, normalize(u.eye.xyz - in.wp));
@@ -176,7 +217,7 @@ struct FOut { @location(0) color: vec4<f32> };
 }
 
 @fragment fn fsWater(in: VOut) -> FOut {
-	let n = surfaceNormal(in.wp);
+	let n = surfaceNormal(in.wp, in.nrm);
 	let s = max(0.0, 1.0 - (u.knob.y - heightAt(uvOf(normalize(in.dir)))) / u.knob.z);
 	let col = vec3<f32>(15.0 + 23.0 * s, 40.0 + 95.0 * s, 69.0 + 100.0 * s) / 255.0;
 	let v = normalize(u.eye.xyz - in.wp);
@@ -190,7 +231,7 @@ struct FOut { @location(0) color: vec4<f32> };
 }
 
 @fragment fn fsRim(in: VOut) -> FOut {
-	let n = surfaceNormal(in.wp);
+	let n = surfaceNormal(in.wp, in.nrm);
 	let facing = max(0.0, dot(n, normalize(u.eye.xyz - in.wp)));
 	let d = 1.0 - facing;
 	var o: FOut;
@@ -198,6 +239,47 @@ struct FOut { @location(0) color: vec4<f32> };
 	return o;
 }
 `;
+
+/* The two normal sources, injected at M_NORMAL. Both expose the same two functions, so
+   the vertex and fragment bodies never vary: vertexNormal is the land pass's source, and
+   surfaceNormal is what the three fragment stages light with. */
+Render3D.NORM_DERIV = `// Screen-space derivative normals (the default): flat per triangle, one varying saved.
+fn vertexNormal(dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> { return dir; }
+
+fn surfaceNormal(wp: vec3<f32>, nrm: vec3<f32>) -> vec3<f32> {
+	var n = normalize(cross(dpdx(wp), dpdy(wp)));
+	if (dot(n, u.eye.xyz - wp) < 0.0) { n = -n; }
+	return n;
+}`;
+Render3D.NORM_ANALYTIC = `// Per-vertex normals from the height field's own central differences (0.5.5): one texel
+// either way, scaled to true arc length, as a height-field gradient in the local
+// east/north/up frame. The cos(lat) floor keeps a pole vertex finite; the sea shell and
+// the rim pass their radial dir instead, exactly what the derivative normals give them.
+fn vertexNormal(dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+	let p = vec2<f32>(uv.x * f32(W), uv.y * f32(H)) - vec2<f32>(0.5);
+	let x = i32(floor(p.x));
+	let y = clamp(i32(floor(p.y)), 0, i32(H) - 1);
+	let xm = select(x - 1, i32(W) - 1, x <= 0);
+	let xp = select(x + 1, 0, x + 1 >= i32(W));
+	let ym = max(y - 1, 0);
+	let yp = min(y + 1, i32(H) - 1);
+	let hL = textureLoad(HEIGHT, vec2<i32>(xm, y), 0).x;
+	let hR = textureLoad(HEIGHT, vec2<i32>(xp, y), 0).x;
+	let hD = textureLoad(HEIGHT, vec2<i32>(x, ym), 0).x;
+	let hU = textureLoad(HEIGHT, vec2<i32>(x, yp), 0).x;
+	let de = 6.28318530718 / f32(W) * max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.001);
+	let dn = 3.14159265359 / f32(H);
+	let g = u.knob.x * R_INV;
+	let east = normalize(vec3<f32>(-dir.z, 0.0, dir.x));
+	let local = normalize(vec3<f32>((hL - hR) * g / (2.0 * de), (hD - hU) * g / (2.0 * dn), 1.0));
+	return normalize(east * local.x + cross(east, dir) * local.y + dir * local.z);
+}
+
+fn surfaceNormal(wp: vec3<f32>, nrm: vec3<f32>) -> vec3<f32> {
+	var n = nrm;
+	if (dot(n, u.eye.xyz - wp) < 0.0) { n = -n; }
+	return n;
+}`;
 
 // The template's baked constants, the way render-gpu.js injects its layout ones.
 Render3D.gatherConsts = function (w, h, lw, lh) {
@@ -217,9 +299,10 @@ Render3D.gatherCode = function (zSource, w, h, lw, lh) {
 			(cellF ? Render3D.cellFBinding : Render3D.cellZBinding) + '\n' +
 			(cellF ? Render3D.cellFRead : Render3D.cellZRead));
 };
-Render3D.renderCode = function (w, h) {
-	return Render3D.RENDER.replace(Render3D.M_RENDER,
-		Render3D.renderConsts(w, h));
+Render3D.renderCode = function (w, h, norm) {
+	return Render3D.RENDER
+		.replace(Render3D.M_NORMAL, norm === 'analytic' ? Render3D.NORM_ANALYTIC : Render3D.NORM_DERIV)
+		.replace(Render3D.M_RENDER, Render3D.renderConsts(w, h));
 };
 
 /* Unit icosphere, k midpoint-subdivision rounds. Vertices 10*4^k + 2, faces 20*4^k; the
@@ -272,6 +355,38 @@ Render3D.mesh = function (k) {
 		faces = next;
 	}
 	idx.set(faces);
+	return { pos: pos, idx: idx, vCount: vCount };
+};
+
+/* Unit equirectangular lattice (0.5.5): (cols + 1) x rows vertices, q = cols x (rows - 1)
+   quads, two triangles each. The seam column is duplicated - i = 0 and i = cols hold the
+   same direction - so no triangle spans the +-180 cut and the texture wrap stays exact;
+   the pole rows are single vertices, which makes one triangle of every pole quad
+   zero-area by construction (2 * cols of them, discarded by the rasterizer rather than
+   special-cased). Positions are unit directions from (lat, lon) in the same frame as the
+   icosphere: uvOf, the displacement, the camera and the pick are mesh-independent, and
+   no WGSL changes with the mode. Faces wind CCW outward, like the icosphere's. */
+Render3D.gridMesh = function (cols, rows) {
+	var vCount = (cols + 1) * rows, nF = 2 * cols * (rows - 1);
+	var pos = new Float32Array(vCount * 3), idx = new Uint32Array(nF * 3);
+	var tau = 6.283185307179586, pi = 3.141592653589793;
+	var i, j, k;
+	for (j = 0; j < rows; j++) {
+		var lat = (j / (rows - 1) - 0.5) * pi, cl = Math.cos(lat), sl = Math.sin(lat);
+		for (i = 0; i <= cols; i++) {
+			var lon = (i / cols - 0.5) * tau;
+			k = (j * (cols + 1) + i) * 3;
+			pos[k] = cl * Math.cos(lon); pos[k + 1] = sl; pos[k + 2] = cl * Math.sin(lon);
+		}
+	}
+	var w = 0;
+	for (j = 0; j < rows - 1; j++) {
+		for (i = 0; i < cols; i++) {
+			var a = j * (cols + 1) + i, b = a + 1, d = a + cols + 1, c = d + 1;
+			idx[w++] = a; idx[w++] = c; idx[w++] = b;
+			idx[w++] = a; idx[w++] = d; idx[w++] = c;
+		}
+	}
 	return { pos: pos, idx: idx, vCount: vCount };
 };
 
@@ -344,12 +459,52 @@ Render3D.prototype.pick = function (out, px, py, w, h) {
 	return true;
 };
 
-Render3D.prototype.setDetail = function (k) {
-	this.k = k;
+// The shader module and the three draw pipelines: the only thing the normal source
+// changes. The layout, the bind group, the buffers and the textures all outlive it.
+Render3D.prototype.buildDraw = function () {
+	var device = this.device;
+	var shader = device.createShaderModule({
+		code: Render3D.renderCode(this.canvas.width, this.canvas.height, this.norm)
+	});
+	var vbLayout = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }];
+	var DS_ON = { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' };
+	var DS_TEST = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' };
+	var ALPHA = { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+		alpha: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' } };
+	var ADD = { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
+		alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } };
+	this.landPipe = device.createRenderPipeline({
+		layout: this.pipeLayout,
+		vertex: { module: shader, entryPoint: 'vsLand', buffers: vbLayout },
+		fragment: { module: shader, entryPoint: 'fsLand', targets: [{ format: this.format }] },
+		primitive: { cullMode: 'back' }, depthStencil: DS_ON
+	});
+	this.waterPipe = device.createRenderPipeline({
+		layout: this.pipeLayout,
+		vertex: { module: shader, entryPoint: 'vsWater', buffers: vbLayout },
+		fragment: { module: shader, entryPoint: 'fsWater', targets: [{ format: this.format, blend: ALPHA }] },
+		primitive: { cullMode: 'back' }, depthStencil: DS_TEST
+	});
+	this.rimPipe = device.createRenderPipeline({
+		layout: this.pipeLayout,
+		vertex: { module: shader, entryPoint: 'vsRim', buffers: vbLayout },
+		fragment: { module: shader, entryPoint: 'fsRim', targets: [{ format: this.format, blend: ADD }] },
+		primitive: { cullMode: 'back' }, depthStencil: DS_TEST
+	});
+};
+
+// Swap the mesh (mode and detail) on a live session: the two vertex buffers are the only
+// thing a mesh is, so this is a one-time destroy-and-refill, never a session teardown -
+// no device request, no texture, no pipeline. The 2048x1024 lattice is the fattest case.
+Render3D.prototype.setMesh = function (mode, detail) {
+	var m = mode === 'grid' ? 'grid' : 'ico';
+	var d = Render3D.parseDetail(m, detail) || Render3D.parseDetail(m, Render3D.DEFAULT_DETAIL[m]);
 	var device = this.device;
 	if (this.posBuf) this.posBuf.destroy();
 	if (this.idxBuf) this.idxBuf.destroy();
-	this.mesh = Render3D.mesh(k);
+	this.meshMode = m;
+	this.detail = d.token;
+	this.mesh = Render3D.meshFor(m, d.token);
 	this.vCount = this.mesh.vCount; this.iCount = this.mesh.idx.length;
 	this.posBuf = device.createBuffer({ size: this.mesh.pos.byteLength, usage: 0x20 | 0x8 });
 	this.idxBuf = device.createBuffer({ size: this.mesh.idx.byteLength, usage: 0x10 | 0x8 });
@@ -357,21 +512,22 @@ Render3D.prototype.setDetail = function (k) {
 	device.queue.writeBuffer(this.idxBuf, 0, this.mesh.idx);
 };
 
+// The three draw pipelines are the whole normals difference (the shader source); the
+// layout, the bind group, the buffers and the textures outlive it.
+Render3D.prototype.setNormals = function (norm) {
+	this.norm = norm === 'analytic' ? 'analytic' : 'deriv';
+	this.buildDraw();
+};
+
 Render3D.prototype.init = function (opts) {
 	var device = this.device = opts.device;
 	var canvas = this.canvas;
 	this.zSource = opts.zSource;
-	this.k = opts.k;
 	this.aspect = canvas.width / canvas.height;
 	this.context = canvas.getContext('webgpu');
 	this.format = 'rgba8unorm';
 	this.context.configure({ device: device, format: this.format, alphaMode: 'opaque' });
-	this.mesh = Render3D.mesh(this.k);
-	this.vCount = this.mesh.vCount; this.iCount = this.mesh.idx.length;
-	this.posBuf = device.createBuffer({ size: this.mesh.pos.byteLength, usage: 0x20 | 0x8 });
-	this.idxBuf = device.createBuffer({ size: this.mesh.idx.byteLength, usage: 0x10 | 0x8 });
-	device.queue.writeBuffer(this.posBuf, 0, this.mesh.pos);
-	device.queue.writeBuffer(this.idxBuf, 0, this.mesh.idx);
+	this.setMesh(opts.mesh || 'ico', opts.detail || Render3D.DEFAULT_DETAIL.ico);
 	this.height = device.createTexture({
 		size: [Render3D.TW, Render3D.TH], format: 'r32float', usage: 0x8 | 0x4
 	});
@@ -406,37 +562,12 @@ Render3D.prototype.init = function (opts) {
 	} else {
 		this.cellF = opts.cellF;
 	}
-	var shader = device.createShaderModule({ code: Render3D.renderCode(canvas.width, canvas.height) });
 	this.drawLayout = device.createBindGroupLayout({ entries: [
 		{ binding: 0, visibility: 0x1 | 0x2, buffer: { type: 'uniform' } },
 		{ binding: 1, visibility: 0x1 | 0x2, texture: { sampleType: 'unfilterable-float' } }
 	] });
-	var pipeLayout = device.createPipelineLayout({ bindGroupLayouts: [this.drawLayout] });
-	var vbLayout = [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }];
-	var DS_ON = { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' };
-	var DS_TEST = { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less' };
-	var ALPHA = { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
-		alpha: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' } };
-	var ADD = { color: { srcFactor: 'one', dstFactor: 'one', operation: 'add' },
-		alpha: { srcFactor: 'one', dstFactor: 'one', operation: 'add' } };
-	this.landPipe = device.createRenderPipeline({
-		layout: pipeLayout,
-		vertex: { module: shader, entryPoint: 'vsLand', buffers: vbLayout },
-		fragment: { module: shader, entryPoint: 'fsLand', targets: [{ format: this.format }] },
-		primitive: { cullMode: 'back' }, depthStencil: DS_ON
-	});
-	this.waterPipe = device.createRenderPipeline({
-		layout: pipeLayout,
-		vertex: { module: shader, entryPoint: 'vsWater', buffers: vbLayout },
-		fragment: { module: shader, entryPoint: 'fsWater', targets: [{ format: this.format, blend: ALPHA }] },
-		primitive: { cullMode: 'back' }, depthStencil: DS_TEST
-	});
-	this.rimPipe = device.createRenderPipeline({
-		layout: pipeLayout,
-		vertex: { module: shader, entryPoint: 'vsRim', buffers: vbLayout },
-		fragment: { module: shader, entryPoint: 'fsRim', targets: [{ format: this.format, blend: ADD }] },
-		primitive: { cullMode: 'back' }, depthStencil: DS_TEST
-	});
+	this.pipeLayout = device.createPipelineLayout({ bindGroupLayouts: [this.drawLayout] });
+	this.setNormals(opts.norm || 'deriv');
 	this.group = device.createBindGroup({ layout: this.drawLayout, entries: [
 		{ binding: 0, resource: { buffer: this.uniform } },
 		{ binding: 1, resource: this.heightView }
@@ -646,7 +777,7 @@ Render3D.prototype.release = function () {
 	if (this.rimPipe && this.rimPipe.destroy) this.rimPipe.destroy();
 	if (this.blitPipe && this.blitPipe.destroy) this.blitPipe.destroy();
 	if (this.tsQ && this.tsQ.destroy) { this.tsQ.destroy(); this.tsOn = false; }
-	this.staging = null;
+	if (this.staging) { this.staging.destroy(); this.staging = null; }
 	this.zScratch = null;
 };
 

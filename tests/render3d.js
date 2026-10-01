@@ -3,18 +3,24 @@
    this pins is the part a real device would reject or that regressed silently before:
      1. the icosphere: counts 10*4^k+2 / 20*4^k, unit positions, CCW-outward winding,
         indices in range, midpoint dedup (a vertex is built exactly once), k = 6 fast;
-     2. the camera: known world points land on known clip coordinates, and the orbit
+     2. the equirectangular lattice (0.5.5): counts (cols+1)*rows / 2*cols*(rows-1), unit
+        positions, CCW-outward winding, the duplicated seam column, and the pole quads'
+        degenerate triangles (2*cols) that no rasterizer will touch;
+     3. the camera: known world points land on known clip coordinates, and the orbit
         clamps pitch and distance without flipping the handedness;
-     3. the frame contract: one encoder = gather -> land -> water -> rim, all into the
+     4. the frame contract: one encoder = gather -> land -> water -> rim, all into the
         3D target; present() is its own encoder on the canvas (the black-frame rule);
-     4. the draw uniform's knob words follow Params per draw (sea, relief ramp) and the
+     5. the draw uniform's knob words follow Params per draw (sea, relief ramp) and the
         page's exag, like the 2D renderer's per-draw Params reads;
-     5. the CPU z pack: NaN gaps -> the marker, and the scratch is the same object across
+     6. the CPU z pack: NaN gaps -> the marker, and the scratch is the same object across
         frames - no per-frame allocation;
-     6. release and detail change destroy what they replace (the 0.3.4 leak lesson), a
-        borrowed LOOK/cellF is never destroyed, and a z-source re-init rebinds the gather;
-     7. the draft's hard requirement: a 1000-frame loop creates no device object at all -
+     7. release, a mesh swap and a normals swap destroy what they replace and nothing
+        else (the 0.3.4 leak lesson), a borrowed LOOK/cellF is never destroyed, and a
+        z-source re-init rebinds the gather;
+     8. the draft's hard requirement: a 1000-frame loop creates no device object at all -
         the mesh, the height texture, the target and the scratch are init-time only.
+   The two normal sources and the two mesh modes are pinned as source variants here
+   (tests/wgsl-struct.js) - what a real device does with them is the smoke's job.
    Run: node --expose-gc tests/render3d.js */
 'use strict';
 const { assert, Grid, State } = require('./helpers.js');
@@ -34,21 +40,21 @@ function canvasOf(w, h) {
 }
 function targetOf(view) { return view && view.of && view.of !== 'canvas' ? 'v3d' : 'canvas'; }
 
-// --- 1. the mesh --------------------------------------------------------------------------
-for (let k = 1; k <= 4; k++) {
-	const m = Render3D.mesh(k);
-	assert.equal(m.vCount, 10 * Math.pow(4, k) + 2, 'k' + k + ' vertex count (10*4^k+2)');
-	assert.equal(m.idx.length / 3, 20 * Math.pow(4, k), 'k' + k + ' triangle count (20*4^k)');
-	assert.equal(m.pos.length, m.vCount * 3, 'k' + k + ' positions are packed');
+// --- 1. the meshes ------------------------------------------------------------------------
+// One geometry check for both builders: counts, packed unit positions, indices in range,
+// CCW-outward winding (the back-face cull needs it) and the degenerate-face count, which is
+// exact for either - 0 for the icosphere, 2 * cols for the lattice's pole rows.
+function checkGeometry(m, name, degenerateWanted) {
+	assert.equal(m.pos.length, m.vCount * 3, name + ' positions are packed');
 	let maxUnitErr = 0;
 	for (let i = 0; i < m.vCount; i++) {
 		const err = Math.abs(Math.hypot(m.pos[i * 3], m.pos[i * 3 + 1], m.pos[i * 3 + 2]) - 1);
 		if (err > maxUnitErr) maxUnitErr = err;
 	}
-	assert.ok(maxUnitErr < 1e-5, 'k' + k + ' positions unit to 1e-5 (max ' + maxUnitErr + ')');
+	assert.ok(maxUnitErr < 1e-5, name + ' positions unit to 1e-5 (max ' + maxUnitErr + ')');
 	let maxIdx = 0;
 	for (let i = 0; i < m.idx.length; i++) if (m.idx[i] > maxIdx) maxIdx = m.idx[i];
-	assert.ok(maxIdx < m.vCount, 'k' + k + ' indices in range');
+	assert.ok(maxIdx < m.vCount, name + ' indices in range');
 	let badWinding = 0, degenerate = 0;
 	for (let f = 0; f < m.idx.length; f += 3) {
 		const a = m.idx[f] * 3, b = m.idx[f + 1] * 3, c = m.idx[f + 2] * 3;
@@ -56,13 +62,21 @@ for (let k = 1; k <= 4; k++) {
 		const e2x = m.pos[c] - m.pos[a], e2y = m.pos[c + 1] - m.pos[a + 1], e2z = m.pos[c + 2] - m.pos[a + 2];
 		const cx = e1y * e2z - e1z * e2y, cy = e1z * e2x - e1x * e2z, cz = e1x * e2y - e1y * e2x;
 		const area = Math.hypot(cx, cy, cz);
-		if (area < 1e-12) degenerate++;
+		// A zero-area triangle is discarded before it can be wound either way; the pole
+		// quads' halves are the only ones, and their cross product is all rounding noise.
+		if (area < 1e-12) { degenerate++; continue; }
 		// CCW seen from outside: the normal agrees with the face centroid's direction.
 		if (cx * (m.pos[a] + m.pos[b] + m.pos[c]) + cy * (m.pos[a + 1] + m.pos[b + 1] + m.pos[c + 1])
 			+ cz * (m.pos[a + 2] + m.pos[b + 2] + m.pos[c + 2]) <= 0) badWinding++;
 	}
-	assert.equal(degenerate, 0, 'k' + k + ' has no degenerate face');
-	assert.equal(badWinding, 0, 'k' + k + ' faces wind CCW outward (the back-face cull needs it)');
+	assert.equal(degenerate, degenerateWanted, name + ' degenerate faces');
+	assert.equal(badWinding, 0, name + ' faces wind CCW outward (the back-face cull needs it)');
+}
+for (let k = 1; k <= 4; k++) {
+	const m = Render3D.mesh(k);
+	assert.equal(m.vCount, 10 * Math.pow(4, k) + 2, 'k' + k + ' vertex count (10*4^k+2)');
+	assert.equal(m.idx.length / 3, 20 * Math.pow(4, k), 'k' + k + ' triangle count (20*4^k)');
+	checkGeometry(m, 'k' + k, 0);
 }
 {
 	// Midpoint dedup: the builder's own counter is exact, and no two positions coincide.
@@ -73,6 +87,46 @@ for (let k = 1; k <= 4; k++) {
 	const t0 = Date.now();
 	Render3D.mesh(6);
 	assert.ok(Date.now() - t0 < 2000, 'k6 builds in under 2 s (took ' + (Date.now() - t0) + ' ms)');
+}
+// The lattice (0.5.5): the same geometry claims plus the two structural ones - the seam
+// column holds the same direction twice (u = 0 and u = 1) and the pole rows are single
+// vertices. Directions are equal to ~1e-16, not bitwise: cos/sin at -pi and +pi differ in
+// their last ulp, and heightAt() mixes the same two texels for both, so the seam is exact
+// where it matters.
+for (const [cols, rows] of [[6, 4], [8, 5]]) {
+	const m = Render3D.gridMesh(cols, rows);
+	const name = 'lattice ' + cols + 'x' + rows;
+	assert.equal(m.vCount, (cols + 1) * rows, name + ' vertex count ((cols+1)*rows)');
+	assert.equal(m.idx.length / 3, 2 * cols * (rows - 1), name + ' triangle count (2*cols*(rows-1))');
+	checkGeometry(m, name, 2 * cols);
+	let maxSeam = 0, poleErr = 0;
+	for (let j = 0; j < rows; j++) {
+		const a = (j * (cols + 1)) * 3, b = (j * (cols + 1) + cols) * 3;
+		for (let c = 0; c < 3; c++) maxSeam = Math.max(maxSeam, Math.abs(m.pos[a + c] - m.pos[b + c]));
+	}
+	for (let i = 0; i <= cols; i++) {
+		// Row 0 is the south pole and the last row the north: (0, -1, 0) and (0, 1, 0).
+		const s = i * 3, n = ((rows - 1) * (cols + 1) + i) * 3;
+		poleErr = Math.max(poleErr, Math.abs(m.pos[s]), Math.abs(m.pos[s + 1] + 1), Math.abs(m.pos[s + 2]),
+			Math.abs(m.pos[n]), Math.abs(m.pos[n + 1] - 1), Math.abs(m.pos[n + 2]));
+	}
+	assert.ok(maxSeam < 1e-12, name + ' seam column duplicates the direction (max ' + maxSeam + ')');
+	assert.ok(poleErr < 1e-12, name + ' pole rows are the two poles, one vertex each (max ' + poleErr + ')');
+	const t0 = Date.now();
+	Render3D.gridMesh(512, 256);
+	assert.ok(Date.now() - t0 < 3000, name + ' 512x256 builds in under 3 s (took ' + (Date.now() - t0) + ' ms)');
+}
+{
+	// The detail vocabulary the page, the URL and the session share.
+	assert.equal(Render3D.DEFAULT_DETAIL.ico, 'k8');
+	assert.equal(Render3D.DEFAULT_DETAIL.grid, '1024x512');
+	assert.deepEqual(Render3D.parseDetail('ico', 'k7'), { token: 'k7', k: 7 });
+	assert.deepEqual(Render3D.parseDetail('ico', '7'), { token: 'k7', k: 7 }, 'the bare ?k3d=7 still parses');
+	assert.deepEqual(Render3D.parseDetail('grid', '1024x512'), { token: '1024x512', cols: 1024, rows: 512 });
+	assert.equal(Render3D.parseDetail('ico', '5'), null, 'an unoffered k is refused, not clamped');
+	assert.equal(Render3D.parseDetail('grid', '8'), null, 'an icosphere k under the lattice mesh is refused');
+	assert.equal(Render3D.meshFor('grid', '8').vCount, 524800, 'meshFor falls back to the mode default');
+	assert.equal(Render3D.meshFor('ico', 'k6').vCount, 40962, 'and builds the icosphere by token');
 }
 
 // --- 2. the camera ------------------------------------------------------------------------
@@ -113,10 +167,10 @@ const look = grid.lookup;
 const lookBuf = gpuStub.createBuffer({ size: look.length * 4, usage: 0x80 | 0x4 | 0x8 });
 const cellF = gpuStub.createBuffer({ size: Math.max(16, grid.V * 32 * 4), usage: 0x80 | 0x4 | 0x8 });
 const r3 = new Render3D(canvasOf(512, 256)).init({
-	device: gpuStub, k: 4, look: lookBuf, V: grid.V, zSource: 'cellF', cellF: cellF, lw: grid.lookupW, lh: grid.lookupH
+	device: gpuStub, mesh: 'ico', detail: 'k6', look: lookBuf, V: grid.V, zSource: 'cellF', cellF: cellF, lw: grid.lookupW, lh: grid.lookupH
 });
 assert.equal(r3.tsOn, false, 'the stub offers no timestamp-query: the 3D line stays silent');
-assert.equal(r3.vCount, 10 * Math.pow(4, 4) + 2, 'the session built the k4 mesh');
+assert.equal(r3.vCount, 10 * Math.pow(4, 6) + 2, 'the session built the k6 mesh');
 
 let r3PassBase = 0;
 // The gather rebinds to the z source it was inited with (cellF here, cellZ below). The
@@ -162,7 +216,7 @@ const zSrc = new State(new Grid(3, 7).build(), 7);
 zSrc.z.fill(123.5);
 zSrc.z[5] = NaN;
 const r3c = new Render3D(canvasOf(512, 256)).init({
-	device: makeDevice(), k: 3, look: zSrc.grid.lookup, V: zSrc.grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
+	device: makeDevice(), mesh: 'ico', detail: 'k6', look: zSrc.grid.lookup, V: zSrc.grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
 });
 const scratch = r3c.zScratch;
 r3c.redraw(zSrc);
@@ -174,8 +228,10 @@ assert.equal(scratch[7], 123.5, 'a real elevation packs through');
 const written = new Float32Array(r3c.cellZ.bytes);
 assert.equal(written[5], -1e9, 'the upload carries the marker, not NaN');
 
-// Release destroys the session's own allocations and never the borrowed ones.
-const ownBufs = [r3c.posBuf, r3c.idxBuf, r3c.uniform, r3c.look, r3c.cellZ];
+// Release destroys the session's own allocations and never the borrowed ones - including
+// the readback staging buffer, which the smoke's rig allocates and release used to drop.
+r3c.initReadback();
+const ownBufs = [r3c.posBuf, r3c.idxBuf, r3c.uniform, r3c.look, r3c.cellZ, r3c.staging];
 r3c.release();
 for (const b of ownBufs) assert.ok(b.destroyed, 'release destroys the session buffers');
 assert.ok(r3c.height === null || r3c.height.destroyed, 'and the height texture');
@@ -185,7 +241,7 @@ assert.ok(!lookBuf.destroyed && !cellF.destroyed, 'a borrowed LOOK/cellF is not 
 
 // A detail change replaces the mesh buffers, nothing else.
 const r3d = new Render3D(canvasOf(512, 256)).init({
-	device: makeDevice(), k: 3, look: look, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
+	device: makeDevice(), mesh: 'ico', detail: 'k6', look: look, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
 });
 // --- the inspector's ray pick ----------------------------------------------------------------
 // The pick must agree with what was drawn: the canvas centre looks at the sub-camera point,
@@ -223,12 +279,44 @@ const r3d = new Render3D(canvasOf(512, 256)).init({
 	assert.ok(cell >= 0 && cell < grid.V, 'the picked direction lands on a real cell (' + cell + ')');
 }
 
+// A mesh swap (mode or detail) and a normals swap replace exactly their own objects - the
+// two vertex buffers, the three pipelines - and nothing else: that identity is what makes
+// a live mode change one-time buffer work instead of a session rebuild (0.5.5).
 const oldPos = r3d.posBuf, oldIdx = r3d.idxBuf, height = r3d.height, uniform = r3d.uniform;
-r3d.setDetail(4);
+r3d.setMesh('ico', 'k7');
 assert.ok(oldPos.destroyed && oldIdx.destroyed, 'a detail change destroys the old mesh buffers');
 assert.equal(r3d.height, height, 'the height texture survives it');
 assert.equal(r3d.uniform, uniform, 'the uniform survives it');
-assert.equal(r3d.vCount, 10 * Math.pow(4, 4) + 2, 'the new mesh is the k4 one');
+assert.equal(r3d.vCount, 10 * Math.pow(4, 7) + 2, 'the new mesh is the k7 one');
+{
+	const icoPos = r3d.posBuf, icoIdx = r3d.idxBuf, group = r3d.group;
+	const cellZ = r3d.cellZ, depth = r3d.depth, look = r3d.look;
+	r3d.setMesh('grid', '512x256');
+	assert.ok(icoPos.destroyed && icoIdx.destroyed, 'a mode change destroys the icosphere buffers');
+	assert.equal(r3d.meshMode, 'grid');
+	assert.equal(r3d.detail, '512x256', 'and the session carries the lattice detail');
+	assert.equal(r3d.vCount, 513 * 256, 'the 512x256 lattice is installed');
+	assert.equal(r3d.iCount, 2 * 512 * 255 * 3, 'with its own index count');
+	assert.equal(r3d.cellZ, cellZ, 'the z upload buffer is not the mesh and survives');
+	assert.equal(r3d.group, group, 'nor is the bind group');
+	assert.equal(r3d.depth, depth, 'nor the depth texture');
+	assert.equal(r3d.look, look, 'nor the borrowed lookup');
+	r3d.setMesh('ico', 'k6');
+	assert.equal(r3d.meshMode, 'ico', 'and back to the icosphere');
+	assert.equal(r3d.detail, 'k6');
+	r3d.setMesh('grid', 'k6');   // an icosphere token under the lattice mesh
+	assert.equal(r3d.detail, '1024x512', 'an unoffered lattice detail lands on the mode default');
+	const landBefore = r3d.landPipe, waterBefore = r3d.waterPipe, rimBefore = r3d.rimPipe;
+	const pos0 = r3d.posBuf, group0 = r3d.group;
+	r3d.setNormals('analytic');
+	assert.equal(r3d.norm, 'analytic');
+	assert.ok(r3d.landPipe !== landBefore && r3d.waterPipe !== waterBefore && r3d.rimPipe !== rimBefore,
+		'the normals swap rebuilds the three draw pipelines');
+	assert.equal(r3d.posBuf, pos0, 'and touches no buffer');
+	assert.equal(r3d.group, group0, 'and no bind group');
+	r3d.setNormals('nonsense');
+	assert.equal(r3d.norm, 'deriv', 'an unknown normal source falls back to the derivative one');
+}
 
 // --- the draft's hard requirement: a height update never rebuilds the planet --------------
 // A play frame may create no device object at all - the mesh buffers, the height texture,

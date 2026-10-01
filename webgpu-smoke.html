@@ -420,8 +420,8 @@ function captureLine(adapter, fallback) {
 	};
 	try {
 		var m3d = document.getElementById('map3d');
-		var r3 = new Render3D(m3d).init({ device: device, k: 6, look: cpu.grid.lookup, V: V,
-			zSource: 'cellF', cellF: S.buf.cellF, lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
+		var r3 = new Render3D(m3d).init({ device: device, mesh: 'ico', detail: 'k6', norm: 'deriv',
+			look: cpu.grid.lookup, V: V, zSource: 'cellF', cellF: S.buf.cellF, lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
 		r3.initReadback();
 		var sea0 = Params.sea;
 		Params.sea = 0;
@@ -455,7 +455,7 @@ function captureLine(adapter, fallback) {
 		note('3d', r3.tsLine() || 'no 3d timing (timestamp-query off)');
 		r3.release();
 		// The CPU-engine mode: same device, but z packed from the CPU state per frame.
-		var r3z = new Render3D(m3d).init({ device: device, k: 6, look: cpu.grid.lookup, V: V,
+		var r3z = new Render3D(m3d).init({ device: device, mesh: 'ico', detail: 'k6', look: cpu.grid.lookup, V: V,
 			zSource: 'cellZ', lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
 		r3z.initReadback();
 		r3z.redraw(cpu);
@@ -466,6 +466,31 @@ function captureLine(adapter, fallback) {
 		}
 		note('3d', 'cellZ upload path drew the CPU state');
 		r3z.release();
+		// 0.5.5: the equirectangular lattice and the analytic normal source. The mesh swap
+		// must not move the camera's picture (centre drawn, silhouette bounded) and the
+		// analytic normals must still light the planet; both swaps are live on one session,
+		// no re-init - the buffers and the pipelines are the only things that change.
+		var r3m = new Render3D(m3d).init({ device: device, mesh: 'grid', detail: '512x256', norm: 'analytic',
+			look: cpu.grid.lookup, V: V, zSource: 'cellZ', lw: cpu.grid.lookupW, lh: cpu.grid.lookupH });
+		r3m.initReadback();
+		r3m.redraw(cpu);
+		await device.queue.onSubmittedWorkDone();
+		var p3e = await r3m.readPixels();
+		var boxMesh = nonBackgroundBox(p3e, 512, 256, r3m.readRow);
+		var drawn = Math.abs(p3e[cx] - 20) + Math.abs(p3e[cx + 1] - 26) + Math.abs(p3e[cx + 2] - 39) > 8;
+		note('3d', 'lattice 512x256 + analytic normals: ' + r3m.vCount + ' vertices, silhouette ' + boxMesh + ' px');
+		if (!drawn) fail('3d: the lattice mesh with analytic normals drew nothing at the centre');
+		if (boxMesh <= 0) fail('3d: the lattice silhouette is empty');
+		r3m.setMesh('ico', 'k6');
+		r3m.setNormals('deriv');
+		r3m.redraw(cpu);
+		await device.queue.onSubmittedWorkDone();
+		var p3f = await r3m.readPixels();
+		if (!(Math.abs(p3f[cx] - 20) + Math.abs(p3f[cx + 1] - 26) + Math.abs(p3f[cx + 2] - 39) > 8)) {
+			fail('3d: the live swap back to the icosphere drew nothing');
+		}
+		note('3d', 'live swap back to the icosphere k6 + derivative normals on the same session');
+		r3m.release();
 	} catch (e) {
 		fail('3d phase threw: ' + ((e && e.stack) || e));
 	}

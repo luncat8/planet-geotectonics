@@ -76,12 +76,14 @@ assert.ok(rendererSrc.includes('max(0.0, 1.0 + z / u.zRange)'), 'the deep-water 
 assert.ok(rendererSrc.includes('min(1.0, z / u.zRange)'), 'and so does the land cap');
 assert.ok(!/\b6500\b/.test(rendererSrc), 'no baked ramp is left in the renderer');
 sources.push({ name: 'rendererBlit', src: Renderer.BLIT });
-// The 3D view (0.5.0): the gather in both z-source variants (the one engine difference)
-// and the draw module, built through the same code the renderer init runs.
+// The 3D view (0.5.0/0.5.5): the gather in both z-source variants (the one engine
+// difference) and the draw module in both normal-source variants (0.5.5), built through
+// the same code the renderer init runs.
 const Render3D = require('../js/render3d.js');
 sources.push({ name: 'render3dGatherCellF', src: Render3D.gatherCode('cellF', Render3D.TW, Render3D.TH, 1024, 512) });
 sources.push({ name: 'render3dGatherCellZ', src: Render3D.gatherCode('cellZ', Render3D.TW, Render3D.TH, 1024, 512) });
-sources.push({ name: 'render3d', src: Render3D.renderCode(2048, 1024) });
+sources.push({ name: 'render3dDeriv', src: Render3D.renderCode(2048, 1024, 'deriv') });
+sources.push({ name: 'render3dAnalytic', src: Render3D.renderCode(2048, 1024, 'analytic') });
 
 for (const { name, src } of sources) {
 	// Strip comments so words/braces inside them count neither as definitions nor references.
@@ -193,7 +195,7 @@ for (const g of [gatherF, gatherZ]) {
 		'a NaN gap lands on the marker, not a hole');
 	assert.ok(g.includes('@workgroup_size(8, 8)'), 'one thread per texel, 8x8 groups');
 }
-const r3dSrc = sources.find((s) => s.name === 'render3d').src;
+const r3dSrc = sources.find((s) => s.name === 'render3dDeriv').src;
 assert.ok(r3dSrc.includes('const R_INV'), 'the radius inverse is baked from Params');
 assert.ok(r3dSrc.includes('const Z_FLOOR') && r3dSrc.includes('max(heightAt(uv), Z_FLOOR)'),
 	'the displacement floor clamps below at the gap-pit bound');
@@ -208,5 +210,26 @@ assert.ok(r3dSrc.includes('15.0 + 23.0 * s') && r3dSrc.includes('100.0 + 145.0 *
 	'the 3D ramp is the 2D relief ramp, sea-relative, verbatim');
 assert.ok(!/textureSample\b/.test(r3dSrc),
 	'r32float is unfilterable: every height read is a textureLoad tap, no sampler in the group');
+// The two normal sources (0.5.5): the same varying and the same three call sites, so the
+// only difference is the injected block - and neither may carry a half-injected marker.
+const r3dAnalytic = sources.find((s) => s.name === 'render3dAnalytic').src;
+for (const [name, src] of [['deriv', r3dSrc], ['analytic', r3dAnalytic]]) {
+	assert.ok(!src.includes(Render3D.M_NORMAL) && !src.includes(Render3D.M_RENDER)
+		&& !src.includes(Render3D.M_Z) && !src.includes(Render3D.M_GATHER),
+		name + ': every injection marker is replaced');
+	assert.ok(src.includes('o.nrm = vertexNormal(dir, uv);'), name + ': the land pass fills the normal varying');
+	assert.ok(src.includes('o.nrm = dir;'), name + ': the sea shell and the rim stay radial');
+	assert.equal((src.match(/surfaceNormal\(in\.wp, in\.nrm\)/g) || []).length, 3,
+		name + ': all three fragments light with the varying');
+}
+assert.ok(r3dSrc.includes('dpdx(wp)') && r3dSrc.includes('dpdy(wp)') && !r3dSrc.includes('textureLoad(HEIGHT, vec2<i32>(xm'),
+	'the derivative source is the screen-space one, with no height taps in a normal');
+assert.ok(!r3dAnalytic.includes('dpdx') && !r3dAnalytic.includes('dpdy'),
+	'the analytic source never differentiates the surface per fragment');
+assert.ok(r3dAnalytic.includes('textureLoad(HEIGHT, vec2<i32>(xm, y), 0).x') && r3dAnalytic.includes('(hL - hR)')
+	&& r3dAnalytic.includes('6.28318530718 / f32(W)') && r3dAnalytic.includes('3.14159265359 / f32(H)'),
+	'the analytic normal differences one texel either way, scaled by the true arc lengths');
+assert.ok(r3dAnalytic.includes('max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.001)'),
+	'with a cos(lat) floor, so a pole vertex stays finite');
 
 console.log('PASS wgsl-struct: ' + checks + ' kernel sources balanced, entry-pointed, constants defined');

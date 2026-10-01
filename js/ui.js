@@ -37,6 +37,7 @@
 	var seaValue = document.getElementById('sea-value'), seaVolValue = document.getElementById('sea-vol-value');
 	var v3dInput = document.getElementById('v3d'), map3d = document.getElementById('map3d');
 	var dispInput = document.getElementById('disp'), k3dInput = document.getElementById('k3d');
+	var mesh3dInput = document.getElementById('mesh3d'), norm3dInput = document.getElementById('norm3d');
 	var dispValue = document.getElementById('disp-value');
 	// Sea controls (0.3.5): two sliders, one active - the last one touched takes the level
 	// and greys the other. The level slider writes Params.sea directly (a recolour on both
@@ -215,27 +216,57 @@
 	}
 
 	// --- 3D view (0.5.0) -------------------------------------------------------------------
-	// A WebGPU render of the same world the map shows: an icosphere displaced by the
-	// segment-final heights, a sea shell at Params.sea, one light. The session borrows
-	// the GPU engine's device (the gather binds cellF) or boots a render-only one and
-	// takes state.z per frame (cellZ upload); either way the sim is untouched. Orbit and
-	// zoom are uniform writes, so unlike the 2D view they never defer a sim step.
+	// A WebGPU render of the same world the map shows: a mesh (the icosphere, or the
+	// 0.5.5 equirectangular lattice) displaced by the segment-final heights, a sea shell
+	// at Params.sea, one light, normals from screen-space derivatives or from the height
+	// field (0.5.5). The session borrows the GPU engine's device (the gather binds cellF)
+	// or boots a render-only one and takes state.z per frame (cellZ upload); either way
+	// the sim is untouched. Orbit and zoom are uniform writes, so unlike the 2D view they
+	// never defer a sim step.
 	var v3d = { on: false, busy: false, r3d: null }, v3dToken = 0;
-	var v3dDisp = 10, v3dK = 8, v3dYaw = 0.65, v3dPitch = 0.42, v3dDist = 3;
-	var V3D_KS = [6, 7, 8, 9];
+	var v3dDisp = 10, v3dMesh = 'ico', v3dDetail = Render3D.DEFAULT_DETAIL.ico;
+	var v3dNorm = 'deriv', v3dYaw = 0.65, v3dPitch = 0.42, v3dDist = 3;
 	function paintV3d() { dispValue.textContent = v3dDisp.toFixed(1) + '×'; }
+	// The detail select is mode-aware: its options are the module's table, rebuilt in
+	// place, so the page, the URL and the session cannot disagree about what a mode
+	// offers. `want` lands on the default when it is not one of them (a stray ?k3d=).
+	function paintDetail(want) {
+		var list = Render3D.DETAILS[v3dMesh], i, o;
+		while (k3dInput.firstChild) k3dInput.removeChild(k3dInput.firstChild);
+		for (i = 0; i < list.length; i++) {
+			o = document.createElement('option');
+			o.value = list[i][0]; o.textContent = list[i][1];
+			k3dInput.appendChild(o);
+		}
+		var d = Render3D.parseDetail(v3dMesh, want);
+		v3dDetail = d ? d.token : Render3D.DEFAULT_DETAIL[v3dMesh];
+		k3dInput.value = v3dDetail;
+	}
 	function applyDisp() {
 		v3dDisp = +dispInput.value;
 		if (v3d.r3d) v3d.r3d.exag = v3dDisp;
 		paintV3d();
 		if (v3d.on) dirty = true;
 	}
-	function applyK3d() {
-		var k = +k3dInput.value;
-		// An unoffered k (a stray ?k3d= or a cleared select) lands back on the default.
-		if (V3D_KS.indexOf(k) < 0) { k3dInput.value = '8'; k = 8; }
-		v3dK = k;
-		if (v3d.on) { releaseV3d(); setV3d(true); }   // a one-time mesh rebuild, not a world rebuild
+	// A detail change swaps the mesh buffers on the live session - one-time work, never a
+	// world rebuild and, unlike the 0.5.0 release-and-reboot, never a session teardown.
+	function applyDetail() {
+		var d = Render3D.parseDetail(v3dMesh, k3dInput.value);
+		v3dDetail = d ? d.token : Render3D.DEFAULT_DETAIL[v3dMesh];
+		k3dInput.value = v3dDetail;
+		if (v3d.r3d) v3d.r3d.setMesh(v3dMesh, v3dDetail);
+		if (v3d.on) dirty = true;
+	}
+	function applyMesh() {
+		v3dMesh = mesh3dInput.value === 'grid' ? 'grid' : 'ico';
+		paintDetail(Render3D.DEFAULT_DETAIL[v3dMesh]);
+		if (v3d.r3d) v3d.r3d.setMesh(v3dMesh, v3dDetail);
+		if (v3d.on) dirty = true;
+	}
+	function applyNorm() {
+		v3dNorm = norm3dInput.value === 'analytic' ? 'analytic' : 'deriv';
+		if (v3d.r3d) v3d.r3d.setNormals(v3dNorm);
+		if (v3d.on) dirty = true;
 	}
 	function releaseV3d() {
 		if (v3d.r3d) { v3d.r3d.release(); v3d.r3d = null; }
@@ -245,16 +276,23 @@
 		(gpu.on && gpu.ready ? gpuCanvas : canvas).hidden = false;
 		layerGroup.classList.remove('off');
 	}
+	// The session's init options, read when the device is finally in hand - a mesh or
+	// detail change made while the adapter promise was in flight lands on the session
+	// that boots, not on the one that was asked for.
+	function v3dOpts(device) {
+		var gpuMode = device !== null && gpu.on && gpu.ready;
+		var o = { device: device, mesh: v3dMesh, detail: v3dDetail, norm: v3dNorm, V: grid.V,
+			zSource: gpuMode ? 'cellF' : 'cellZ', lw: grid.lookupW, lh: grid.lookupH,
+			look: gpuMode ? GpuSim.S.buf.lookup : grid.lookup };
+		if (gpuMode) o.cellF = GpuSim.S.buf.cellF;
+		return o;
+	}
 	// The boot itself, minus the user-path gates: the engine (and its device) is final
 	// when this runs. `token` voids a boot that a toggle-off or a re-init overtook.
 	function bootV3dNow(done) {
 		var token = ++v3dToken;
 		v3d.busy = true;
 		var r3d = new Render3D(map3d);
-		var gpuMode = gpu.on && gpu.ready;
-		var opts = gpuMode
-			? { device: GpuSim.S.device, k: v3dK, look: GpuSim.S.buf.lookup, V: grid.V, zSource: 'cellF', cellF: GpuSim.S.buf.cellF, lw: grid.lookupW, lh: grid.lookupH }
-			: { device: null, k: v3dK, look: grid.lookup, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH };
 		var finish = function (error) {
 			if (token !== v3dToken) { if (!error && r3d.target) r3d.release(); return; }
 			v3d.busy = false;
@@ -267,23 +305,23 @@
 				v3d.r3d = r3d; v3d.on = true;
 				map3d.hidden = false; canvas.hidden = true; gpuCanvas.hidden = true;
 				layerGroup.classList.add('off');
-				probe.textContent = '3D on · k' + v3dK + ' · ' + r3d.vCount.toLocaleString() + ' vertices · drag orbits, wheel zooms.';
+				probe.textContent = '3D on · ' + (v3dMesh === 'grid' ? 'heightmap ' : 'icosphere ') + v3dDetail
+					+ ' · ' + r3d.vCount.toLocaleString() + ' vertices · drag orbits, wheel zooms.';
 			}
 			if (token === v3dToken) done(error);
 		};
-		if (opts.device) {
-			try { r3d.init(opts); } catch (error) { finish(error); return; }
+		if (gpu.on && gpu.ready) {
+			try { r3d.init(v3dOpts(GpuSim.S.device)); } catch (error) { finish(error); return; }
 			finish(null);
 			return;
 		}
 		// CPU engine: the render-only device the sim never needed. Default limits hold
-		// (the fattest mesh is 94 MB of buffers); no feature asks beyond the base set.
+		// (the fattest mesh is k9's 90 MB of buffers); no feature asks beyond the base set.
 		navigator.gpu.requestAdapter().then(function (adapter) {
 			if (!adapter) { finish(new Error('no WebGPU adapter')); return; }
 			adapter.requestDevice().then(function (device) {
 				if (token !== v3dToken) { finish(new Error('superseded')); return; }
-				opts.device = device;
-				try { r3d.init(opts); } catch (error) { finish(error); return; }
+				try { r3d.init(v3dOpts(device)); } catch (error) { finish(error); return; }
 				finish(null);
 			}, finish);
 		}, finish);
@@ -321,7 +359,9 @@
 	}
 	v3dInput.addEventListener('change', function () { setV3d(v3dInput.checked); });
 	dispInput.addEventListener('input', applyDisp);
-	k3dInput.addEventListener('change', applyK3d);
+	mesh3dInput.addEventListener('change', applyMesh);
+	k3dInput.addEventListener('change', applyDetail);
+	norm3dInput.addEventListener('change', applyNorm);
 
 	function syncAdjust() {
 		coolingInput.checked = state.cooling === 1;
@@ -448,11 +488,15 @@
 	prefilled('ero', eroInput);
 	prefilled('relief', reliefInput);
 	prefilled('disp', dispInput);
-	// The detail select takes only the k values it offers (an unoffered ?k3d= is ignored,
-	// as always) - the generic prefill would leave a refused select on its first option.
-	var k3dAsked = +query.get('k3d');
-	if (V3D_KS.indexOf(k3dAsked) >= 0) k3dInput.value = String(k3dAsked);
-	v3dDisp = +dispInput.value; v3dK = +k3dInput.value;
+	// The mesh and normals selects take only what the module offers; the detail select's
+	// options follow the mesh, and an unoffered ?k3d= (the wrong namespace, or a k the
+	// mesh does not have) lands on that mesh's default rather than on the first option.
+	if (query.get('mesh') === 'grid') v3dMesh = 'grid';
+	if (query.get('norm') === 'analytic') v3dNorm = 'analytic';
+	mesh3dInput.value = v3dMesh;
+	norm3dInput.value = v3dNorm;
+	paintDetail(query.get('k3d') === null ? Render3D.DEFAULT_DETAIL[v3dMesh] : query.get('k3d'));
+	v3dDisp = +dispInput.value;
 	if (query.get('v3d') === '1') v3dInput.checked = true;
 	paintV3d();
 	// ?seavol= makes the volume slider the active control; ?sea= keeps the level one, and
@@ -1052,7 +1096,9 @@
 		if (v3d.on) {
 			v3dLine = ' · 3d on';
 			if (v3dDisp !== 10) v3dLine += ' · disp ' + v3dDisp + 'x';
-			if (v3dK !== 8) v3dLine += ' · k' + v3dK;
+			if (v3dMesh !== 'ico') v3dLine += ' · mesh ' + v3dMesh;
+			if (v3dDetail !== Render3D.DEFAULT_DETAIL[v3dMesh]) v3dLine += ' · ' + v3dDetail;
+			if (v3dNorm !== 'deriv') v3dLine += ' · norm ' + v3dNorm;
 		}
 		return rig
 			+ '\nengine ' + engine + ' · L' + grid.level
