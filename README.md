@@ -39,7 +39,13 @@ Open `index.html` directly in a browser.
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
   placer is liberated by erosion and rides the sediment load downhill.
-- Deposit extraction on demand: a one-cell blur of each potential, its ranked local maxima,
+- Synthetic deposit catalogue (0.6.0): Freeze catalogue pauses the world, snapshots its geology and
+  generates deterministic ellipsoidal bodies (VMS, porphyry, orogenic Au) on a fixed cube-sphere tile
+  grid, each with host, burial depth, orientation, ore tonnes and grades. Bodies are a pure function of
+  seed + generator version + snapshot, so clicks, whole-world scans and re-imports agree byte for byte;
+  the simulation is never touched. Priors are game parameters (`data/deposits/SOURCES.md`), not
+  reserves. See `0.6.x-plan-deposit-prospector.md`.
+- Potential-maxima diagnostic on demand (the "Potential maxima JSON" button): a one-cell blur of each potential, its ranked local maxima,
   and a context tag per deposit, dumped as JSON.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus a column probe and a plate-lineage/split/merge readout. Drag the map to rotate

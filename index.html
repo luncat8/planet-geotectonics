@@ -36,7 +36,8 @@
 				<label title="Volume: conserved water as a multiple of the sea-0 volume; the level is solved">Water ×<input id="sea-vol" type="range" min="0" max="4" step="0.05" value="1"><span class="value" id="sea-vol-value">1.00×</span></label>
 				<label title="3D: vertical exaggeration of the relief">Displacement ×<input id="disp" type="range" min="1" max="40" step="0.5" value="10"><span class="value" id="disp-value">10.0×</span></label>
 				<label title="3D: mesh - the icosphere (even facets, no pole rows) or the equirectangular lattice (even texels, pole rows)">Mesh<select id="mesh3d"><option value="ico" selected>Icosphere</option><option value="grid">Heightmap</option></select></label><label title="3D: mesh detail; the mesh is level-independent and rebuilds once on change">3D detail<select id="k3d"><option value="k6">k6 · 41k vertices</option><option value="k7">k7 · 164k</option><option value="k8" selected>k8 · 655k</option><option value="k9">k9 · 2.6M</option></select></label><label title="3D: surface normals - screen-space derivatives (flat per triangle) or per-vertex from the height field">Normals<select id="norm3d"><option value="deriv" selected>Derivative</option><option value="analytic">Analytic</option></select></label>
-				<button id="save">Save world</button><button id="deposits">Deposits JSON</button>
+				<button id="save">Save world</button><button id="deposits">Potential maxima JSON</button>
+				<button id="catalogue" title="Pause, snapshot the geology and generate the whole synthetic deposit catalogue (0.6.0)">Freeze catalogue</button><button id="catalogue-json" disabled>Catalogue JSON</button>
 			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
 				<label>Resolution<select id="level"><option value="5" selected>L5 · 10,242 cells</option><option value="6">L6 · 40,962 cells</option><option value="7">L7 · 163,842 cells</option></select></label>
@@ -47,7 +48,7 @@
 				<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
 			</fieldset>
 		</section>
-		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div>Column inspector: <label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p></div></section>
+		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div>Column inspector: <label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p><p id="catalogue-readout">Freeze the paused world to generate its synthetic deposit catalogue.</p></div></section>
 	</main>
 	<script src="js/env.js"></script>
 	<script src="js/geodesics.js"></script>
@@ -70,6 +71,8 @@
 	<script src="js/perf.js"></script>
 	<script src="js/clipboard.js"></script>
 	<script src="js/extract.js"></script>
+	<script src="js/data/deposit-models.js"></script>
+	<script src="js/deposits.js"></script>
 	<script src="js/sim.js"></script>
 	<script src="js/data/earth-1deg.js"></script>
 	<script src="js/data/earth-05deg.js"></script>

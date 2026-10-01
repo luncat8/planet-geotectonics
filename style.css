@@ -67,6 +67,7 @@ h2 { color: #d4dfdf; text-transform: uppercase; font-weight: 500; }
 
 /* Reserve inspector space to prevent page layout shifts. */
 #probe { white-space: pre-line; min-height: 8.5em; }
+#catalogue-readout { white-space: pre-line; min-height: 6em; font-size: 0.85em; }
 @media (max-width: 640px) { main { padding: 24px 14px; } .notes { grid-template-columns: 1fr; gap: 16px; } .map-top { flex-wrap: wrap; } .map-bottom span:nth-child(2) { display: none; } .clock { min-width: 0; white-space: normal; } .clock strong { font-size: 20px; } }
 
 /* Keep layer controls and the boundary key visible together. */

@@ -51,6 +51,17 @@
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var extractScratch = null;
+	// The frozen exploration scenario (0.6.0): null until a pause-time freeze completes, and
+	// void again whenever the world is replaced. freezeJob is the cancel token of a running scan.
+	var catalogue = null, freezeJob = 0;
+	var catalogueReadout = document.getElementById('catalogue-readout');
+	function downloadBlob(name, blob) {
+		var link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+		link.download = name;
+		link.click();
+		URL.revokeObjectURL(link.href);
+	}
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var perfStrip = document.getElementById('perf-rows');
 	// --- Adjust: the live sliders (0.3.3) --------------------------------------------------
@@ -623,6 +634,8 @@
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
 		extractScratch = null;   // sized to the old grid.V
+		freezeJob++; catalogue = null;   // a scan of the old world must not publish
+		catalogueSave.disabled = true; catalogueReadout.textContent = 'Freeze the paused world to generate its synthetic deposit catalogue.';
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
@@ -800,12 +813,8 @@
 		}
 		saveBlob();
 		function saveBlob() {
-			var blob = new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' });
-		var link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-			link.download = 'planet-' + startInput.value + '-' + Math.round(state.t) + 'myr.pgt';
-			link.click();
-			URL.revokeObjectURL(link.href);
+			downloadBlob('planet-' + startInput.value + '-' + Math.round(state.t) + 'myr.pgt',
+				new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' }));
 		}
 	});
 	// Deposit extraction is on demand, so its scratch is allocated on first use, never per frame.
@@ -813,15 +822,47 @@
 	document.getElementById('deposits').addEventListener('click', function () {
 		var extract = function () {
 			if (!extractScratch) extractScratch = new Float64Array(grid.V);
-			var blob = new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' });
-			var link = document.createElement('a');
-			link.href = URL.createObjectURL(blob);
-			link.download = 'deposits-' + Math.round(state.t) + 'myr.json';
-			link.click();
-			URL.revokeObjectURL(link.href);
+			downloadBlob('potential-maxima-' + Math.round(state.t) + 'myr.json',
+				new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' }));
 		};
 		if (gpu.on && gpu.ready) { GpuSim.download(state).then(extract, extract); return; }
 		extract();
+	});
+	// Freeze (0.6.0): pause, pull one coherent mirror, snapshot the geology and generate the
+	// whole catalogue in timed chunks. The scenario is published only when the scan completes,
+	// and a reset or reload cancels it. Resuming play leaves the frozen scenario as history.
+	function scanCatalogue(job, scenario, from, world) {
+		if (job !== freezeJob) return;
+		var next = Deposits.scan(scenario, from, 2048);
+		if (next < Deposits.tileCount()) {
+			catalogueReadout.textContent = 'Generating catalogue: ' + Math.round(100 * next / Deposits.tileCount()) + ' %';
+			setTimeout(scanCatalogue, 0, job, scenario, next, world);
+			return;
+		}
+		catalogue = scenario;
+		catalogueReadout.textContent = 'Frozen catalogue at ' + world.t.toFixed(1) + ' Myr (synthetic, game priors):\n'
+			+ Deposits.summary(scenario, 8);
+		catalogueSave.disabled = false;
+	}
+	var catalogueSave = document.getElementById('catalogue-json');
+	document.getElementById('catalogue').addEventListener('click', function () {
+		setPlaying(false);
+		var job = ++freezeJob;
+		catalogue = null; catalogueSave.disabled = true;
+		catalogueReadout.textContent = 'Freezing the world...';
+		var world = state;
+		var begin = function () {
+			if (job !== freezeJob) return;
+			var scenario = Deposits.scenario(Deposits.snapshot(world, startInput.value + ' ' + presetInput.value), world.seed);
+			scanCatalogue(job, scenario, 0, world);
+		};
+		if (gpu.on && gpu.ready) { GpuSim.download(state).then(begin, begin); return; }
+		begin();
+	});
+	catalogueSave.addEventListener('click', function () {
+		if (!catalogue) return;
+		downloadBlob('deposit-catalogue-' + Math.round(catalogue.meta.t) + 'myr.json',
+			new Blob([Deposits.json(catalogue)], { type: 'application/json' }));
 	});
 	loadInput.addEventListener('change', function () {
 		var file = loadInput.files[0];

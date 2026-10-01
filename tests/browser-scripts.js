@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
-for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
+for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'data/deposit-models', 'deposits', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
 'render3d', 'gpu/d1diff']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
@@ -28,6 +28,9 @@ if (!Array.isArray(deposits)) throw new Error('extraction returns a list');
 if (JSON.parse(Extract.json(state, 0.01, 2, new Float64Array(state.grid.V))).format !== 'pgt-deposits') {
 	throw new Error('deposit json carries its format tag');
 }
+var scenario = Deposits.scenario(Deposits.snapshot(state, 'smoke'), 1);
+Deposits.scan(scenario, 0, 600);
+if (JSON.parse(Deposits.json(scenario)).format !== 'pgt-deposit-catalogue') throw new Error('catalogue json carries its format tag');
 var blob = Checkpoint.save(state);
 Checkpoint.load(state, blob);
 Sim.raster(state);

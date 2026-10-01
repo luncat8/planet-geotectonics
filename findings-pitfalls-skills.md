@@ -1678,3 +1678,21 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	hexagonal mesas. True continuous heightmap relief requires spatial interpolation (e.g.
 	spherical Delaunay barycentric gather or ring neighbor blend) during the gather pass.
 
+
+## a deterministic catalogue on top of a drifting sim (0.6.0)
+
+- Key every random draw by the candidate (seed, version, tile, family, ordinal, draw index) through
+  an integer counter hash, and draw ALL of a candidate's numbers before deciding acceptance. Then
+  neither visiting order, chunk size nor a changed potential elsewhere can reroll a body. A
+  sequential PRNG consumed during a scan fails this at the first click-order test.
+- Tile the sphere with an equiangular cube, not with the sim grid or lat/lon: direction-to-tile is
+  closed form, there is no pole or seam branch, and the catalogue stays valid when the sim
+  resolution changes. Keep anchors 2 % inside the tile so tileOf(dirOf(anchor)) round-trips.
+- A point query must also read neighbouring tiles (bodies overhang). Sampling the 3x3 square of
+  offsets around the point is enough while the square is narrower than a tile; the test compares
+  `near` against a brute-force scan at poles, cube corners and seams.
+- Round stored numbers to six significant digits and derive volume, ore and metal from the rounded
+  inputs; JSON then round-trips byte for byte and a record reproduces its own resources.
+- The blurred potentials are broad (arc median ~0.4 on a grown hot-start world), so a linear
+  acceptance gave ~18k bodies at L4. Acceptance exponent 2 and lower caps give ~5k.
+  `node experiments/deposit-stats.js 4 800 7` prints the counts and percentiles.

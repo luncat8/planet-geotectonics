@@ -147,7 +147,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'extract', 'data/deposit-models', 'deposits', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
 	'data/plate-crosswalk', 'earth', 'render'];
 
@@ -1274,6 +1274,24 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(r3.releases, 1, 'the session released its allocations');
 	}
 
+	// The frozen deposit catalogue (0.6.0): Freeze pauses the world and generates the catalogue in
+	// timed chunks; the JSON button wakes only when the scan completes; a reset cancels a scan.
+	const cat = loadPage('');
+	cat.el('play').click();
+	assert.equal(cat.el('play').textContent, 'Pause', 'the page is playing before the freeze');
+	assert.equal(cat.el('catalogue-json').disabled, true, 'nothing to export before a freeze');
+	cat.el('catalogue').click();
+	assert.equal(cat.el('play').textContent, 'Play', 'the freeze pauses the world');
+	for (let waited = 0; !/^Frozen catalogue/.test(cat.el('catalogue-readout').textContent) && waited < 600; waited++) await cat.tick();
+	assert.ok(/^Frozen catalogue at 0\.0 Myr[^]*synthetic bodies/.test(cat.el('catalogue-readout').textContent), cat.el('catalogue-readout').textContent);
+	assert.equal(cat.el('catalogue-json').disabled, false, 'the export is available once the catalogue is complete');
+	cat.el('catalogue').click();
+	assert.equal(cat.el('catalogue-json').disabled, true, 'a new freeze withdraws the old export until it completes');
+	cat.el('reset').click();
+	for (let waited = 0; waited < 30; waited++) await cat.tick();
+	assert.ok(/^Freeze the paused world/.test(cat.el('catalogue-readout').textContent), 'a reset cancels the running scan and clears the readout');
+	assert.equal(cat.el('catalogue-json').disabled, true);
+
 	console.log('PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
 		+ page.Perf.SLOTS + ' slots in place and is the copy control, the bench can measure every setting the page offers,'
@@ -1293,5 +1311,6 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' the strip\'s V3D slot name the session, a mesh or normals change swaps buffers or pipelines'
 		+ ' on the live session without a world rebuild, and off restores the map;'
 		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
-		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
+		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly;'
+		+ ' the deposit catalogue freeze pauses, scans in chunks, exports only when complete and is cancelled by a reset');
 })().catch((error) => { console.error(error); process.exit(1); });

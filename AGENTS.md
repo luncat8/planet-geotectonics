@@ -67,6 +67,8 @@ the reverse-time answer, and what is not possible. 0.4.6a is in: data/earth/PALE
 tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotations.js.
 0.4.8-plan-earth-data.md - modern sediment/provenance improvement and holdout bake gates.
 0.6.x-plan-deposit-prospector.md - deterministic exploration catalogue, instruments, core and economics.
+0.6.0 is in: js/deposits.js, js/data/deposit-models.js (game priors), data/deposits/SOURCES.md,
+tests/deposits.js, experiments/deposit-stats.js.
 0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
