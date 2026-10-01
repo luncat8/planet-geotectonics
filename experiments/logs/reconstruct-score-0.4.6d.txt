@@ -1,0 +1,23 @@
+[*] reconstruct-score: earth (25 plates, epoch 0 Ma) reconstructed onto L5 seed 7, 10242 columns, 10242 cells
+  250 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 25.92% vs reference 31.83%  ·  IoU 0.3954 (unreconstructed 0.2484)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  200 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 26.48% vs reference 37.58%  ·  IoU 0.4350 (unreconstructed 0.2669)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  150 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 28.00% vs reference 35.93%  ·  IoU 0.4841 (unreconstructed 0.3086)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  100 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 29.12% vs reference 31.01%  ·  IoU 0.5060 (unreconstructed 0.3139)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  65 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 29.25% vs reference 33.51%  ·  IoU 0.6740 (unreconstructed 0.4339)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  40 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 28.79% vs reference 35.56%  ·  IoU 0.6965 (unreconstructed 0.5628)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+  20 Ma · moved 9109 columns, 1133 left put (4 plates the crosswalk has no plate for)
+    land 28.34% vs reference 34.29%  ·  IoU 0.7437 (unreconstructed 0.6898)  ·  PASS against 0.38
+    back to 0 Ma: IoU with the starting mask 1.000000
+PASS reconstruct-score

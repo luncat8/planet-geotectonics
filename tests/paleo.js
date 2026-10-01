@@ -1,5 +1,5 @@
-// paleo.js tests (0.4.5, extended 0.4.6c): the historical checkpoint packs (Pangaea 250 Ma,
-// Gondwana 200 Ma). Provenance (epoch/geometry/plate table), the re-baked model codes and
+// paleo.js tests (0.4.5, extended 0.4.6c/d): the historical checkpoint packs (Pangaea 250 Ma
+// down to Miocene 20 Ma). Provenance (epoch/geometry/plate table), the re-baked model codes and
 // poles, the steered ('realistic') and procedural ('game') loader paths, the zero-pole guard
 // for a model-less pack, fidelity to the source raster, the forward-reconstruction score
 // against the modern map, and short stable forward runs. The full-epoch convergence
@@ -15,10 +15,24 @@ const Params = require('../js/params.js');
 require('../js/data/earth-1deg.js');
 require('../js/data/earth-250Ma.js');
 require('../js/data/earth-200Ma.js');
+require('../js/data/earth-150Ma.js');
+require('../js/data/earth-100Ma.js');
+require('../js/data/earth-065Ma.js');
+require('../js/data/earth-040Ma.js');
+require('../js/data/earth-020Ma.js');
 
+// wet = measured L5 wet fraction, plates/model = the bake's plate table, bin = the 1deg
+// raster the pack encodes, vsModern = the pack's land mask against the modern one at L5
+// seed 7 (measured; the checkpoints approach the present monotonically, which is the
+// physical claim - a loose "different from modern" band would hide a scrambled set).
 const CASES = [
-	{ name: 'earth-250Ma', epoch: 250, plates: 92, model: 84, wet: 0.6824, bin: '250Ma_1deg.bin' },
-	{ name: 'earth-200Ma', epoch: 200, plates: 111, model: 103, wet: 0.6321, bin: '200Ma_1deg.bin' }
+	{ name: 'earth-250Ma', epoch: 250, plates: 92, model: 84, wet: 0.6824, bin: '250Ma_1deg.bin', vsModern: 0.2477 },
+	{ name: 'earth-200Ma', epoch: 200, plates: 111, model: 103, wet: 0.6321, bin: '200Ma_1deg.bin', vsModern: 0.2631 },
+	{ name: 'earth-150Ma', epoch: 150, plates: 111, model: 103, wet: 0.6461, bin: '150Ma_1deg.bin', vsModern: 0.3107 },
+	{ name: 'earth-100Ma', epoch: 100, plates: 108, model: 100, wet: 0.6931, bin: '100Ma_1deg.bin', vsModern: 0.3105 },
+	{ name: 'earth-065Ma', epoch: 65, plates: 110, model: 102, wet: 0.6717, bin: '065Ma_1deg.bin', vsModern: 0.4330 },
+	{ name: 'earth-040Ma', epoch: 40, plates: 112, model: 104, wet: 0.6544, bin: '040Ma_1deg.bin', vsModern: 0.5624 },
+	{ name: 'earth-020Ma', epoch: 20, plates: 110, model: 102, wet: 0.6670, bin: '020Ma_1deg.bin', vsModern: 0.6873 }
 ];
 const packs = Earth.packs();
 
@@ -75,7 +89,10 @@ for (const c of CASES) {
 	console.log('  ' + Earth.describe(sc));
 	assert.ok(Math.abs(sc.wetFraction - c.wet) <= 0.01, c.name + ' wet ' + sc.wetFraction.toFixed(4));
 	assert.ok(sc.meanLand > 800 && sc.meanLand < 1200, c.name + ' mean land ' + sc.meanLand.toFixed(0));
-	assert.ok(sc.meanOcean > -4800 && sc.meanOcean < -3500, c.name + ' mean ocean ' + sc.meanOcean.toFixed(0));
+	// The mean-ocean band spans the epochs' real spread, not one pack's: the 150 Ma map is
+	// 52% old navy floor (z = -5500 m), so its mean ocean is -5047 m where Pangaea's
+	// shelf-dominated -4095 m. Below -5.2 km is a broken datum calibration, not an epoch.
+	assert.ok(sc.meanOcean > -5200 && sc.meanOcean < -3500, c.name + ' mean ocean ' + sc.meanOcean.toFixed(0));
 	assert.ok(sc.rms <= 100, c.name + ' round-trip RMS ' + sc.rms.toFixed(1) + ' m');
 	// The game preset hands the same pack to the procedural mantle: no steering, no
 	// prescription - the 0.4.6c wiring must not leak into it.
@@ -140,7 +157,8 @@ assert.ok(Earth.fraction(modernM) > 0.25 && Earth.fraction(modernM) < 0.35,
 for (const c of CASES) {
 	const pk = packs.find(p => p.name === c.name);
 	const iou = Earth.iou(Earth.landFromPack(pk, g5), modernM);
-	assert.ok(iou.iou > 0.1 && iou.iou < 0.6, c.name + '-vs-modern IoU ' + iou.iou.toFixed(3));
+	assert.ok(Math.abs(iou.iou - c.vsModern) <= 0.02,
+		c.name + '-vs-modern IoU ' + iou.iou.toFixed(4) + ' vs measured ' + c.vsModern);
 }
 
 // --- short forward run (20 Myr, game preset): stable, evolving, deterministic ------------

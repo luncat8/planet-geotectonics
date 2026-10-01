@@ -1,10 +1,11 @@
-// reconstruct.js tests (0.4.6b): Mode K exact rigid reconstruction, reversibility and IoU gate.
+// reconstruct.js tests (0.4.6b, extended 0.4.6d): Mode K exact rigid reconstruction,
+// reversibility and the IoU gate against every committed checkpoint pack.
 // The plan §9 and report-2 §4 prescribe:
 //  - 250 -> 0 -> 250 Ma bit-identical world (lossless)
 //  - moves every column by its plate's rotation and nothing else
 //  - leaves t/frame untouched
 //  - restores live state exactly
-//  - modern pack reconstructed to 250 Ma lands within measured IoU band (0.38 threshold after ceiling measurement)
+//  - modern pack reconstructed to each epoch lands within its measured IoU band (§5)
 const { assert, Grid, State, Sim, equal } = require('./helpers.js');
 const Earth = require('../js/earth.js');
 const Rotations = require('../js/rotations.js');
@@ -12,6 +13,11 @@ const PlateCrosswalk = require('../js/data/plate-crosswalk.js');
 require('../js/data/earth-1deg.js');
 require('../js/data/earth-250Ma.js');
 require('../js/data/earth-200Ma.js');
+require('../js/data/earth-150Ma.js');
+require('../js/data/earth-100Ma.js');
+require('../js/data/earth-065Ma.js');
+require('../js/data/earth-040Ma.js');
+require('../js/data/earth-020Ma.js');
 
 const g = new Grid(5, 7).build();
 const modern = Earth.pick(5, 'earth');
@@ -99,11 +105,15 @@ for (let c = 0; c < g.V; c++) {
 assert.equal(s.t, t0, 't still untouched after restore');
 assert.equal(s.frame, frame0, 'frame still untouched after restore');
 
-// --- 5. IoU gate against committed packs (measured ceiling 0.4537/0.4657, threshold 0.38) ----
-const ref250 = Earth.pick(5, 'pangaea');
-const ref200 = Earth.pick(5, 'gondwana');
-assert.ok(ref250, '250Ma pack exists');
-assert.ok(ref200, '200Ma pack exists');
+// --- 5. IoU gate against committed packs ----------------------------------------------------
+// Measured at L5 seed 7 by experiments/reconstruct-score.js, which now walks the whole
+// 0.4.0 plan §8.5 ladder: the reconstruction recovers the committed pack's coastline better
+// the closer the epoch is to the present (0.3954 at 250 Ma -> 0.7437 at 20 Ma), because both
+// the reconstruction and the reference map converge on the modern world. Bands are +-0.02
+// around the measurement - tight enough that a mirrored or mis-referenced pack fails, wide
+// enough for the L5 resampling.
+const BANDS = [[250, 0.3954], [200, 0.4350], [150, 0.4841], [100, 0.5060],
+	[65, 0.6740], [40, 0.6965], [20, 0.7437]];
 
 function iouAt(epoch, ref, minIoU, maxIoU) {
 	const st = new State(new Grid(5, 7).build(), 7);
@@ -122,10 +132,14 @@ function iouAt(epoch, ref, minIoU, maxIoU) {
 	assert.ok(backIou.iou > 0.999999, epoch + ' Ma back to 0 Ma IoU with starting mask ' + backIou.iou.toFixed(6));
 }
 
-// Measured ceilings: 0.4537 at 250 Ma, 0.4657 at 200 Ma. Our reconstruction after fixes A+B reaches 0.3954/0.4350.
-// Set bands wide enough for resampling (L5) but tight enough that mirrored fails (mirrored scores ~0).
-iouAt(250, ref250, 0.38, 0.50);
-iouAt(200, ref200, 0.38, 0.55);
+// The measured bands replace the original 0.38 floor and the polygon-vs-PaleoDEM ceiling
+// guard (0.4537/0.4657 at 250/200 Ma): a younger epoch's own reference mask sits much closer
+// to the modern one, so a single ceiling from 250 Ma would reject a correct reconstruction.
+for (const [epoch, want] of BANDS) {
+	const ref = Earth.byEpoch(epoch);
+	assert.ok(ref, epoch + ' Ma pack exists');
+	iouAt(epoch, ref, want - 0.02, want + 0.02);
+}
 
 // --- 6. continental priority check: land fraction recovers vs no-priority baseline ----
 // No-priority baseline at L5 250 Ma is 19.2% (report). With priority it should be >25% (we get 25.9% with remap, 26.6% without).
@@ -136,4 +150,4 @@ const landFrac = Earth.fraction(Earth.landFromState(sCheck));
 assert.ok(landFrac > 0.25, 'land fraction after fix A+B > 0.25, got ' + landFrac.toFixed(4));
 assert.ok(landFrac < 0.40, 'land fraction after fix < 0.40 (not overflooded), got ' + landFrac.toFixed(4));
 
-console.log('PASS reconstruct: lossless 250->0->250, t/frame untouched, snapshot+refresh live restore, IoU >=0.38 within ceiling');
+console.log('PASS reconstruct: lossless 250->0->250, t/frame untouched, snapshot+refresh live restore, all seven checkpoints inside their measured IoU band');

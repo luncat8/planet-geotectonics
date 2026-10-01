@@ -23,18 +23,36 @@ var EarthQuat = typeof module !== 'undefined' && module.exports ? require('./qua
 var EarthColumns = typeof module !== 'undefined' && module.exports ? require('./columns.js') : (typeof Columns !== 'undefined' ? Columns : null);
 var EarthSurface = typeof module !== 'undefined' && module.exports ? require('./surface.js') : (typeof Surface !== 'undefined' ? Surface : null);
 var Earth = {
+	// Historical checkpoint start values -> pack names (0.4.5, extended 0.4.6d down the
+	// 0.4.0 plan 8.5 roadmap). One table: the Start select, Earth.pick and the score tools all
+	// read it, so a checkpoint is named in exactly one place. The value is the start's
+	// nickname, not its age; Earth.byEpoch is the lookup in the other direction. Ages follow
+	// the PDMap 5 Ma texture steps, so the K-Pg checkpoint is baked at 65 Ma.
+	history: {
+		pangaea: 'earth-250Ma', gondwana: 'earth-200Ma', jurassic: 'earth-150Ma',
+		cretaceous: 'earth-100Ma', kpg: 'earth-065Ma', eocene: 'earth-040Ma', miocene: 'earth-020Ma'
+	},
 	packs: function () {
 		var g = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : this);
 		return g.EarthPacks || [];
 	},
+	// The committed historical pack for an age, or null - the age-keyed way in, for the score
+	// tools and the tests, which think in epochs rather than in Start values.
+	byEpoch: function (epoch) {
+		var packs = Earth.packs();
+		for (var i = 0; i < packs.length; i++) {
+			if (packs[i].name !== 'earth' && packs[i].epoch === epoch) return packs[i];
+		}
+		return null;
+	},
 	// Best registered pack for a grid level and start value: 'earth' (present day) gets
 	// the 0.5deg raster (w >= 720) at L7+ and the 1.0deg baseline below; the historical
-	// checkpoints (0.4.5) name their 1.0deg epoch pack directly. A missing pack is null
-	// and the caller falls back to the procedural map start.
+	// checkpoints (0.4.5) name their 1.0deg epoch pack through Earth.history. A missing pack
+	// is null and the caller falls back to the procedural map start.
 	pick: function (level, start) {
 		var packs = Earth.packs();
 		start = start || 'earth';
-		var want = start === 'pangaea' ? 'earth-250Ma' : (start === 'gondwana' ? 'earth-200Ma' : null);
+		var want = Earth.history[start] || null;
 		var wide = level >= 7, fallback = null;
 		for (var i = 0; i < packs.length; i++) {
 			var p = packs[i];

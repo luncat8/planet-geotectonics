@@ -15,8 +15,9 @@
 	var reconValue = document.getElementById('recon-value');
 	var earthScore = null;
 	// Starts that boot from an Earth pack (0.4.0/0.4.5): present day, plus the historical
-	// checkpoints (Pangaea 250 Ma, Gondwana 200 Ma). The Preset select belongs to these only.
-	function isEarthStart(v) { return v === 'earth' || v === 'pangaea' || v === 'gondwana'; }
+	// checkpoints - whatever Earth.history names, so a new checkpoint needs no change here.
+	// The Preset select belongs to these only.
+	function isEarthStart(v) { return v === 'earth' || (typeof Earth !== 'undefined' && !!Earth.history[v]); }
 	function paintStart() {
 		var earth = isEarthStart(startInput.value);
 		presetLabel.hidden = !earth;

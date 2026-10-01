@@ -214,6 +214,7 @@ The committed source textures and the 1° bins extracted from them (via
 | `data/earth/paleo/plates-250Ma.bin` | per-cell plate ids + stage ω from `gpml_plates.js --epoch=250` (85 plates) | `724fd05731e075c987ee0cd78a533a71` |
 | `data/earth/paleo/plates-200Ma.bin` | the same at `--epoch=200` (125 plates) | `e774d07ee2c4a9df62bf6ad5446e3a59` |
 
+
 Baked packs: `js/data/earth-250Ma.js` (`pangaea`, epoch 250, 84 PALEOMAP model plates + 8 oceanic
 Voronoi, datum `+0.00 m`) and `js/data/earth-200Ma.js` (`gondwana`, epoch 200, 103 + 8, datum
 `+0.00 m`). The 0.4.5 bake gave them nine anonymous land components and zero poles; the 0.4.6c
@@ -236,6 +237,60 @@ plates); continental cells no polygon claims (56 % at 250 Ma — the polygons an
 are not the same vintage) follow their majority model neighbour; the remaining ocean gets the
 same k=8 farthest-point Voronoi as the 0.4.5 bake, with no code and no pole — dead ocean
 floor, honest about not knowing its kinematics.
+
+**0.4.6d — the rest of the §8.5 ladder (150 → 20 Ma).** Same source, same route, five more
+epochs. PDMap steps in 5 Ma, so the K-Pg checkpoint is baked at **65 Ma**, the nearest step to
+66 Ma; every other epoch is an exact step. Ages are zero-padded in the file names to match the
+existing three.
+
+| File | Role | MD5 |
+|---|---|---|
+| `data/earth/paleo/150Ma_source.jpg` | PDMap `150.jpg` (Late Jurassic), 1024×512 | `415acaa0b480e63110d6eedd6aa17f9c` |
+| `data/earth/paleo/100Ma_source.jpg` | PDMap `100.jpg` (Mid-Cretaceous) | `3ed48301cd7ec92d43f8f51b2d6f7427` |
+| `data/earth/paleo/065Ma_source.jpg` | PDMap `065.jpg` (K-Pg) | `73040c7a6d882a7d8c31766ecd605a20` |
+| `data/earth/paleo/040Ma_source.jpg` | PDMap `040.jpg` (Middle Eocene) | `3648a630d7cc3eca6b2d8af1971cc8b3` |
+| `data/earth/paleo/020Ma_source.jpg` | PDMap `020.jpg` (Early Miocene) | `d2f857ac16541a3c1d7faddcc7579b39` |
+| `data/earth/paleo/150Ma_1deg.bin` | 1° z/age/kind raster from `150Ma_source.jpg` | `7e334ab10c59a96230242ed1c9a13557` |
+| `data/earth/paleo/100Ma_1deg.bin` | the same at 100 Ma | `434336ac15d15bcd2099cf725e52ea27` |
+| `data/earth/paleo/065Ma_1deg.bin` | the same at 65 Ma | `f52d6a55a924b53dd230550ba3396e1a` |
+| `data/earth/paleo/040Ma_1deg.bin` | the same at 40 Ma | `cc7ca9107b613b37dda8bd20a2eff371` |
+| `data/earth/paleo/020Ma_1deg.bin` | the same at 20 Ma | `fd5d286025344007010011298d42b337` |
+| `data/earth/paleo/plates-150Ma.bin` | `gpml_plates.js --epoch=150` (125 rings → 125 plates) | `fceb3594b6e14fd7c4cebcb84726eb69` |
+| `data/earth/paleo/plates-100Ma.bin` | `--epoch=100` (133 plates) | `a4c2941ace6efba5b42c24df61a96cbc` |
+| `data/earth/paleo/plates-065Ma.bin` | `--epoch=65` (140 plates) | `582bb06410fefa45d1a8fdc0c8d0dfb1` |
+| `data/earth/paleo/plates-040Ma.bin` | `--epoch=40` (145 plates) | `2845d618df9ce0bc9fefbc8760c7532a` |
+| `data/earth/paleo/plates-020Ma.bin` | `--epoch=20` (145 plates) | `4bcaa3079cbf40f444c6ae2a3715823f` |
+
+`tools/earth/paleo_extract.js` needs a JPEG decoder; the project vendors one
+(`vendor/jpeg-js/`, jpeg-js 0.4.4 decoder, Apache-2.0) so the pipeline runs offline from a clean
+checkout. It is a build-time dependency of that one tool — no page script loads it.
+
+Baked packs, one epoch per line — `n=$(printf "%03d" "$e")` is the zero-padded name and
+`$t` is that epoch's `--ids-min-cells` (see the rule below the table):
+
+```
+for pair in 150:10 100:20 65:20 40:20 20:25; do
+    e=${pair%%:*}; t=${pair##*:}; n=$(printf "%03d" "$((10#$e))")
+    node tools/earth/gpml_plates.js --epoch=$e --out=data/earth/paleo/plates-${n}Ma.bin
+    python3 tools/earth/bake_earth.py --paleo data/earth/paleo/${n}Ma_1deg.bin \
+        --name earth-${n}Ma --out js/data/earth-${n}Ma.js --report data/earth/report-${n}Ma.txt \
+        --plate-ids data/earth/paleo/plates-${n}Ma.bin --ids-min-cells $t
+done
+```
+
+| Pack | Start value | Epoch | Model plates + 8 oceanic | Wet | datum |
+|---|---|---|---|---|---|
+| `js/data/earth-150Ma.js` | `jurassic` | 150 | 103 + 8 | 64.02 % | `+0.00 m` |
+| `js/data/earth-100Ma.js` | `cretaceous` | 100 | 100 + 8 | 68.71 % | `+0.00 m` |
+| `js/data/earth-065Ma.js` | `kpg` | 65 | 102 + 8 | 66.56 % | `+0.00 m` |
+| `js/data/earth-040Ma.js` | `eocene` | 40 | 104 + 8 | 64.21 % | `+0.00 m` |
+| `js/data/earth-020Ma.js` | `miocene` | 20 | 102 + 8 | 65.55 % | `+0.00 m` |
+
+`--ids-min-cells` is per epoch because the polygon set grows denser towards the present (125
+rings at 150 Ma, 145 at 20 Ma) and the pack must stay under `plateCap` 128 including the eight
+oceanic Voronoi plates. The rule: the smallest threshold that keeps the model table at 104 or
+fewer, i.e. 112 plates with headroom — 10 / 20 / 20 / 20 / 25. The 200 Ma pack predates the
+rule at 10 (103 + 8), and 250 Ma is at 1 (84 + 8).
 
 ### Ingested (0.4.6): the PaleoAtlas v3 rotation model
 

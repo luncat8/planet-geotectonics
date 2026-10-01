@@ -137,6 +137,7 @@ const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleom
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
 	'data/plate-crosswalk', 'earth', 'render'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
@@ -775,13 +776,19 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	livePage.pump(2, 3000);
 	assert.ok(/2[45] plates/.test(lEl('gaps').textContent), 'the game world steps too');
 
-	// The historical checkpoints (0.4.5, re-baked 0.4.6c): Pangaea (250 Ma) and Gondwana
-	// (200 Ma) boot from their own epoch packs, show the Preset select like the Earth start,
-	// and the copy header names the start. Under the game preset their model ids stay
-	// unused: K10 drives, and the status reports the re-baked pack's plate count.
+	// The historical checkpoints (0.4.5, re-baked 0.4.6c, staged down the §8.5 ladder in
+	// 0.4.6d): Pangaea 250 Ma through Miocene 20 Ma boot from their own epoch packs, show
+	// the Preset select like the Earth start, and the copy header names the start. Under the
+	// game preset their model ids stay unused: K10 drives, and the status reports the re-baked
+	// pack's plate count. Each row's wet fraction and plate count are the bake's own numbers.
 	for (const [start, probeRe, wetRe, platesRe, clock] of [
 		['pangaea', /^earth-250Ma 360x180 /, /wet 68\.\d\d%/, /\b92 plates/, 4000],
-		['gondwana', /^earth-200Ma 360x180 /, /wet 63\.\d\d%/, /\b111 plates/, 4600]
+		['gondwana', /^earth-200Ma 360x180 /, /wet 63\.\d\d%/, /\b111 plates/, 4600],
+		['jurassic', /^earth-150Ma 360x180 /, /wet 64\.\d\d%/, /\b111 plates/, 5000],
+		['cretaceous', /^earth-100Ma 360x180 /, /wet 69\.\d\d%/, /\b108 plates/, 5400],
+		['kpg', /^earth-065Ma 360x180 /, /wet 67\.\d\d%/, /\b110 plates/, 5800],
+		['eocene', /^earth-040Ma 360x180 /, /wet 65\.\d\d%/, /\b112 plates/, 6200],
+		['miocene', /^earth-020Ma 360x180 /, /wet 66\.\d\d%/, /\b110 plates/, 6600]
 	]) {
 		lEl('start').value = start;
 		lEl('start').dispatch('change');

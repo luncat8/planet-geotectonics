@@ -5,8 +5,8 @@
 // composed reconstruction lands the continents in the ocean and scores near zero, so a
 // passing score cannot be faked.
 //
-//   node experiments/reconstruct-score.js [--epochs=250,200] [--level=5] [--seed=7]
-//                                         [--preset=realistic]
+//   node experiments/reconstruct-score.js [--epochs=250,200,150,100,65,40,20] [--level=5]
+//                                         [--seed=7] [--preset=realistic]
 //
 // Reference masks are the committed historical packs' own land masks, i.e. the Scotese
 // PaleoDEM coastlines. The plan's original threshold IoU >= 0.60 was measured as
@@ -19,6 +19,11 @@ const Earth = require('../js/earth.js');
 require('../js/data/earth-1deg.js');
 require('../js/data/earth-250Ma.js');
 require('../js/data/earth-200Ma.js');
+require('../js/data/earth-150Ma.js');
+require('../js/data/earth-100Ma.js');
+require('../js/data/earth-065Ma.js');
+require('../js/data/earth-040Ma.js');
+require('../js/data/earth-020Ma.js');
 
 const flag = (name, value) => {
 	const arg = process.argv.find((a) => a.startsWith('--' + name + '='));
@@ -27,7 +32,7 @@ const flag = (name, value) => {
 const LEVEL = +flag('level', 5), SEED = +flag('seed', 7);
 const PRESET = flag('preset', 'realistic');
 const THRESHOLD = +flag('threshold', 0.38);
-const EPOCHS = flag('epochs', '250,200').split(',').map(Number);
+const EPOCHS = flag('epochs', '250,200,150,100,65,40,20').split(',').map(Number);
 
 const modern = Earth.pick(LEVEL, 'earth');
 if (!modern) { console.error('FAIL: no modern pack'); process.exit(1); }
@@ -43,7 +48,7 @@ console.log('[*] reconstruct-score: ' + modern.name + ' (' + modern.plates.count
 const atHome = Earth.landFromState(state);
 let failed = false;
 for (const epoch of EPOCHS) {
-	const ref = Earth.pick(LEVEL, epoch === 250 ? 'pangaea' : epoch === 200 ? 'gondwana' : null);
+	const ref = Earth.byEpoch(epoch);
 	if (!ref) { console.log('    ' + epoch + ' Ma: no committed pack, skipped'); continue; }
 	const refMask = Earth.landFromPack(ref, grid);
 	const base = Earth.iou(atHome, refMask);

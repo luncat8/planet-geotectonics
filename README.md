@@ -83,7 +83,9 @@ same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIB
 - Earth start (0.4.0/0.4.5/0.4.6): the Startup fieldset can boot the real Earth instead of the
   procedural land mask. `?start=earth` is present-day Earth, baked from the PALEOMAP 0 Ma map
   plus the NNR-MORVEL56 plate model (true sea level, 70.8 % wet, real 25 plates, 1° and 0.5°
-  packs); `?start=pangaea` and `?start=gondwana` boot the 250 Ma and 200 Ma reconstructions
+  packs); `?start=pangaea`, `?start=gondwana`, `?start=jurassic`, `?start=cretaceous`,
+  `?start=kpg`, `?start=eocene` and `?start=miocene` boot the 250, 200, 150, 100, 65, 40 and
+  20 Ma reconstructions
   (Scotese & Wright 2018), whose re-baked packs carry the PALEOMAP rotation model's own plate
   ids per cell. An Earth start shows a Preset select: `realistic` pins the thermal budget and
   prescribes the rotations — constant NNR Euler poles (`prescribedOmega`) on the modern start,
@@ -92,14 +94,16 @@ same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIB
   the true hypsometry. The Reconstruct slider (Mode K) scrubs an Earth start to any past
   epoch through the committed rotation model: exact rigid rotations, reversible, display-only,
   and the release restores the live pose. `experiments/reconstruct-score.js` gates the
-  kinematics (IoU 0.3954 at 250 Ma / 0.4350 at 200 Ma against measured ceilings of
-  0.4537/0.4657); `experiments/paleo-score.js` steps a checkpoint forward to the present: the
-  steered runs converge (Pangaea ends at IoU 0.319 vs the procedural plateau of 0.252,
-  Gondwana at 0.352, both rising at the end), and the gate is corrected to that measurement —
+  kinematics over the whole ladder (IoU 0.3954 at 250 Ma rising to 0.7437 at 20 Ma against
+  measured ceilings of 0.4537/0.4657 at the two oldest); `experiments/paleo-score.js` steps a
+  checkpoint forward to the present: the steered runs converge (Pangaea ends at IoU 0.319 vs
+  the procedural plateau of 0.252, Gondwana at 0.352, both rising at the end; 0.416 / 0.503 /
+  0.660 / 0.679 / 0.742 at 150 / 100 / 65 / 40 / 20 Ma), and the gate is corrected to that
+  measurement —
   a forward run cannot reach the rigid ceiling because any prescribed-ω world erodes its land
   over hundreds of Myr (the modern pack falls to IoU 0.20 against its own mask in 250 Myr;
-  see the 0.4.6 plan §10.3). Older checkpoints (150 → 20 Ma) are now bake-only staging (see
-  `0.4.0-Earth-map-plan.md` §8).
+  see the 0.4.6 plan §10.3). Every epoch on the `0.4.0-Earth-map-plan.md` §8.5 roadmap is now
+  baked and staged (see `0.4.6-review.md` and that plan's §8).
 
 See `0.2-plan.md`, `0.1.5-final-design.md` and `0.4.0-Earth-map-plan.md`.
 

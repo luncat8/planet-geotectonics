@@ -16,6 +16,11 @@ const Earth = require('../js/earth.js');
 require('../js/data/earth-1deg.js');
 require('../js/data/earth-250Ma.js');
 require('../js/data/earth-200Ma.js');
+require('../js/data/earth-150Ma.js');
+require('../js/data/earth-100Ma.js');
+require('../js/data/earth-065Ma.js');
+require('../js/data/earth-040Ma.js');
+require('../js/data/earth-020Ma.js');
 
 const flag = (name, value) => {
 	const arg = process.argv.find(a => a.startsWith('--' + name + '='));

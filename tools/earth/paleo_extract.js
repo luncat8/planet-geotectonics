@@ -31,7 +31,7 @@
  * consistency pass and datum calibration then make the pack self-consistent:
  * sea level lands exactly where the map draws water.
  *
- * Usage (needs jpeg-js: `npm install jpeg-js` in a scratch dir, or NODE_PATH):
+ * Usage (jpeg-js is vendored in vendor/jpeg-js, so a clean checkout runs this offline):
  *   node tools/earth/paleo_extract.js <in.jpg> <out.bin> --deg 1 [--epoch 250]
  *
  * Output bin (little endian):
@@ -46,10 +46,13 @@
 const fs = require('fs');
 const path = require('path');
 const jpeg = (() => {
+	// Vendored copy first: the bake must run from a clean checkout with no install step.
+	try { return require(path.join(__dirname, '..', '..', 'vendor', 'jpeg-js')); }
+	catch (e) {}
 	try { return require('jpeg-js'); } catch (e) {
 		try { return require(path.join(__dirname, '..', 'node_modules', 'jpeg-js')); }
 		catch (e2) {
-			console.error('jpeg-js not found - run `npm install jpeg-js` (see header)');
+			console.error('jpeg-js not found - expected vendor/jpeg-js/ (see header)');
 			process.exit(1);
 		}
 	}

@@ -1622,3 +1622,28 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	catalogue contains shards at 154 cm/yr equivalent (plate 306's 10 Ma stage), so the
 	vMax/R cap is not decoration - it fires on ~0.4% of plate-epochs and never on a major
 	craton except Australia/Antarctica's single 80 Ma stage.
+
+## a blocked download route is not a blocked source (0.4.6d, 2026-09-30)
+
+	SOURCES.md recorded that the build sandbox cannot reach the Zenodo/EarthByte NetCDF-CSV
+	PaleoDEMS, and the 0.4.6c handoff read that as "the older epochs are blocked in the
+	sandbox". They were not: the 1 degree CC-BY 4.0 JPEG route the project already ingests
+	lives on raw.githubusercontent and was reachable all along. The lesson is the check, not
+	the conclusion: before a milestone is called blocked on data, re-fetch a file the repo
+	ALREADY trusts from the candidate route and compare its hash - fetching
+	raw.githubusercontent.com/andytradewave/pdmap/master/vendor/paleodem/000.jpg returned
+	MD5 71a45fbb4c7b8e457d38212285f3dcc7, byte-identical to the committed
+	data/earth/paleo/000Ma_source.jpg. A route that reproduces a committed artefact exactly
+	is not a route of last resort, it is the route, and the DOIs in SOURCES.md stay the
+	canonical citation either way. A hash that matches nothing is worse than a 404: a
+	loop that builds the URL from an unpadded epoch writes the same 14-byte "404: Not
+	Found" body into every file it was told to fetch, and three identical MD5s are the tell.
+
+## bash printf "%03d" reads a leading zero as octal (0.4.6d, 2026-09-30)
+
+	Padding an epoch to three digits - `n=$(printf "%03d" "$e")` over a 065/040/020 pair -
+	silently produced 053Ma, 032Ma, 016Ma, because printf's integer conversion takes the
+	argument as octal when it starts with 0. Three bakes then failed on missing bins while
+	the loop looked correct. Use `printf "%03d" "$((10#$e))"`, or pad in the source list
+	(`for e in 65 40 20`) instead of the destination. The same trap applies to arithmetic
+	and to `sort -n` on padded ids.
