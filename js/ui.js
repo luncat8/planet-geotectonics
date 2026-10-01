@@ -55,6 +55,14 @@
 	// void again whenever the world is replaced. freezeJob is the cancel token of a running scan.
 	var catalogue = null, freezeJob = 0;
 	var catalogueReadout = document.getElementById('catalogue-readout');
+	// Prospecting (0.6.1): lazy snapshot + instruments. The catalogue above doubles as the
+	// exploration snapshot; surveys generate only the tiles they touch, so a whole-world
+	// scan is not required. The ledger accumulates discovery knowledge.
+	var prospectReadout = document.getElementById('prospect-readout');
+	var prospectLedgerEl = document.getElementById('prospect-ledger');
+	var prospectLedger = Prospector.createLedger();
+	var lastPinned = null; // {x,y,z, cell, tile, lat,lon}
+	var prospectRepeats = new Map(); // key "tile:cell" -> count
 	function downloadBlob(name, blob) {
 		var link = document.createElement('a');
 		link.href = URL.createObjectURL(blob);
@@ -636,6 +644,9 @@
 		extractScratch = null;   // sized to the old grid.V
 		freezeJob++; catalogue = null;   // a scan of the old world must not publish
 		catalogueSave.disabled = true; catalogueReadout.textContent = 'Freeze the paused world to generate its synthetic deposit catalogue.';
+		prospectLedger = Prospector.createLedger(); prospectRepeats.clear(); lastPinned = null;
+		if (prospectReadout) prospectReadout.textContent = 'Select instruments and Survey pinned cell. First survey snapshots the paused world; not every cell hosts a commercial deposit.';
+		if (prospectLedgerEl) prospectLedgerEl.textContent = '';
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
@@ -864,6 +875,103 @@
 		downloadBlob('deposit-catalogue-' + Math.round(catalogue.meta.t) + 'myr.json',
 			new Blob([Deposits.json(catalogue)], { type: 'application/json' }));
 	});
+	// Prospecting 0.6.1: instruments on the frozen snapshot, lazy tiles.
+	function getProspectConfig() {
+		return {
+			visual: !!document.getElementById('prospect-visual').checked,
+			sample: !!document.getElementById('prospect-sample').checked,
+			drill500: !!document.getElementById('prospect-drill500').checked,
+			drill5000: !!document.getElementById('prospect-drill5000').checked,
+			mag: !!document.getElementById('prospect-mag').checked,
+			seismic: !!document.getElementById('prospect-seismic').checked
+		};
+	}
+	function hasAnyInstrument(cfg) { return cfg.visual || cfg.sample || cfg.drill500 || cfg.drill5000 || cfg.mag || cfg.seismic; }
+	function ensureProspectScenario(done) {
+		if (catalogue && catalogue.snapshot) { done(catalogue); return; }
+		// Snapshot now; do not scan whole world.
+		var world = state;
+		var begin = function () {
+			try {
+				var sc = Deposits.scenario(Deposits.snapshot(world, startInput.value + ' ' + presetInput.value), world.seed);
+				catalogue = sc;
+				catalogueReadout.textContent = 'Snapshot at ' + world.t.toFixed(1) + ' Myr (lazy, ' + DepositEconomics.describe() + '): surveys generate only touched tiles; Freeze scans all ' + Deposits.tileCount() + ' tiles.';
+				catalogueSave.disabled = true;
+				done(sc);
+			} catch (e) { prospectReadout.textContent = 'Snapshot failed: ' + e.message; }
+		};
+		if (gpu.on && gpu.ready) { GpuSim.download(state).then(begin, begin); }
+		else begin();
+	}
+	function pinFromProbe(cell) {
+		var g = grid, pos = g.pos;
+		var x = pos[cell*3], y = pos[cell*3+1], z = pos[cell*3+2];
+		var len = Math.hypot(x,y,z); x/=len; y/=len; z/=len;
+		lastPinned = { x:x, y:y, z:z, cell:cell, tile: Deposits.tileOf(x,y,z), lat: +(Math.asin(y)*180/Math.PI).toFixed(4), lon: +(Math.atan2(z,x)*180/Math.PI).toFixed(4) };
+	}
+	function runProspect(repeat) {
+		if (!lastPinned) { prospectReadout.textContent = 'Click the map to pin a cell, then Survey.'; return; }
+		var cfg = getProspectConfig();
+		if (!hasAnyInstrument(cfg)) { prospectReadout.textContent = 'Select at least one instrument.'; return; }
+		var repeatKey = lastPinned.tile + ':' + lastPinned.cell;
+		var count = prospectRepeats.get(repeatKey) || 0;
+		if (repeat) { count++; prospectRepeats.set(repeatKey, count); }
+		else prospectRepeats.set(repeatKey, count);
+		var doSurvey = function (sc) {
+			var survey = Prospector.survey(sc, lastPinned.x, lastPinned.y, lastPinned.z, cfg, count);
+			// Attach ground truth when reveal is on, but keep it separate from observations.
+			if (document.getElementById('prospect-reveal').checked) {
+				var truth = Prospector._candidates(sc, lastPinned.x, lastPinned.y, lastPinned.z, 600);
+				// filter to those within 200 m to avoid huge truth dump
+				var filtered = [];
+				for (var i=0;i<truth.length;i++) { var b=truth[i], o=[0,0]; Deposits.offsetFrom(b, lastPinned.x, lastPinned.y, lastPinned.z, o); if (Math.hypot(o[0],o[1])<400) filtered.push(b); }
+				survey.truth = filtered.slice(0,4);
+			}
+			Prospector.addToLedger(prospectLedger, survey);
+			var text = Prospector.formatSurvey(survey, !!document.getElementById('prospect-reveal').checked);
+			var econFilter = !!document.getElementById('prospect-econ').checked;
+			if (econFilter && survey.economics.length) {
+				var pos = survey.economics.filter(function(e){return e.positive;});
+				text += '\nEconomics filter (scenario-positive only ' + DepositEconomics.describe() + '): ' + (pos.length? pos.map(function(e){return e.id;}).join(', ') : 'none of the detected bodies pass; barren or sub-economic (not detected ≠ absent)') ;
+			} else if (survey.detected.length) {
+				text += '\nEconomics (' + DepositEconomics.describe() + '): ' + survey.economics.map(function(e){return e.id + ' ' + (e.positive? 'POSITIVE':'sub-econ') + ' $' + (e.net/1e6).toFixed(1) + 'M';}).join('; ');
+			}
+			if (!survey.detected.length) text += '\n\nNot every cell hosts an economic deposit: favourability is continuous, ore bodies are discrete and price/cost filters thin them further.';
+			prospectReadout.textContent = text;
+			var ledgerText = 'Ledger: ' + prospectLedger.discovered.size + ' distinct bodies detected across ' + prospectLedger.surveys.length + ' survey(s).';
+			if (prospectLedger.discovered.size) {
+				var ids = Array.from(prospectLedger.discovered).slice(0,20);
+				ledgerText += '\n' + ids.join(', ') + (prospectLedger.discovered.size>20? ' …':'');
+			}
+			if (catalogue && catalogue.tiles) ledgerText += '\nTiles materialised: ' + catalogue.tiles.size + ' / ' + Deposits.tileCount();
+			prospectLedgerEl.textContent = ledgerText;
+		};
+		ensureProspectScenario(doSurvey);
+	}
+	document.getElementById('prospect-survey').addEventListener('click', function(){ runProspect(false); });
+	document.getElementById('prospect-repeat').addEventListener('click', function(){ runProspect(true); });
+	document.getElementById('prospect-viable').addEventListener('click', function(){
+		var doExport = function(sc){
+			var econOnly = document.getElementById('prospect-econ').checked;
+			if (sc.complete) {
+				var all = Deposits.allBodies(sc);
+				var filtered = econOnly ? all.filter(function(b){ return DepositEconomics.screen(b).positive;}) : all;
+				var name = econOnly ? 'viable-deposits-' : 'all-deposits-';
+				downloadBlob(name + Math.round(sc.meta.t) + 'myr.json', new Blob([JSON.stringify(filtered,null,1)],{type:'application/json'}));
+				prospectReadout.textContent = (econOnly? 'Viable ':'All ') + filtered.length + ' of ' + all.length + ' bodies at ' + sc.meta.t.toFixed(1) + ' Myr (' + DepositEconomics.describe() + ')';
+			} else {
+				// Export the ledger's discovered bodies, filtered.
+				var discoveredBodies = [];
+				var seen = new Set();
+				for(var s=0;s<prospectLedger.surveys.length;s++){ var surv=prospectLedger.surveys[s]; var cands=Prospector._candidates(sc, surv.anchor.x, surv.anchor.y, surv.anchor.z, 700); for(var ci=0; ci<cands.length; ci++){ var b=cands[ci]; if(seen.has(b.id))continue; if(surv.detected.indexOf(b.id)>=0){ seen.add(b.id); discoveredBodies.push(b); } } }
+				if(econOnly) discoveredBodies = discoveredBodies.filter(function(b){return DepositEconomics.screen(b).positive;});
+				if(!discoveredBodies.length){ prospectReadout.textContent = 'No discovered bodies to export; survey some cells and freeze for a whole-world map.'; return; }
+				downloadBlob((econOnly?'viable-':'')+'discovered-' + Math.round(sc.meta.t) + 'myr.json', new Blob([JSON.stringify(discoveredBodies,null,1)],{type:'application/json'}));
+			}
+		};
+		if(!catalogue){ prospectReadout.textContent='Survey a cell first to snapshot, or Freeze for a whole-world export.'; return; }
+		doExport(catalogue);
+	});
 	loadInput.addEventListener('change', function () {
 		var file = loadInput.files[0];
 		if (!file) return;
@@ -938,7 +1046,9 @@
 	}
 	function probeReport(cell) {
 		var owner = state.owner[cell];
-		if (owner < 0) { probe.textContent = 'Cell ' + cell + ' · uncovered gap, ' + state.gapFrames[cell] + ' frames old.'; return; }
+		if (owner < 0) { probe.textContent = 'Cell ' + cell + ' · uncovered gap, ' + state.gapFrames[cell] + ' frames old.'; lastPinned = null; return; }
+		try { pinFromProbe(cell); } catch (e) {}
+		
 		var rank = 0, names = ['interior', 'transform', 'divergent', 'subduction', 'collision'];
 		for (var k = 0; k < grid.ringN[cell]; k++) {
 			var e = cell * 6 + k, t = state.edgeType[e], r = t === 1 && state.polarity[e] === 2 ? 4 : t === 1 ? 3 : t === 2 ? 2 : t === 3 ? 1 : 0;

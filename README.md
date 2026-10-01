@@ -45,6 +45,7 @@ Open `index.html` directly in a browser.
   seed + generator version + snapshot, so clicks, whole-world scans and re-imports agree byte for byte;
   the simulation is never touched. Priors are game parameters (`data/deposits/SOURCES.md`), not
   reserves. See `0.6.x-plan-deposit-prospector.md`.
+- Prospecting instruments (0.6.1): the frozen snapshot is lazily materialised — a survey of the pinned cell generates only its tiles, so `Freeze catalogue` is only for a whole-world export. Visual, sample-assay, 500 m / 5 km drilling, magnetic/EM and seismic each have an honest footprint, depth and host limit, deterministic noise and a repeat index; a null result means not detected within support, not absent. Only ~19 % of synthetic bodies are scenario-positive under the game economics (`js/data/deposit-economics.js` — prices, recovery, opex, depth/water penalties, scale cutoff), so most cells are barren or sub-economic. The ledger of discovered bodies grows with surveys and survives until the world is reset.
 - Potential-maxima diagnostic on demand (the "Potential maxima JSON" button): a one-cell blur of each potential, its ranked local maxima,
   and a context tag per deposit, dumped as JSON.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore

@@ -39,6 +39,19 @@
 				<button id="save">Save world</button><button id="deposits">Potential maxima JSON</button>
 				<button id="catalogue" title="Pause, snapshot the geology and generate the whole synthetic deposit catalogue (0.6.0)">Freeze catalogue</button><button id="catalogue-json" disabled>Catalogue JSON</button>
 			</fieldset>
+			<fieldset id="prospect"><legend>Prospecting · instruments survey the frozen snapshot</legend>
+				<label class="check"><input id="prospect-visual" type="checkbox" checked> Visual</label>
+				<label class="check"><input id="prospect-sample" type="checkbox"> Sample+assay</label>
+				<label class="check"><input id="prospect-drill500" type="checkbox"> Drill 500 m</label>
+				<label class="check"><input id="prospect-drill5000" type="checkbox"> Drill 5 km</label>
+				<label class="check"><input id="prospect-mag" type="checkbox"> Mag/EM</label>
+				<label class="check"><input id="prospect-seismic" type="checkbox"> Seismic</label>
+				<button id="prospect-survey" title="Survey the pinned cell with the selected instruments; first use snapshots the paused world lazily without scanning all tiles">Survey pinned cell</button>
+				<button id="prospect-repeat" title="Explicit repeat survey of the same site (improves confidence at a cost, does not reroll hidden geology)">Repeat survey</button>
+				<label class="check"><input id="prospect-reveal" type="checkbox"> Reveal ground truth (debug)</label>
+				<label class="check"><input id="prospect-econ" type="checkbox" checked> Scenario-positive only</label>
+				<button id="prospect-viable" title="Export viable bodies within instrument support or, after freeze, whole-world viable map">Export viable JSON</button>
+			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
 				<label>Resolution<select id="level"><option value="5" selected>L5 · 10,242 cells</option><option value="6">L6 · 40,962 cells</option><option value="7">L7 · 163,842 cells</option></select></label>
 				<label>Start<select id="start"><option value="map" selected>Map start</option><option value="hot">Hot start</option><option value="earth">Earth · present day</option><option value="pangaea">Earth · 250 Ma Pangaea</option><option value="gondwana">Earth · 200 Ma Gondwana</option><option value="jurassic">Earth · 150 Ma Late Jurassic</option><option value="cretaceous">Earth · 100 Ma Cretaceous</option><option value="kpg">Earth · 65 Ma K-Pg</option><option value="eocene">Earth · 40 Ma Eocene</option><option value="miocene">Earth · 20 Ma Miocene</option></select></label>
@@ -48,7 +61,7 @@
 				<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
 			</fieldset>
 		</section>
-		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div>Column inspector: <label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p><p id="catalogue-readout">Freeze the paused world to generate its synthetic deposit catalogue.</p></div></section>
+		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div>Column inspector: <label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p><p id="catalogue-readout">Freeze the paused world to generate its synthetic deposit catalogue.</p><p id="prospect-readout" style="white-space:pre-line; min-height:6em; font-size:0.85em;">Select instruments and Survey pinned cell. First survey snapshots the paused world; not every cell hosts a commercial deposit.</p><p id="prospect-ledger" style="white-space:pre-line; font-size:0.8em; color:#aab9bd;"></p></div></section>
 	</main>
 	<script src="js/env.js"></script>
 	<script src="js/geodesics.js"></script>
@@ -73,6 +86,8 @@
 	<script src="js/extract.js"></script>
 	<script src="js/data/deposit-models.js"></script>
 	<script src="js/deposits.js"></script>
+	<script src="js/data/deposit-economics.js"></script>
+	<script src="js/prospector.js"></script>
 	<script src="js/sim.js"></script>
 	<script src="js/data/earth-1deg.js"></script>
 	<script src="js/data/earth-05deg.js"></script>
