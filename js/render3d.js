@@ -256,6 +256,7 @@ Render3D.NORM_ANALYTIC = `// Per-vertex normals from the height field's own cent
 // east/north/up frame. The cos(lat) floor keeps a pole vertex finite; the sea shell and
 // the rim pass their radial dir instead, exactly what the derivative normals give them.
 fn vertexNormal(dir: vec3<f32>, uv: vec2<f32>) -> vec3<f32> {
+	if (abs(dir.y) > 0.9999) { return dir; }
 	let p = vec2<f32>(uv.x * f32(W), uv.y * f32(H)) - vec2<f32>(0.5);
 	let x = i32(floor(p.x));
 	let y = clamp(i32(floor(p.y)), 0, i32(H) - 1);
@@ -777,6 +778,14 @@ Render3D.prototype.release = function () {
 	if (this.rimPipe && this.rimPipe.destroy) this.rimPipe.destroy();
 	if (this.blitPipe && this.blitPipe.destroy) this.blitPipe.destroy();
 	if (this.tsQ && this.tsQ.destroy) { this.tsQ.destroy(); this.tsOn = false; }
+	if (this.tsResolve) {
+		for (var r = 0; r < this.tsResolve.length; r++) if (this.tsResolve[r] && this.tsResolve[r].destroy) this.tsResolve[r].destroy();
+		this.tsResolve = null;
+	}
+	if (this.tsMap) {
+		for (var m = 0; m < this.tsMap.length; m++) if (this.tsMap[m] && this.tsMap[m].destroy) this.tsMap[m].destroy();
+		this.tsMap = null;
+	}
 	if (this.staging) { this.staging.destroy(); this.staging = null; }
 	this.zScratch = null;
 };

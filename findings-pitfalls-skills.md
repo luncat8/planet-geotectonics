@@ -1647,3 +1647,34 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	the loop looked correct. Use `printf "%03d" "$((10#$e))"`, or pad in the source list
 	(`for e in 65 40 20`) instead of the destination. The same trap applies to arithmetic
 	and to `sort -n` on padded ids.
+
+## normalizing a zero tangent at the pole produces NaNs in WGSL (0.5.5, 2026-10-01)
+
+	In analytic normal calculation on a sphere, the east tangent vector in world coordinates
+	is proportional to (-dir.z, 0, dir.x). At the geographic poles (dir = (0, ±1, 0)), both
+	dir.x and dir.z are zero, so the vector is (0, 0, 0). Calling normalize(vec3(0, 0, 0)) in
+	WGSL produces NaNs, poisoning the vertex normal and the lighting across all incident pole
+	triangles. Guard with `if (abs(dir.y) > 0.9999) { return dir; }` at the top of the
+	vertex normal shader: at the exact pole all longitudes converge and the normal is strictly
+	radial, so returning dir is mathematically exact and avoids 4 redundant textureLoad calls.
+
+## timestamp resolve/map buffers must be destroyed on release (0.5.5, 2026-10-01)
+
+	When profiling passes with createQuerySet, resolve buffers (usage QUERY_RESOLVE) and map
+	buffers (usage MAP_READ) are allocated per session. Render3D.release() destroyed textures,
+	pipelines, and geometry buffers, but omitted tsResolve and tsMap. Across repeated 3D
+	toggles or engine/level re-inits, this leaks device buffers. Always iterate and call
+	destroy() on tsResolve and tsMap arrays in release().
+
+## mesh topology vs height sampling: why a dense mesh still looks like hexes (0.5.5, 2026-10-01)
+
+	A dense tessellation (icosphere k8/k9 or lattice 1024x512/2048x1024) only defines the
+	geometric polygon density of the globe. If the height texture is populated via nearest-cell
+	lookup (LOOK[sy * LW + sx] = c), every texel inside cell c's Voronoi footprint receives the
+	exact same scalar elevation. The resulting height texture is a piecewise-constant mosaic
+	of flat hexagonal plateaus. Bilinear filtering merely softens a 1-texel transition at cell
+	edges. Therefore, regardless of whether the mesh is an icosphere or an equirectangular
+	lattice (confusingly named "Heightmap" in 0.5.5 UI), the 3D terrain displaces into flat
+	hexagonal mesas. True continuous heightmap relief requires spatial interpolation (e.g.
+	spherical Delaunay barycentric gather or ring neighbor blend) during the gather pass.
+

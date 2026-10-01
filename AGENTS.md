@@ -68,7 +68,8 @@ tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotat
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
-Render3D.gridMesh, the Mesh/Normals selects, the mode-aware detail list.
+Render3D.gridMesh, the Mesh/Normals selects, the mode-aware detail list; s14 investigates 3D
+height modes (hex plateaus vs continuous vertex-interpolated heightmap).
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.

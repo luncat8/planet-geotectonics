@@ -229,11 +229,17 @@ const written = new Float32Array(r3c.cellZ.bytes);
 assert.equal(written[5], -1e9, 'the upload carries the marker, not NaN');
 
 // Release destroys the session's own allocations and never the borrowed ones - including
-// the readback staging buffer, which the smoke's rig allocates and release used to drop.
+// the readback staging buffer and the timestamp resolve/map buffers.
 r3c.initReadback();
-const ownBufs = [r3c.posBuf, r3c.idxBuf, r3c.uniform, r3c.look, r3c.cellZ, r3c.staging];
+const mockTsRes = [gpuStub.createBuffer({ size: 64, usage: 4 }), gpuStub.createBuffer({ size: 64, usage: 4 })];
+const mockTsMap = [gpuStub.createBuffer({ size: 64, usage: 4 }), gpuStub.createBuffer({ size: 64, usage: 4 })];
+r3c.tsResolve = mockTsRes;
+r3c.tsMap = mockTsMap;
+const ownBufs = [r3c.posBuf, r3c.idxBuf, r3c.uniform, r3c.look, r3c.cellZ, r3c.staging, ...mockTsRes, ...mockTsMap];
 r3c.release();
 for (const b of ownBufs) assert.ok(b.destroyed, 'release destroys the session buffers');
+assert.equal(r3c.tsResolve, null, 'tsResolve cleared');
+assert.equal(r3c.tsMap, null, 'tsMap cleared');
 assert.ok(r3c.height === null || r3c.height.destroyed, 'and the height texture');
 const borrowed = [lookBuf, cellF];
 r3.release();

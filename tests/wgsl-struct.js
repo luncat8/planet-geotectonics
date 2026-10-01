@@ -231,5 +231,7 @@ assert.ok(r3dAnalytic.includes('textureLoad(HEIGHT, vec2<i32>(xm, y), 0).x') && 
 	'the analytic normal differences one texel either way, scaled by the true arc lengths');
 assert.ok(r3dAnalytic.includes('max(sqrt(max(1.0 - dir.y * dir.y, 0.0)), 0.001)'),
 	'with a cos(lat) floor, so a pole vertex stays finite');
+assert.ok(r3dAnalytic.includes('if (abs(dir.y) > 0.9999) { return dir; }'),
+	'pole vertices return radial direction without division by zero');
 
 console.log('PASS wgsl-struct: ' + checks + ' kernel sources balanced, entry-pointed, constants defined');
