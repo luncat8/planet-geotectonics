@@ -52,6 +52,10 @@
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
+	var prospectPanel = document.getElementById('prospect'), prospectLedger = null, prospectClickSerial = 0;
+	var instrumentInputs = [];
+	for (var inst = 0; inst < Instruments.LIST.length; inst++)
+		instrumentInputs.push(document.getElementById('inst-' + Instruments.LIST[inst].id));
 	var perfStrip = document.getElementById('perf-rows');
 	// --- Adjust: the live sliders (0.3.3) --------------------------------------------------
 	// Four knobs that apply mid-play on both engines with no restart: the mantle temperature
@@ -414,6 +418,24 @@
 	// pre-fill rides the same list: ?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9 is exactly the
 	// header line a non-default capture copies.
 	var query = new URLSearchParams(location.search);
+	var prospectIntro = 'Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.';
+	function selectedInstrumentIds() {
+		var ids = [];
+		for (var i = 0; i < instrumentInputs.length; i++)
+			if (instrumentInputs[i].checked) ids.push(Instruments.LIST[i].id);
+		return ids;
+	}
+	function prospectCapture() {
+		var ids = selectedInstrumentIds();
+		return ids.length ? 'prospect inst ' + ids.join(',') : '';
+	}
+	var instPrefill = query.get('inst');
+	if (instPrefill !== null) {
+		var requested = Object.create(null), names = instPrefill.toLowerCase().split(',');
+		for (var n = 0; n < names.length; n++) requested[names[n].trim()] = 1;
+		for (var p = 0; p < instrumentInputs.length; p++)
+			instrumentInputs[p].checked = !!requested[Instruments.LIST[p].id];
+	}
 	function offeredLevel(level) {
 		for (var i = 0; i < levelInput.options.length; i++) {
 			if (+levelInput.options[i].value === level) return true;
@@ -432,6 +454,7 @@
 	if (query.get('seed')) Params.seed = +query.get('seed') >>> 0;
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
 	var renderer = new Renderer(canvas, state), gpuRenderer = null, playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
+	prospectLedger = new Instruments.Ledger(grid.V);
 	// The view is independent of the simulated world. Its quaternion is deliberately not
 	// clamped: each pointer move composes one small surface rotation, so many full turns stay
 	// usable instead of snapping at a latitude or longitude limit. `viewVersion` is bumped by
@@ -596,6 +619,7 @@
 	// Lagrangian on one grid, so a different level is a different world and there is nothing to
 	// carry over. `after` runs once the engine is ready on the new world.
 	function rebuildWorld(level, seed, start, after) {
+		prospectClickSerial++;
 		Params.level = level;
 		grid = new Grid(level, seed).build();
 		state = new State(grid, seed, start === 'hot');
@@ -623,6 +647,8 @@
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
 		extractScratch = null;   // sized to the old grid.V
+		prospectLedger = new Instruments.Ledger(grid.V);
+		prospectPanel.textContent = prospectIntro;
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
@@ -865,35 +891,40 @@
 		};
 		reader.readAsArrayBuffer(file);
 	});
-	function probeAt(event, target) {
-		if (v3d.on && target === map3d) { probeAt3d(event); return; }
+	function cellAt(x, y, target) {
+		if (v3d.on && target === map3d) return cellAt3d(x, y);
 		var rect = mapRect(target);
-		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * grid.lookupW)));
-		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * grid.lookupH)));
+		var px = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((x - rect.left) / rect.width * grid.lookupW)));
+		var py = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((y - rect.top) / rect.height * grid.lookupH)));
 		if (renderer.updateViewLookup) renderer.updateViewLookup();
 		var mapLookup = renderer.viewLookup || grid.lookup;
-		probeReport(mapLookup[(grid.lookupH - 1 - y) * grid.lookupW + x]);
+		return mapLookup[(grid.lookupH - 1 - py) * grid.lookupW + px];
+	}
+	function probeAt(event, target) {
+		var cell = cellAt(event.clientX, event.clientY, target);
+		if (cell >= 0) probeReport(cell);
 	}
 	// The 3D inspector: the pointer ray is intersected with the unit planet (Render3D.pick,
-	// the camera's own basis maths), the hit direction maps to uv exactly like the gather
-	// kernel maps texels (u = lon/tau + 1/2, v = lat/pi + 1/2, row 0 = south - no flip,
-	// unlike the 2D screen path), and the cell under it reports from the CPU state. probeClick
-	// has already pulled a fresh mirror on the GPU engine; a hover reads it as it is, one
-	// event cycle old - the same split as the 2D map.
+	// the camera's own basis maths), then maps the hit direction to the gather's uv convention.
+	// Hover reads the CPU mirror as it is; a click pulls it first, exactly like the 2D map.
 	var pickDir = new Float64Array(3);
-	function probeAt3d(event) {
+	function cellAt3d(x, y) {
 		var r3d = v3d.r3d;
-		if (!r3d || !r3d.pick) return;
+		if (!r3d || !r3d.pick) return -1;
 		var rect = mapRect(map3d);
-		if (!r3d.pick(pickDir, event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height)) {
+		if (!r3d.pick(pickDir, x - rect.left, y - rect.top, rect.width, rect.height)) {
 			probe.textContent = 'Off the planet.';
-			return;
+			return -1;
 		}
 		var u = Math.atan2(pickDir[2], pickDir[0]) / MapView.TAU + 0.5;
 		var v = Math.asin(Math.max(-1, Math.min(1, pickDir[1]))) / Math.PI + 0.5;
-		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor(u * grid.lookupW)));
-		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor(v * grid.lookupH)));
-		probeReport(grid.lookup[y * grid.lookupW + x]);
+		var px = Math.min(grid.lookupW - 1, Math.max(0, Math.floor(u * grid.lookupW)));
+		var py = Math.min(grid.lookupH - 1, Math.max(0, Math.floor(v * grid.lookupH)));
+		return grid.lookup[py * grid.lookupW + px];
+	}
+	function probeAt3d(event) {
+		var cell = cellAt3d(event.clientX, event.clientY);
+		if (cell >= 0) probeReport(cell);
 	}
 	function probeReport(cell) {
 		var owner = state.owner[cell];
@@ -918,14 +949,36 @@
 		' · basin ' + state.oBas[owner].toFixed(2) + ' · placer ' + state.oPla[owner].toFixed(2) +
 		' · fert ' + state.fert[owner].toFixed(2);
 	}
-	// The inspector reads the CPU state, so on the GPU engine a click first pulls the mirror
-	// back (one readback, on demand only) and then reports from it.
+	function inspectCell(cell, selected) {
+		probeReport(cell);
+		if (!selected.length) return;
+		try {
+			var result = Instruments.survey(state, cell, selected, prospectLedger);
+			prospectPanel.textContent = Instruments.report(result);
+		} catch (error) {
+			prospectPanel.textContent = 'Survey failed: ' + error.message;
+			console.error('Prospecting survey failed', error);
+		}
+	}
+	// Resolve the cell while the event and current view are still live; then snapshot the
+	// selected tools and world before GPU readback. Neither a cleared currentTarget, a later pan,
+	// nor a world rebuild can redirect this survey to a different cell or session.
 	function probeClick(event) {
+		var cell = cellAt(event.clientX, event.clientY, event.currentTarget);
+		if (!Number.isInteger(cell) || cell < 0) return;
+		var selected = selectedInstrumentIds(), world = state, serial = ++prospectClickSerial;
 		if (gpu.on && gpu.ready) {
-			GpuSim.download(state).then(function () { probeAt(event, event.currentTarget); });
+			GpuSim.download(world).then(function () {
+				if (state === world && serial === prospectClickSerial) inspectCell(cell, selected);
+			}).catch(function (error) {
+				if (state !== world || serial !== prospectClickSerial) return;
+				probe.textContent = 'GPU readback failed: ' + error.message;
+				if (selected.length) prospectPanel.textContent = 'Survey failed: ' + error.message;
+				console.error('Prospecting readback failed', error);
+			});
 			return;
 		}
-		probeAt(event, event.currentTarget);
+		inspectCell(cell, selected);
 	}
 	function mapRect(target) {
 		if (target.getBoundingClientRect) return target.getBoundingClientRect();
@@ -1088,7 +1141,7 @@
 	function perfReport() {
 		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
 		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
-		var viewGate = viewGateReport(), adjust = adjustReport();
+		var viewGate = viewGateReport(), adjust = adjustReport(), prospect = prospectCapture();
 		var recon = reconInput && +reconInput.value ? 'recon ' + (+reconInput.value).toFixed(0) + ' Ma' : '';
 		// The 3D is a view setting, so it names itself only when it differs from the
 		// default (off); its knobs follow the adj line's convention.
@@ -1110,6 +1163,7 @@
 			+ '\n' + Perf.report(stripRows())
 			+ (viewGate ? '\n' + viewGate : '')
 			+ (adjust ? '\n' + adjust : '')
+			+ (prospect ? '\n' + prospect : '')
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
 	}
 	Clipboard.bind(perfStrip, perfReport, Clipboard.classAck(perfStrip));

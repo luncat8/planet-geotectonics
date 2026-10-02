@@ -52,7 +52,13 @@ canvas:active { cursor: grabbing; }
    the run is slow, not broken. */
 .controls label.slow { color: #e8b45a; }
 .controls label.slow select { border-color: #8a6d2f; background: #241d10; }
-#follow {accent-color: #9bdfba; width: auto; min-height: 0;}
+#follow { accent-color: #9bdfba; width: auto; min-height: 0; }
+#prospect-tools { flex: 1 1 100%; }
+.prospect-hint { flex: 1 1 100%; color: #788c99; font-size: 11px; }
+.inspectors { display: grid; gap: 12px; min-width: 0; }
+.inspectors > div { min-width: 0; }
+#prospect { width: 100%; max-width: 100%; margin: 10px 0 0; padding: 10px; max-height: 24em; overflow: auto; border: 1px solid #2b3540; border-radius: 6px;
+	background: #1a2632; color: #c9d8d9; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: pre; }
 
 button, select, input { font: inherit; border: 1px solid #3c4b57; border-radius: 5px; background: #1a2632; color: #e1e8eb; padding: 10px 12px; min-height: 39px; }
 button { cursor: pointer; font-size: 13px; }

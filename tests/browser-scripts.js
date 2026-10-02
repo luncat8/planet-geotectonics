@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
-for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
+for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'deposits', 'instruments', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
 'render3d', 'gpu/d1diff']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
@@ -23,6 +23,11 @@ Sim.advance(state, 0.1, 190);
 renderer.draw('plate'); renderer.draw('type'); renderer.draw('z'); renderer.draw('owner');
 renderer.draw('damage'); renderer.draw('sediment'); renderer.draw('speed'); renderer.draw('age'); renderer.draw('force');
 for (const ore of Renderer.ORE) renderer.draw(ore);
+var ledger = new Instruments.Ledger(state.grid.V);
+var survey = Instruments.survey(state, 0, ['d5k'], ledger);
+if (!survey.ok || ledger.cellsN !== 1 || !Instruments.report(survey).startsWith('cell 0')) {
+	throw new Error('single-cell instrument survey did not load');
+}
 const deposits = Extract.deposits(state, 0.01, 4, new Float64Array(state.grid.V));
 if (!Array.isArray(deposits)) throw new Error('extraction returns a list');
 if (JSON.parse(Extract.json(state, 0.01, 2, new Float64Array(state.grid.V))).format !== 'pgt-deposits') {

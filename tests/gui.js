@@ -117,6 +117,12 @@ assert.ok(/overflow-x: auto/.test(spanCss) && /scrollbar-width: none/.test(spanC
 assert.ok(/cursor: copy/.test(rowsCss), 'the whole strip reads as a copy control');
 rule('.perf .rows.copied');
 rule('.perf .rows.copy-failed');
+const prospectCss = rule('#prospect');
+assert.ok(/max-height: 24em/.test(prospectCss) && /overflow: auto/.test(prospectCss)
+	&& /max-width: 100%/.test(prospectCss),
+	'the persistent single-cell report scrolls inside its column instead of expanding the page');
+assert.ok(/id="prospect-tools"/.test(indexHtml) && /Prospecting · one cell per click/.test(indexHtml),
+	'the primary instrument surface is an explicit single-cell survey');
 // The settings live in two named groups (index.html), and the slow-on-CPU warning has its
 // amber rule: the test realm's DOM stub reads classes but not styles, so the stylesheet is
 // pinned the way the strip rules are.
@@ -147,7 +153,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'extract', 'deposits', 'instruments', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
 	'data/plate-crosswalk', 'earth', 'render'];
 
@@ -322,6 +328,11 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.equal(el('badge').textContent, 'CPU · L5');
 	assert.equal(el('grid-info').textContent, 'EQUIRECTANGULAR / 10,242 CELLS / 223 KM');
 	assert.equal(el('level').value, '5');
+	assert.equal(el('prospect').textContent, 'Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.');
+	for (const id of ['obs', 'geo', 'mag', 'gpr', 'd500', 'd5k', 'lab']) {
+		assert.ok(el('inst-' + id), 'the Prospecting fieldset offers ' + id);
+		assert.equal(el('inst-' + id).checked, false, 'no instrument is selected by default');
+	}
 	assert.equal(strip.children.length, page.Perf.SLOTS, 'one span per slot, mounted at boot');
 	assert.equal(strip.children[0].textContent, 'performance counter idle', 'the page\'s own placeholder');
 	assert.equal(gpu.inits.length, 0, 'the CPU default never touches the device');
@@ -355,6 +366,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		'copy header: ' + worldLine(text));
 	assert.ok(!/\n\n/.test(text) && !/\n$/.test(text), 'no blank line for a reserved-but-empty slot');
 	assert.ok(/\nt 0\.1 Myr · CPU · L5$/.test(text), 'the world line closes the report: ' + text.split('\n').pop());
+	assert.ok(!/^prospect /m.test(text), 'the default capture has no prospecting line');
 	assert.ok(strip.classList.contains('copied'), 'the strip acknowledges that the write landed');
 	assert.equal(strip.children.length, page.Perf.SLOTS, 'acknowledgement does not replace the report rows');
 	assert.equal(page.api.document.getElementById('copy-perf'), null, 'there is no separate Copy button');
@@ -532,6 +544,13 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.ok(!/^adj /m.test(stray.copy()),
 		'a capture at the defaults says nothing about adjustments:\n' + stray.copy());
 
+	const prospectPrefill = loadPage('?inst=obs,d5k');
+	assert.equal(prospectPrefill.el('inst-obs').checked, true, '?inst= pre-fills Field observation');
+	assert.equal(prospectPrefill.el('inst-d5k').checked, true, '?inst= pre-fills the deep drill');
+	assert.equal(prospectPrefill.el('inst-geo').checked, false, 'unlisted instruments stay off');
+	const prospectCapture = prospectPrefill.copy();
+	assert.match(prospectCapture, /^prospect inst obs,d5k$/m, 'the capture names the selected instruments');
+
 	// The five 0.3.3 controls ride the same pre-fill, and the copied adj line is the query
 	// that reproduces the capture - the line the sliders themselves write when moved.
 	const tuned = loadPage('?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9');
@@ -597,11 +616,14 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.ok(countChanged(identity, dragged) > 20000,
 		'the drag re-mapped the paint: ' + countChanged(identity, dragged) + ' of ' + TOTAL + ' pixels');
 	// The drag's own release-click is suppressed; a fresh press-release inspects the column.
+	const emptyProspect = pEl('prospect').textContent;
 	map.dispatch('pointerdown', { button: 0, pointerId: 1, clientX: 460, clientY: 250, currentTarget: map });
 	map.dispatch('pointerup', { pointerId: 1, currentTarget: map });
 	map.dispatch('click', { clientX: 460, clientY: 250, currentTarget: map });
 	const probed = /^Cell (\d+)/.exec(pEl('probe').textContent);
 	assert.ok(probed, 'a click after the drag inspected a column: ' + pEl('probe').textContent);
+	assert.equal(pEl('prospect').textContent, emptyProspect,
+		'with no instruments selected, a click leaves the prospect report untouched');
 	const cell = +probed[1], p4 = (250 * 1024 + 460) * 4;
 	assert.deepEqual([map.lastImage.data[p4], map.lastImage.data[p4 + 1], map.lastImage.data[p4 + 2]],
 		[mirror.colors[cell * 3], mirror.colors[cell * 3 + 1], mirror.colors[cell * 3 + 2]],
@@ -622,6 +644,18 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	map.dispatch('pointermove', { pointerId: 9, clientX: 300, clientY: 300, currentTarget: map });
 	assert.equal(pEl('probe').textContent, 'untouched', 'unchecked, a hover leaves the inspector alone');
 	pEl('follow').checked = true;
+
+	// Instruments answer one explicit cell click. Hover remains the cheap column preview and
+	// cannot add coverage or overwrite the persistent single-cell report.
+	pEl('inst-d5k').checked = true;
+	map.dispatch('click', { clientX: 460, clientY: 250, currentTarget: map });
+	const firstSurvey = pEl('prospect').textContent;
+	assert.match(firstSurvey, /d5k  hole 5000 m/);
+	assert.match(firstSurvey, /session 1 cells surveyed/);
+	map.dispatch('pointermove', { pointerId: 9, clientX: 700, clientY: 100, currentTarget: map });
+	assert.equal(pEl('prospect').textContent, firstSurvey, 'hover changes only the column inspector');
+	map.dispatch('click', { clientX: 700, clientY: 100, currentTarget: map });
+	assert.match(pEl('prospect').textContent, /session 2 cells surveyed/, 'a second click surveys one more cell');
 
 	// A press that never travels 4 px is the probe click, and the view does not move.
 	map.dispatch('pointerdown', { button: 0, pointerId: 2, clientX: 100, clientY: 100, currentTarget: map });
@@ -693,6 +727,16 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	await panPage.tick();
 	assert.equal(pEl('badge').textContent, 'GPU · L6');
 	const gpuMap = pEl('mapgpu');
+	gpuMap.dispatch('click', { clientX: 400, clientY: 200, currentTarget: gpuMap }); // release-click from the last drag
+	const gpuClick = { clientX: 400, clientY: 200, currentTarget: gpuMap };
+	gpuMap.dispatch('click', gpuClick);
+	gpuClick.currentTarget = null;   // browsers clear it as soon as the handler returns
+	pEl('inst-d5k').checked = false; // an in-flight readback must keep the click's instrument set too
+	await panPage.tick();
+	assert.match(pEl('probe').textContent, /^Cell \d+/, 'GPU click uses the captured target after readback');
+	assert.match(pEl('prospect').textContent, /d5k  hole 5000 m/,
+		'the click snapshots its instrument set and the fresh GPU mirror');
+	pEl('inst-d5k').checked = true;
 	pEl('play').click();
 	panPage.pump(3);
 	const inFlight = panPage.gpu.plays[panPage.gpu.plays.length - 1];
@@ -771,6 +815,8 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	};
 	for (const id of ['level', 'start', 'seed', 'reset', 'load'])
 		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'startup', '#' + id + ' lives in the Startup group');
+	for (const id of ['inst-obs', 'inst-geo', 'inst-mag', 'inst-gpr', 'inst-d500', 'inst-d5k', 'inst-lab'])
+		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'prospect-tools', '#' + id + ' lives in the Prospecting group');
 	for (const id of ['dt', 'speed', 'cadence', 'run-to', 'engine', 'save', 'deposits'])
 		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'adjust', '#' + id + ' lives in the Adjust group');
 	// The five live controls of 0.3.3 are Adjust controls too: nothing in this group rebuilds

@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 30 kernel, rig and GUI tests, ~1.5 min here
+node tests/run-all.js		short profile (default): 35 kernel, rig and GUI tests, ~2 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 
@@ -68,9 +68,11 @@ tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotat
 0.4.8-plan-earth-data.md - modern sediment/provenance improvement and holdout bake gates.
 0.6.x-plan-deposit-prospector.md - the deposit prospector umbrella: vocabulary, the stability
 contract, thresholds, module map and staging. the increments:
-0.6.0-plan-instruments.md - instrument set, the click-to-explore survey, the session ledger, the overlay.
+0.6.0-review.md - implementation review, short-profile results and follow-up scope.
+0.6.0-plan-instruments.md - local click-to-explore survey, seven instruments and the session ledger;
+	no map-wide scan.
 0.6.1-plan-deposit-catalogue.md - the deposit record, quantization, the Earth-anchored class table, viability.
-0.6.2-plan-core-and-viability-map.md - the stratigraphic core, the regional campaign and the viable map.
+0.6.2-plan-core-and-viability-map.md - the stratigraphic core, optional regional campaign and the opt-in viable map.
 0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent

@@ -44,10 +44,20 @@
 				<label id="preset-label" hidden title="Earth starts only: Realistic holds the real NNR-MORVEL poles (present day) and pins the thermal budget; Game lets the procedural mantle drive the continents. Historical packs have no poles, so Realistic there is a frozen-pole game run">Preset<select id="preset"><option value="realistic" selected>Realistic · real poles</option><option value="game">Game · mantle-driven</option></select></label>
 				<label id="recon-label" hidden title="Reconstruct: put the modern pack at a past epoch using the PALEOMAP rotation model (Mode K). Exact, reversible, display-side - writes no sim parameter.">Reconstruct<input id="recon" type="range" min="0" max="540" step="1" value="0"><span class="value" id="recon-value">0 Ma</span></label>
 				<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
-				<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
-			</fieldset>
-		</section>
-		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div>Column inspector: <label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p></div></section>
+					<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
+				</fieldset>
+				<fieldset id="prospect-tools"><legend>Prospecting · one cell per click</legend>
+					<label class="check" title="Outcrop, structure and placer pans; shallow exposure only"><input id="inst-obs" name="inst" value="obs" type="checkbox">Field observation</label>
+					<label class="check" title="Upstream catchment geochemistry; up to three drainage hops"><input id="inst-geo" name="inst" value="geo" type="checkbox">Stream geochemistry</label>
+					<label class="check" title="Depth-integrated response across a two-ring footprint"><input id="inst-mag" name="inst" value="mag" type="checkbox">Gravity + magnetics</label>
+					<label class="check" title="Sediment reflectors and shallow placer horizons"><input id="inst-gpr" name="inst" value="gpr" type="checkbox">Ground radar</label>
+					<label class="check" title="A 500 m hole; assay only where a candidate is intersected"><input id="inst-d500" name="inst" value="d500" type="checkbox">Drill 500 m</label>
+					<label class="check" title="A 5 km hole; assay only where a candidate is intersected"><input id="inst-d5k" name="inst" value="d5k" type="checkbox">Drill 5 km</label>
+					<label class="check" title="Refines a deposit already found; cannot discover one by itself"><input id="inst-lab" name="inst" value="lab" type="checkbox">Lab assay</label>
+					<small class="prospect-hint">Click a cell to survey it. Hover only updates the column inspector; it never surveys a cell.</small>
+				</fieldset>
+			</section>
+			<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div class="inspectors"><div><h2>Column inspector</h2><label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p></div><div><h2>Prospecting report</h2><pre id="prospect" aria-live="polite">Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.</pre></div></div></section>
 	</main>
 	<script src="js/env.js"></script>
 	<script src="js/geodesics.js"></script>
@@ -70,6 +80,8 @@
 	<script src="js/perf.js"></script>
 	<script src="js/clipboard.js"></script>
 	<script src="js/extract.js"></script>
+	<script src="js/deposits.js"></script>
+	<script src="js/instruments.js"></script>
 	<script src="js/sim.js"></script>
 	<script src="js/data/earth-1deg.js"></script>
 	<script src="js/data/earth-05deg.js"></script>

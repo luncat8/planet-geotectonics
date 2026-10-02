@@ -41,6 +41,14 @@ Open `index.html` directly in a browser.
   placer is liberated by erosion and rides the sediment load downhill.
 - Deposit extraction on demand: a one-cell blur of each potential, its ranked local maxima,
   and a context tag per deposit, dumped as JSON.
+- Single-cell prospecting (0.6.0): choose any combination of field observation, stream geochemistry,
+  gravity/magnetics, ground radar, shallow/deep drilling and lab assay, then click one cell. The
+  report is pinned independently from the cheap pointer-follow column probe; hover never surveys
+  or adds ledger entries. Reach, cover, drainage footprint and deterministic detection noise gate
+  each tool, while independent readings, drilling and lab work build inferred/indicated/measured
+  confidence in a page-local ledger. Candidates have stable column-frame identities and depth
+  buckets; size/grade, core logs, map-wide campaigns and markers are later increments, so this
+  workflow does not scan or claim the whole planet.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
   the surface; the trackball view has no latitude/longitude clamp and slows horizontal motion
@@ -109,12 +117,13 @@ same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIB
   see the 0.4.6 plan §10.3). Every epoch on the `0.4.0-Earth-map-plan.md` §8.5 roadmap is now
   baked and staged (see `0.4.6-review.md` and that plan's §8).
 
-See `0.2-plan.md`, `0.1.5-final-design.md` and `0.4.0-Earth-map-plan.md`.
+See `0.2-plan.md`, `0.1.5-final-design.md`, `0.4.0-Earth-map-plan.md` and the prospecting
+stages in `0.6.x-plan-deposit-prospector.md`; the 0.6.0 review is in `0.6.0-review.md`.
 
 ## Test
 
 ```
-node tests/run-all.js            short profile: every test except the four histories (~1 min)
+node tests/run-all.js            short profile: 35 tests except the four histories (~2 min)
 node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
 node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```
