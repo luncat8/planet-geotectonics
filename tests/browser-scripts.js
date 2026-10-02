@@ -28,11 +28,11 @@ var survey = Instruments.survey(state, 0, ['d5k'], ledger);
 if (!survey.ok || ledger.cellsN !== 1 || !Instruments.report(survey).startsWith('cell 0')) {
 	throw new Error('single-cell instrument survey did not load');
 }
-const deposits = Extract.deposits(state, 0.01, 4, new Float64Array(state.grid.V));
-if (!Array.isArray(deposits)) throw new Error('extraction returns a list');
-if (JSON.parse(Extract.json(state, 0.01, 2, new Float64Array(state.grid.V))).format !== 'pgt-deposits') {
-	throw new Error('deposit json carries its format tag');
-}
+const catalogue = Deposits.build(state);
+if (!Array.isArray(catalogue.records)) throw new Error('the catalogue returns a record list');
+const dump = JSON.parse(Deposits.json(state));
+if (dump.format !== 'pgt-deposits' || dump.version !== 2) throw new Error('deposit json carries its v2 format tag');
+if (!dump.classes.length || !dump.totals) throw new Error('deposit json carries the class table and its totals');
 var blob = Checkpoint.save(state);
 Checkpoint.load(state, blob);
 Sim.raster(state);

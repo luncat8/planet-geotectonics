@@ -39,15 +39,28 @@ Open `index.html` directly in a browser.
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
   placer is liberated by erosion and rides the sediment load downhill.
-- Deposit extraction on demand: a one-cell blur of each potential, its ranked local maxima,
-  and a context tag per deposit, dumped as JSON.
+- Deposit catalogue on demand (0.6.1): a one-cell blur of each potential and its ranked local
+  maxima become records with numbers. A flat class table of thirteen Earth-anchored rows
+  (porphyry, epithermal, VMS, Ni-Cu-PGE, cratonic diamond, orogenic vein, Carlin-style Au,
+  sandstone uranium, coal, potash, placer Au, Superior- and Algoma-type iron) turns a quantized
+  potential into a tonnage off a percentile ladder, log-uniform grades with the published negative
+  grade-tonnage correlation, 1-8 ore bodies whose shape follows one aspect ratio and reproduces
+  the tonnage exactly, a depth that knows whether the class is hosted in the basement or inside
+  the sediment pile, contained metal, and the industry's own grade / size / depth viability screen
+  with the failing leg named. Every number is a function of integer buckets and of a hash of
+  (seed, class, quantized body direction), so it does not move when the sim drifts under a bucket
+  or the clock advances. `Deposits.at` answers one cell for a click; `Deposits.build` is an
+  explicit O(V) catalogue (21 ms at L5, 74 ms at L7) that only an export or a regional request may
+  start, and `Deposits.json` dumps it as `pgt-deposits` v2.
 - Single-cell prospecting (0.6.0): choose any combination of field observation, stream geochemistry,
   gravity/magnetics, ground radar, shallow/deep drilling and lab assay, then click one cell. The
   report is pinned independently from the cheap pointer-follow column probe; hover never surveys
   or adds ledger entries. Reach, cover, drainage footprint and deterministic detection noise gate
   each tool, while independent readings, drilling and lab work build inferred/indicated/measured
   confidence in a page-local ledger. Candidates have stable column-frame identities and depth
-  buckets; size/grade, core logs, map-wide campaigns and markers are later increments, so this
+  buckets, and each found line now carries the 0.6.1 economics - variant, commodity, tonnage, size
+  class, grades, body count, depth interval and the viability verdict. A survey performs no
+  world scan at all: core logs, map-wide campaigns and markers are later increments, so this
   workflow does not scan or claim the whole planet.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
@@ -118,7 +131,9 @@ same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIB
   baked and staged (see `0.4.6-review.md` and that plan's §8).
 
 See `0.2-plan.md`, `0.1.5-final-design.md`, `0.4.0-Earth-map-plan.md` and the prospecting
-stages in `0.6.x-plan-deposit-prospector.md`; the 0.6.0 review is in `0.6.0-review.md`.
+stages in `0.6.x-plan-deposit-prospector.md`; the reviews are in `0.6.0-review.md` and
+`0.6.1-review.md`, and the catalogue's measured calibration is §10 of
+`0.6.1-plan-deposit-catalogue.md` (`node experiments/deposit-calibration.js`).
 
 ## Test
 

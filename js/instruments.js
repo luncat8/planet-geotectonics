@@ -7,23 +7,30 @@ var Instruments = (function () {
 		{ id: 'obs', name: 'Field observation', reach: 50, coverMax: 5, footprint: 1, kinds: ALL, detect: 0.45 },
 		{ id: 'geo', name: 'Stream-sediment geochemistry', reach: 0, coverMax: 200, footprint: -1, kinds: ALL, detect: 0.25 },
 		{ id: 'mag', name: 'Gravity + magnetics', reach: 3000, coverMax: Infinity, footprint: 2,
-			kinds: (1 << 0) | (1 << 1) | (1 << 2), detect: 0.30 },
+			kinds: (1 << 0) | (1 << 1) | (1 << 2) | (1 << 6), detect: 0.30 },
 		{ id: 'gpr', name: 'Shallow reflection / ground radar', reach: 1000, coverMax: Infinity, footprint: 0,
 			kinds: (1 << 4) | (1 << 5), detect: 0.25 },
 		{ id: 'd500', name: 'Shallow drill 500 m', reach: 500, coverMax: Infinity, footprint: 0, kinds: ALL, detect: 0.10 },
 		{ id: 'd5k', name: 'Deep drill 5 km', reach: 5000, coverMax: Infinity, footprint: 0, kinds: ALL, detect: 0.10 },
 		{ id: 'lab', name: 'Assay + isotopes', reach: 0, coverMax: Infinity, footprint: 0, kinds: ALL, detect: Infinity }
 	];
+	// Rows are instruments, columns the seven deposit kinds. Magnetite-rich iron formation is
+	// the classic magnetic target; ground radar only reaches the shallow basin and placer hosts.
 	var KIND_GAIN = [
-		[1, 1, 1, 1, 1, 1],
-		[1, 1, 1, 1, 1, 1],
-		[1, 1, 0.5, 0, 0, 0],
-		[0, 0, 0, 0, 1, 1],
-		[1, 1, 1, 1, 1, 1],
-		[1, 1, 1, 1, 1, 1],
-		[0, 0, 0, 0, 0, 0]
+		[1, 1, 1, 1, 1, 1, 1],
+		[1, 1, 1, 1, 1, 1, 1],
+		[1, 1, 0.5, 0, 0, 0, 1],
+		[0, 0, 0, 0, 1, 1, 0],
+		[1, 1, 1, 1, 1, 1, 1],
+		[1, 1, 1, 1, 1, 1, 1],
+		[0, 0, 0, 0, 0, 0, 0]
 	];
 	var CONFIDENCE = ['unknown', 'inferred', 'indicated', 'measured'];
+	function zeroReadings() {
+		var out = [];
+		for (var i = 0; i < KINDS.length; i++) out.push(0);
+		return out;
+	}
 	var EARTH_RADIUS = InstrumentParams.radius;
 	var DEPTH_STEP = 50;
 
@@ -166,8 +173,8 @@ var Instruments = (function () {
 	}
 	function collectCandidates(s, cell, instIndex, ledger, result, foundNow) {
 		var inst = LIST[instIndex], nCells = collectSamples(s, cell, inst, ledger),
-			cells = ledger.sampleCells, values = [0, 0, 0, 0, 0, 0], candidates = [], loadTotal = 0,
-			sums = [0, 0, 0, 0, 0, 0], contributing = 0;
+			cells = ledger.sampleCells, values = zeroReadings(), candidates = [], loadTotal = 0,
+			sums = zeroReadings(), contributing = 0;
 		var isGeo = inst.id === 'geo';
 		for (var ci = 0; ci < nCells; ci++) {
 			var c = cells[ci], owner = s.owner[c];
@@ -301,7 +308,7 @@ var Instruments = (function () {
 		var foundNow = Object.create(null);
 		for (var n = 0; n < indices.length; n++) {
 			var index = indices[n], inst = LIST[index];
-			result.readings.push({ id: inst.id, name: inst.name, values: [0, 0, 0, 0, 0, 0],
+			result.readings.push({ id: inst.id, name: inst.name, values: zeroReadings(),
 				hits: [], contributors: 0, sampleCount: 0, metrics: cellMetrics(s, cell), refined: 0 });
 			result.readings[result.readings.length - 1].depthToSource = -1;
 			if (inst.id === 'lab') applyLab(s, cell, ledger, result, foundNow);
@@ -375,6 +382,24 @@ var Instruments = (function () {
 		}
 		return line + 'no reading above background';
 	}
+	// A size is printed in its own ladder unit: Mt of ore for most rows, tonnes of U3O8 for
+	// sandstone uranium. Grades carry the unit the class table drew them in.
+	function sizeText(record) {
+		return (record.size >= 1 ? countText(record.size) : String(record.size)) + ' ' + record.unit;
+	}
+	function gradeText(record) {
+		var out = [];
+		for (var metal in record.grade) out.push(metal + ' ' + record.grade[metal] + record.gradeUnit[metal]);
+		return out.join(', ');
+	}
+	function economicsText(record) {
+		var line = '\n      ' + record.variant + ' · ' + record.commodity + ' · ' + sizeText(record)
+			+ ' (' + record.sizeClass + ')';
+		var grades = gradeText(record);
+		if (grades) line += ' @ ' + grades;
+		line += ' · ' + record.bodies.length + (record.bodies.length === 1 ? ' body' : ' bodies');
+		return line + ' · ' + (record.viable ? 'viable' : 'sub-economic: ' + record.reason);
+	}
 	function report(result) {
 		if (!result || !result.ok) return 'Select at least one instrument, then click a map cell.';
 		var lat = result.lat * 180 / Math.PI, lon = result.lon * 180 / Math.PI, cell = result.cell;
@@ -389,11 +414,11 @@ var Instruments = (function () {
 		for (var f = 0; f < result.found.length; f++) {
 			var item = result.found[f], rec = item.record;
 			text += '\n  #' + rec.id + '  ' + rec.kind + '  ' + CONFIDENCE[item.entry.confidence]
-				+ '  top ' + rec.top + ' m  ' + rec.host;
+				+ '  ' + rec.top + '-' + rec.bottom + ' m  ' + rec.host;
 			if (item.stale) text += '  · retained in session';
 			if (item.refinedFrom) text += '  · lab ' + CONFIDENCE[item.refinedFrom] + ' → ' + CONFIDENCE[item.entry.confidence];
 			if (item.instruments.length) text += '  · ' + item.instruments.join('+');
-			text += '  · size / grade pending';
+			text += economicsText(rec);
 		}
 		text += '\nsession ' + countText(result.ledger.cellsN) + ' cells surveyed · '
 			+ countText(result.ledger.found.length) + ' records found';

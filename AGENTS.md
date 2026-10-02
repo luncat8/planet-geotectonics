@@ -71,7 +71,9 @@ contract, thresholds, module map and staging. the increments:
 0.6.0-review.md - implementation review, short-profile results and follow-up scope.
 0.6.0-plan-instruments.md - local click-to-explore survey, seven instruments and the session ledger;
 	no map-wide scan.
-0.6.1-plan-deposit-catalogue.md - the deposit record, quantization, the Earth-anchored class table, viability.
+0.6.1-plan-deposit-catalogue.md - the deposit record, quantization, the Earth-anchored class table,
+	viability; §10 holds the measured calibration (experiments/deposit-calibration.js).
+0.6.1-review.md - implementation review of the catalogue: what the first measurement changed.
 0.6.2-plan-core-and-viability-map.md - the stratigraphic core, optional regional campaign and the opt-in viable map.
 0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
 0.5.0-draft-3d-render.md - draft: 3D planet render.

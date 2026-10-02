@@ -53,7 +53,8 @@ assert.notEqual(noise0, Instruments.noise(noiseWorld.seed, {
 }, 2), 'separate anchors do not share noise');
 
 // One-cell survey only: no whole-world scan or simulation mutation, with quantized reports.
-const shallow = site('oPla', 0.2);
+// 0.03 raw: above the trace floor once the placer field scale is applied, below depositMin.
+const shallow = site('oPla', 0.03);
 const shallowLedger = selectLedger(shallow);
 const before = Checkpoint.save(shallow);
 const weak = Instruments.survey(shallow, 0, ['obs'], shallowLedger);
@@ -71,6 +72,15 @@ assert.equal(observation.found.length, 1, 'field observation sees a shallow expo
 assert.equal(observation.found[0].entry.confidence, 1);
 assert.match(Instruments.report(observation), /obs  clicked column exposed/);
 assert.match(Instruments.report(observation), /inferred/);
+// 0.6.1: the found line carries the record's economics, not a placeholder.
+const economics = Instruments.report(observation);
+const found = observation.found[0].record;
+assert.match(economics, new RegExp(found.top + '-' + found.bottom + ' m'), 'the found line gives the depth interval');
+assert.match(economics, /gold · Au · [\d.,]+ Mt \((small|medium|large|giant)\) @ Au [\d.]+g\/t/,
+	'and the variant, commodity, tonnage, size class and grade');
+assert.match(economics, /· \d+ (body|bodies) · (viable|sub-economic: (grade|size|depth))$/m,
+	'and the body count and the viability verdict');
+assert.ok(!/pending/.test(economics.split('found deposits')[1]), 'no size/grade placeholder is left');
 const buriedOutcrop = site('oPla', 0.95, { elevation: 500, sediment: 6 });
 const buriedObservation = Instruments.survey(buriedOutcrop, 0, ['obs'], selectLedger(buriedOutcrop));
 assert.equal(buriedObservation.found.length, 0, 'observation does not work through more than five metres of cover');

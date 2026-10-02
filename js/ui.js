@@ -50,7 +50,6 @@
 	function seaKm(sea) { return (sea >= 0 ? '+' : '') + (sea / 1000).toFixed(1); }
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
-	var extractScratch = null;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var prospectPanel = document.getElementById('prospect'), prospectLedger = null, prospectClickSerial = 0;
 	var instrumentInputs = [];
@@ -646,7 +645,7 @@
 		syncAdjust();
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
-		extractScratch = null;   // sized to the old grid.V
+		Deposits.release();      // catalogue scratch and cache were sized to the old grid.V
 		prospectLedger = new Instruments.Ledger(grid.V);
 		prospectPanel.textContent = prospectIntro;
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
@@ -834,12 +833,12 @@
 			URL.revokeObjectURL(link.href);
 		}
 	});
-	// Deposit extraction is on demand, so its scratch is allocated on first use, never per frame.
+	// The full catalogue is an explicit, user-requested O(V) build - the one place a click is
+	// allowed to pay for every cell. Its scratch is allocated on first use, never per frame.
 	// On the GPU engine it first pulls the mirror so the potentials are current.
 	document.getElementById('deposits').addEventListener('click', function () {
 		var extract = function () {
-			if (!extractScratch) extractScratch = new Float64Array(grid.V);
-			var blob = new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' });
+			var blob = new Blob([Deposits.json(state)], { type: 'application/json' });
 			var link = document.createElement('a');
 			link.href = URL.createObjectURL(blob);
 			link.download = 'deposits-' + Math.round(state.t) + 'myr.json';

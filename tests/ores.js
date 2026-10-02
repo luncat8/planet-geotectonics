@@ -11,6 +11,7 @@ const Contact = require('../js/contact.js');
 const ColumnUpdate = require('../js/column-update.js');
 const Surface = require('../js/surface.js');
 const Extract = require('../js/extract.js');
+const Deposits = require('../js/deposits.js');
 const Diag = require('../js/diag.js');
 const Checkpoint = require('../js/checkpoint.js');
 
@@ -201,26 +202,36 @@ assert.ok(endGeo.basinSediment > 0.6, 'oBas stays in thick sediment: ' + endGeo.
 // share; 0.85 keeps the assertion about where arcs form while tolerating the drift.
 assert.ok(endGeo.arcOnOverrider > 0.85, 'oArc stays on overriding plates: ' + endGeo.arcOnOverrider);
 
-// Extraction: ranked, in range, tagged, and the same list twice.
+// Extraction: the field primitives still shape the field, and the catalogue above them is
+// ranked, in range, tagged and the same list twice.
 const scratch = new Float64Array(grid.V);
-const deposits = Extract.deposits(s, 0.15, 12, scratch);
-assert.ok(deposits.length >= 6, 'every class yields a deposit: ' + deposits.length);
-for (const d of deposits) {
-	assert.ok(d.value >= 0.15 && d.value <= 1, 'deposit value in range: ' + d.value);
-	assert.ok(d.host !== 'none' && d.kind && d.epoch > 0, 'deposit carries a context tag');
-	assert.ok(Number.isFinite(d.lat) && Math.abs(d.lat) <= Math.PI / 2, 'deposit latitude');
+Extract.blur(s, s.oArc, scratch);
+const arcPeaks = Extract.peaks(s, scratch, 0.15, []);
+for (const peak of arcPeaks) {
+	assert.ok(peak.value >= 0.15 && peak.value <= 1, 'blurred peak in range: ' + peak.value);
+	assert.ok(Extract.host(s, peak.cell) !== 'none', 'a peak sits on a hosted cell');
 }
-for (let k = 0; k < 6; k++) {
-	const own = deposits.filter((d) => d.kind === Diag.ORE_NAMES[k]);
-	for (let at = 1; at < own.length; at++) {
-		assert.ok(own[at - 1].value >= own[at].value, Diag.ORE_NAMES[k] + ' deposits are ranked');
+const catalogue = Deposits.build(s);
+assert.ok(catalogue.records.length >= 6, 'the catalogue is populated: ' + catalogue.records.length);
+for (const d of catalogue.records) {
+	assert.ok(d.potential >= Params.depositMin && d.potential <= 1, 'record potential in range: ' + d.potential);
+	assert.ok(d.host !== 'none' && d.kind && d.epochMyr >= 0, 'record carries a context tag');
+	assert.ok(Number.isFinite(d.lat) && Math.abs(d.lat) <= Math.PI / 2, 'record latitude');
+}
+for (let k = 0; k < Deposits.KINDS.length; k++) {
+	const ranked = catalogue.byKind[k];
+	for (let at = 1; at < ranked.length; at++) {
+		const before = catalogue.records[ranked[at - 1]], now = catalogue.records[ranked[at]];
+		const weight = (r) => r.contained[Object.keys(r.contained)[0]];
+		assert.ok(weight(before) >= weight(now), Deposits.KINDS[k] + ' records are ranked by contained metal');
 	}
 }
-assert.equal(Extract.json(s, 0.15, 4, scratch), Extract.json(s, 0.15, 4, scratch),
-	'extraction is deterministic');
-const parsed = JSON.parse(Extract.json(s, 0.15, 4, scratch));
+s.frame++;   // the cache is keyed on the frame: a second build must still be byte-identical
+assert.equal(Deposits.json(s), Deposits.json(s), 'the catalogue is deterministic');
+const parsed = JSON.parse(Deposits.json(s));
 assert.equal(parsed.format, 'pgt-deposits');
-assert.equal(parsed.totals.length, 6);
+assert.equal(parsed.version, 2);
+assert.equal(parsed.classes.length, Deposits.CLASSES.length);
 assert.ok(parsed.deposits.length > 0, 'json carries deposits');
 
 // Ore is state, not a derived buffer: it must survive a round trip exactly.
