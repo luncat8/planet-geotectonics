@@ -203,4 +203,13 @@ const carried = Core.section(stable, next, 5000);
 assert.deepEqual(sameLayers(carried), sameLayers(first), 'a column keeps its bedding when its cell changes');
 assert.equal(carried.intersections[0].id, first.intersections[0].id, 'ore identity follows the same anchor');
 
+// 3D spatial intersection: a step-out collar outside the body's ellipsoid misses the ore body
+// while still logging the host crust, and an off-axis collar pinches the intersected chord.
+const body0 = record.bodies[0];
+assert.ok(first.intersections[0].strikeDeg === body0.strikeDeg && first.intersections[0].dipDeg === body0.dipDeg,
+	'core intersections carry 3D structural attitude');
+const stepOutMiss = Core.section(stable, next, 5000, { eastM: body0.axesM[0] * 10, northM: body0.axesM[0] * 10 });
+assert.equal(stepOutMiss.intersections.length, 0, 'a distant step-out collar misses the 3D ore bodies');
+sumsToDepth(stepOutMiss);
+
 console.log('PASS core: contiguous anchored beds, water datum, local context features, real catalogue intersections, stable JSON and a basement stop');

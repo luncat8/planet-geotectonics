@@ -366,6 +366,46 @@ Deposits.build(spyWorld);
 assert.equal(scans, Deposits.KINDS.length, 'only the explicit build scans, once per kind');
 Extract.peaks = realPeaks;
 
+// --- 10. 3D ellipsoid body geometry and vertical ray-solid intersections -----------------
+assert.equal(new Set(catalogue.records.map((r) => r.id)).size, catalogue.records.length,
+	'catalogue records have unique ids');
+assert.ok(Array.isArray(summary.top) && summary.top.length > 0 && summary.top.length <= 10,
+	'summary exposes a global top-10 viable ranking');
+const out = [0, 0];
+const sphere = { axesM: [100, 100, 100], strikeDeg: 30, dipDeg: 50, burialTopM: 40 };
+assert.ok(Deposits.verticalIntersection(sphere, 0, 0, out));
+assert.ok(Math.abs(out[0] - 40) < 1e-9 && Math.abs(out[1] - 240) < 1e-9, 'sphere through its centre: ' + out);
+assert.ok(Deposits.verticalIntersection(sphere, 60, 0, out));
+assert.ok(Math.abs(out[1] - out[0] - 160) < 1e-9, 'off-centre chord of a sphere is 2 x 80 m');
+assert.ok(!Deposits.verticalIntersection(sphere, 100, 0, out) && !Deposits.verticalIntersection(sphere, 90, 90, out),
+	'a miss is not an intersection');
+const sheet = { axesM: [200, 120, 10], strikeDeg: 0, dipDeg: 0, burialTopM: 30 };
+assert.ok(Deposits.verticalIntersection(sheet, 100, 0, out));
+assert.ok(Math.abs(out[0] - (40 - 10 * Math.sqrt(1 - (100 / 120) ** 2))) < 1e-9, 'a flat sheet is thinner off its centre');
+const lode = { axesM: [300, 100, 5], strikeDeg: 0, dipDeg: 90, burialTopM: 10 };
+assert.ok(Deposits.verticalIntersection(lode, 0, 0, out) && Math.abs(out[0] - 10) < 1e-9 && Math.abs(out[1] - 210) < 1e-9,
+	'a vertical lode spans its down-dip axis: ' + out);
+assert.ok(!Deposits.verticalIntersection(lode, 6, 0, out), 'a drill 6 m off a 5 m-thick vertical lode misses');
+for (const record of catalogue.records) {
+	const row = Deposits.CLASSES.find((r) => r.kind === record.kind && r.variant === record.variant);
+	for (let bi = 0; bi < record.bodies.length; bi++) {
+		const b = record.bodies[bi];
+		assert.ok(b.strikeDeg >= 0 && b.strikeDeg < 360 && b.strikeDeg % 5 === 0, 'quantized strikeDeg');
+		assert.ok(b.dipDeg >= row.dip[0] && b.dipDeg <= row.dip[1], 'dipDeg inside class dip band');
+		assert.ok(Array.isArray(b.axesM) && b.axesM.length === 3 && b.axesM[0] >= b.axesM[1] && b.axesM[2] >= 1,
+			'3D ellipsoid semi-axes');
+		if (bi === 0) assert.ok(b.eastM === 0 && b.northM === 0, 'primary body is anchored at the collar');
+		assert.ok(Deposits.verticalIntersection(b, b.eastM, b.northM, out), 'a body intersects at its own centre');
+		assert.ok(Math.abs(out[0] - b.top) < 1e-9 && Math.abs(out[1] - b.bottom) < 1e-9,
+			'centre intersection spans [top, bottom]');
+		assert.ok(Deposits.verticalIntersection(b, 0, 0, out), 'cluster collar intersects every body in the cluster');
+		assert.ok(out[0] >= b.top - 1e-9 && out[1] <= b.bottom + 1e-9 && out[1] > out[0],
+			'off-centre intersection stays within the body depth envelope');
+		assert.ok(!Deposits.verticalIntersection(b, b.eastM + b.axesM[0] * 3, b.northM + b.axesM[0] * 3, out),
+			'a distant step-out collar misses the 3D ellipsoid');
+	}
+}
+
 // --- the catalogue is a read-only view: it never touches checkpointed state --------------
 const untouched = garden();
 const before = Checkpoint.save(untouched);

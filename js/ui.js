@@ -856,8 +856,9 @@
 		markerContext.clearRect(0, 0, width, height);
 		var pos = grid.pos, projected = campaignProject || (campaignProject = new Float64Array(2));
 		function diamond(record, viable) {
-			var b = record.cell * 3;
-			MapView.project(projected, pos[b], pos[b + 1], pos[b + 2], viewQ, width, height);
+			var dir = record.direction, b = record.cell * 3;
+			var dx = dir ? dir[0] : pos[b], dy = dir ? dir[1] : pos[b + 1], dz = dir ? dir[2] : pos[b + 2];
+			MapView.project(projected, dx, dy, dz, viewQ, width, height);
 			var x = projected[0], y = projected[1], radius = 3.5;
 			markerContext.beginPath();
 			markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);

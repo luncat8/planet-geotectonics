@@ -139,9 +139,19 @@ assert.equal(shallowHole.found.length, 0, 'the 500 m drill misses the buried rec
 const deepHole = Instruments.survey(covered, 0, ['d5k'], coveredLedger);
 assert.equal(deepHole.found.length, 1, 'the 5 km drill intersects it');
 assert.equal(deepHole.found[0].entry.confidence, 3, 'a drill intersection is measured');
+assert.equal(deepHole.found[0].entry.drilled, true, 'the entry records the drill intersection');
+assert.equal(deepHole.found[0].entry.assayed, false, 'the drill core starts unassayed');
+const unassayedBand = deepHole.found[0].entry.gradeBand.Cu;
+assert.ok(unassayedBand && unassayedBand[0] < unassayedBand[1], 'unassayed drill core has a field uncertainty band');
 assert.match(Instruments.report(deepHole), /assay pending/);
 const labMeasured = Instruments.survey(covered, 0, ['lab'], coveredLedger);
 assert.equal(labMeasured.found[0].entry.confidence, 3, 'lab cannot promote or demote a measured record');
+assert.equal(labMeasured.found[0].entry.assayed, true, 'lab certifies the drilled core');
+assert.equal(labMeasured.readings[0].certified, 1, 'lab reading counts the certified core');
+assert.equal(labMeasured.found[0].entry.gradeBand.Cu[0], labMeasured.found[0].entry.gradeBand.Cu[1],
+	'certified core grade band narrows to the exact grade');
+assert.match(Instruments.report(labMeasured), /core grade certified/);
+assert.match(Instruments.report(labMeasured), /lab assayed/);
 
 const remote = site('oVms', 1);
 const remoteLedger = selectLedger(remote);
@@ -260,7 +270,7 @@ for (let i = 0; i < 12; i++) {
 }
 chunkMs.sort((a, b) => a - b);
 const medianChunkMs = (chunkMs[5] + chunkMs[6]) * 0.5;
-assert.ok(medianChunkMs < 1.5, 'measured L5 campaign chunk median stays under 1.5 ms: ' + medianChunkMs.toFixed(3));
+assert.ok(medianChunkMs < 1.25, 'measured L5 campaign chunk median stays under 1.25 ms: ' + medianChunkMs.toFixed(3));
 console.log('campaign L5 d500+geo+mag chunk median ' + medianChunkMs.toFixed(2) + ' ms (1.25 ms target, 12 samples)');
 
 // Coverage is an OR of tools on one unique cell, and hover has no path into this module.

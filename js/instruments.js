@@ -161,6 +161,19 @@ var Instruments = (function () {
 		var wet = s.z[cell] < InstrumentParams.sea;
 		return s.z[cell] > InstrumentParams.sea || (wet && cover <= inst.coverMax);
 	}
+	var _drillSpan = [0, 0];
+	function canDrillIntersect(inst, record) {
+		var bodies = record.bodies;
+		if (!bodies || !bodies.length || !InstrumentDeposits.verticalIntersection)
+			return record.top <= inst.reach;
+		for (var b = 0; b < bodies.length; b++) {
+			var body = bodies[b];
+			if (!InstrumentDeposits.verticalIntersection(body, 0, 0, _drillSpan)) continue;
+			var enterRock = Math.max(body.top, Math.min(body.bottom - 1, Math.round(_drillSpan[0])));
+			if (enterRock <= inst.reach) return true;
+		}
+		return false;
+	}
 	function canMeasure(instIndex, s, record) {
 		var inst = LIST[instIndex], actualCover = s.hSed[record.owner];
 		if (actualCover > inst.coverMax) return false;
@@ -170,6 +183,7 @@ var Instruments = (function () {
 		}
 		if (inst.id === 'geo') return true;
 		if (inst.id === 'lab') return false;
+		if (inst.id === 'd500' || inst.id === 'd5k') return canDrillIntersect(inst, record);
 		return record.top <= inst.reach;
 	}
 	function gain(instIndex, kindIndex) {
@@ -178,6 +192,21 @@ var Instruments = (function () {
 	function noise(seed, record, instIndex) {
 		var mixSeed = (seed ^ Math.imul(instIndex + 1, 0x9e3779b1)) >>> 0;
 		return InstrumentDeposits.hash32(mixSeed, record.kindIndex, record.anchorKey) / 4294967296;
+	}
+	function computeGradeBand(seed, record, certified) {
+		var band = {};
+		for (var metal in record.grade) {
+			var g = record.grade[metal];
+			if (certified) {
+				band[metal] = [g, g];
+			} else {
+				var skew = (noise(seed ^ 0x517cc1b7, record, 5) - 0.5) * 0.08;
+				var lo = +(g * (0.88 + skew)).toPrecision(2);
+				var hi = +(g * (1.12 + skew)).toPrecision(2);
+				band[metal] = [Math.min(g, lo), Math.max(g, hi)];
+			}
+		}
+		return band;
 	}
 	function resultItem(result, entry, record, known, stale) {
 		for (var i = 0; i < result.found.length; i++) {
@@ -188,7 +217,10 @@ var Instruments = (function () {
 				return result.found[i];
 			}
 		}
-		var item = { entry: entry, record: record || entry.record, known: known, stale: stale, instruments: [], refinedFrom: 0 };
+		var item = {
+			entry: entry, record: record || entry.record, known: known, stale: stale,
+			instruments: [], refinedFrom: 0, certifiedByLab: false
+		};
 		result.found.push(item);
 		return item;
 	}
@@ -237,13 +269,15 @@ var Instruments = (function () {
 			best.kindIndex = record.kindIndex;
 			setAnchor(best, record);
 			best.record = record;
+			if (best.drilled) best.gradeBand = computeGradeBand(state.seed, record, !!best.assayed);
 			ledger.byId[best.id] = best;
 			return best;
 		}
 		var created = {
 			id: record.id, kind: record.kind, kindIndex: record.kindIndex, cell: record.cell,
 			anchorKey: record.anchorKey.slice(0), direction: record.direction.slice(0),
-			confidence: 0, evidence: 0, epochMyr: record.epochMyr, firstSeen: record.epochMyr,
+			confidence: 0, evidence: 0, drilled: false, assayed: false, gradeBand: null,
+			epochMyr: record.epochMyr, firstSeen: record.epochMyr,
 			lastSeen: record.epochMyr, surveyCell: -1, record: record,
 			ledgerIndex: ledger.found.length
 		};
@@ -273,7 +307,16 @@ var Instruments = (function () {
 	var campaignValues = new Float64Array(KINDS.length), campaignSums = new Float64Array(KINDS.length);
 	function collectCandidates(s, cell, instIndex, ledger, result, foundNow, catalogue) {
 		var detailed = !!result, inst = LIST[instIndex], nCells = collectSamples(s, cell, inst, ledger),
-			cells = ledger.sampleCells, values = detailed ? zeroReadings() : campaignValues,
+			cells = ledger.sampleCells, depths = ledger.sampleDepth;
+		if (!detailed && catalogue) {
+			var anyRecord = false;
+			for (var sc = 0; sc < nCells; sc++) {
+				var cCell = cells[sc];
+				if (catalogue.cellStart[cCell + 1] > catalogue.cellStart[cCell]) { anyRecord = true; break; }
+			}
+			if (!anyRecord) return;
+		}
+		var values = detailed ? zeroReadings() : campaignValues,
 			candidates = detailed ? [] : null, loadTotal = 0,
 			sums = detailed ? zeroReadings() : campaignSums, contributing = 0;
 		if (!detailed) { values.fill(0); sums.fill(0); }
@@ -285,41 +328,47 @@ var Instruments = (function () {
 			seisReading.interfaces = seismicSection(s, cell, cellMetrics(s, cell));
 			seisReading.reflectors = [];
 		}
-		for (var ci = 0; ci < nCells; ci++) {
-			var c = cells[ci], owner = s.owner[c];
-			if (owner < 0 || owner >= s.n || !s.alive[owner]) continue;
-			if (!readable(s, instIndex, c, owner)) continue;
-			var weight = 1;
-			if (isGeo) {
-				weight = Math.max(0, s.mobile[c]);
-				if (!(weight > 0)) continue;
-				loadTotal += weight;
-				contributing++;
-			}
-			for (var k = 0; k < KINDS.length; k++) {
-				if (!(inst.kinds & (1 << k))) continue;
-				var value = InstrumentDeposits.blurAt(s, k, c);
-				if (inst.id === 'd500' || inst.id === 'd5k') {
-					var intersected = catalogueAt(s, catalogue, c, k);
-					if (!intersected || !canMeasure(instIndex, s, intersected)) continue;
-					value = intersected.potential;
+		if (detailed || isGeo) {
+			for (var ci = 0; ci < nCells; ci++) {
+				var c = cells[ci], owner = s.owner[c];
+				if (owner < 0 || owner >= s.n || !s.alive[owner]) continue;
+				if (!readable(s, instIndex, c, owner)) continue;
+				var weight = 1;
+				if (isGeo) {
+					weight = Math.max(0, s.mobile[c]);
+					if (!(weight > 0)) continue;
+					loadTotal += weight;
+					contributing++;
 				}
-				if (isGeo) sums[k] += value * weight;
-				else if (value > values[k]) values[k] = value;
+				for (var k = 0; k < KINDS.length; k++) {
+					if (!(inst.kinds & (1 << k))) continue;
+					var value = InstrumentDeposits.blurAt(s, k, c);
+					if (inst.id === 'd500' || inst.id === 'd5k') {
+						var intersected = catalogueAt(s, catalogue, c, k);
+						if (!intersected || !canMeasure(instIndex, s, intersected)) continue;
+						value = intersected.potential;
+					}
+					if (isGeo) sums[k] += value * weight;
+					else if (value > values[k]) values[k] = value;
+				}
 			}
-		}
-		if (isGeo && loadTotal > 0) {
-			for (var g = 0; g < KINDS.length; g++) values[g] = sums[g] / loadTotal;
+			if (isGeo && loadTotal > 0) {
+				for (var g = 0; g < KINDS.length; g++) values[g] = sums[g] / loadTotal;
+			}
 		}
 		for (var sample = 0; sample < nCells; sample++) {
-			var sourceCell = cells[sample], sourceOwner = s.owner[sourceCell];
+			var sourceCell = cells[sample];
+			if (catalogue && catalogue.cellStart[sourceCell + 1] === catalogue.cellStart[sourceCell]) continue;
+			var sourceOwner = s.owner[sourceCell];
 			if (sourceOwner < 0 || sourceOwner >= s.n || !s.alive[sourceOwner]) continue;
+			var ringDist = depths[sample];
 			for (var kind = 0; kind < KINDS.length; kind++) {
 				if (!(inst.kinds & (1 << kind)) || gain(instIndex, kind) === 0) continue;
 				var record = catalogueAt(s, catalogue, sourceCell, kind);
 				if (!record || !canMeasure(instIndex, s, record)) continue;
 				if (candidates) candidates.push(record);
-				var signal = isGeo ? values[kind] : record.potential;
+				var atten = inst.id === 'mag' ? Math.exp(-record.top / 12000) * Math.exp(-ringDist * 0.08) : 1;
+				var signal = isGeo ? values[kind] : record.potential * atten;
 				var limit = inst.detect * (0.7 + 0.6 * noise(s.seed, record, instIndex));
 				if (signal < limit * gain(instIndex, kind)) continue;
 				var reading = detailed ? result.readings[result.readings.length - 1] : null;
@@ -353,6 +402,9 @@ var Instruments = (function () {
 					entry.confidence = Math.max(entry.confidence, popcount(entry.evidence) > 1 ? 2 : 1);
 				} else if (inst.tier === 'direct') {
 					entry.confidence = 3;
+					entry.drilled = true;
+					if (!entry.gradeBand) entry.gradeBand = computeGradeBand(s.seed, record, !!entry.assayed);
+					if (reading && entry.assayed) reading.assayStatus = 'lab assayed';
 				}
 				if (detailed) {
 					var item = resultItem(result, entry, record, wasKnown, false);
@@ -423,17 +475,25 @@ var Instruments = (function () {
 	}
 	function applyLab(s, cell, ledger, result, foundNow) {
 		var reading = result ? result.readings[result.readings.length - 1] : null;
-		var list = ledger.byRecordCell[String(cell)], changed = 0;
+		var list = ledger.byRecordCell[String(cell)], changed = 0, certified = 0;
 		if (!list) return;
 		for (var i = 0; i < list.length; i++) {
 			var entry = list[i];
 			if (entry.confidence < 1) continue;
-			var before = entry.confidence;
+			var before = entry.confidence, wasAssayed = !!entry.assayed;
 			if (before < 2) { entry.confidence++; changed++; }
+			if (entry.drilled && !wasAssayed) {
+				entry.assayed = true;
+				entry.gradeBand = computeGradeBand(s.seed, entry.record, true);
+				certified++;
+			} else if (!wasAssayed && before < 2) {
+				entry.assayed = true;
+			}
 			entry.lastSeen = Math.round(s.t * 10) / 10;
 			if (reading) {
 				var item = resultItem(result, entry, entry.record, true, false);
 				if (entry.confidence !== before) item.refinedFrom = before;
+				if (entry.drilled && !wasAssayed) item.certifiedByLab = true;
 				if (item.instruments.indexOf('lab') < 0) item.instruments.push('lab');
 				reading.hits.push('#' + entry.id);
 			}
@@ -441,6 +501,7 @@ var Instruments = (function () {
 		}
 		if (reading) {
 			reading.refined = changed;
+			reading.certified = certified;
 			reading.metrics = cellMetrics(s, cell);
 		}
 	}
@@ -598,7 +659,8 @@ var Instruments = (function () {
 			return line;
 		}
 		if (reading.id === 'd500' || reading.id === 'd5k') {
-			line += 'hole ' + LIST[instrumentIndex(reading.id)].reach + ' m · cover ' + m.sediment + ' m · assay pending';
+			line += 'hole ' + LIST[instrumentIndex(reading.id)].reach + ' m · cover ' + m.sediment + ' m · '
+				+ (reading.assayStatus || 'assay pending');
 			line += reading.holeHits.length ? ' · intersections ' + reading.holeHits.join(', ') : ' · no intersections';
 			return line;
 		}
@@ -620,7 +682,9 @@ var Instruments = (function () {
 		}
 		if (reading.id === 'lab') {
 			line += !reading.hits.length ? 'no previously found sample'
+				: reading.refined && reading.certified ? 'refined & certified ' + reading.hits.join(', ') + ' · confidence improved, core grade certified'
 				: reading.refined ? 'refined ' + reading.hits.join(', ') + ' · confidence improved'
+				: reading.certified ? 'assayed ' + reading.hits.join(', ') + ' · core grade certified'
 				: 'known sample ' + reading.hits.join(', ') + ' · no further confidence gain';
 			return line;
 		}
@@ -665,6 +729,7 @@ var Instruments = (function () {
 				+ '  ' + rec.top + '-' + rec.bottom + ' m  ' + rec.host;
 			if (item.stale) text += '  · retained in session';
 			if (item.refinedFrom) text += '  · lab ' + CONFIDENCE[item.refinedFrom] + ' → ' + CONFIDENCE[item.entry.confidence];
+			if (item.certifiedByLab || (item.entry.drilled && item.entry.assayed)) text += '  · lab assayed';
 			if (item.instruments.length) text += '  · ' + item.instruments.join('+');
 			text += economicsText(rec);
 		}

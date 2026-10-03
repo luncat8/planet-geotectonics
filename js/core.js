@@ -196,12 +196,21 @@ var Core = (function () {
 		for (var metal in record.grade) out.push(metal + ' ' + record.grade[metal] + ' ' + record.gradeUnit[metal]);
 		return out.join(' ');
 	}
-	function intersections(records, water, depth, out) {
+	var _span = [0, 0];
+	function intersections(records, water, depth, eastM, northM, out) {
 		for (var r = 0; r < records.length; r++) {
 			var record = records[r];
 			for (var b = 0; b < record.bodies.length; b++) {
 				var body = record.bodies[b], top = water + body.top, bottom = water + body.bottom;
-				var from = Math.max(0, top), to = Math.min(depth, bottom);
+				var enterRock = body.top, exitRock = body.bottom;
+				if (body.axesM && CoreDeposits.verticalIntersection) {
+					if (!CoreDeposits.verticalIntersection(body, eastM, northM, _span)) continue;
+					enterRock = Math.max(body.top, Math.min(body.bottom - 1, Math.round(_span[0])));
+					exitRock = Math.min(body.bottom, Math.max(enterRock + 1, Math.round(_span[1])));
+				} else if (eastM !== 0 || northM !== 0) {
+					continue;
+				}
+				var from = Math.max(0, water + enterRock), to = Math.min(depth, water + exitRock);
 				if (to <= from) continue;
 				out.push({
 					id: record.id,
@@ -213,6 +222,10 @@ var Core = (function () {
 					bodyBottom: bottom,
 					from: from,
 					to: to,
+					strikeDeg: body.strikeDeg !== undefined ? body.strikeDeg : 0,
+					dipDeg: body.dipDeg !== undefined ? body.dipDeg : 0,
+					eastM: body.eastM || 0,
+					northM: body.northM || 0,
 					grade: record.grade,
 					gradeUnit: record.gradeUnit,
 					label: oreLabel(record),
@@ -247,7 +260,7 @@ var Core = (function () {
 					ores.push({
 						id: hits[j].id, kind: hits[j].kind, variant: hits[j].variant,
 						label: hits[j].label, grade: hits[j].grade, gradeUnit: hits[j].gradeUnit,
-						bodyIndex: hits[j].bodyIndex
+						bodyIndex: hits[j].bodyIndex, strikeDeg: hits[j].strikeDeg, dipDeg: hits[j].dipDeg
 					});
 				}
 				if (ores.length) {
@@ -262,10 +275,13 @@ var Core = (function () {
 		}
 		return out;
 	}
-	function section(state, cell, requestedDepth, seed) {
+	function section(state, cell, requestedDepth, seed, opts) {
 		if (!Number.isInteger(cell) || cell < 0 || cell >= state.grid.V) throw new RangeError('core cell is outside the grid');
 		var owner = state.owner[cell];
 		if (owner < 0 || owner >= state.n || !state.alive[owner]) return null;
+		if (seed && typeof seed === 'object') { opts = seed; seed = opts.seed; }
+		var eastM = opts && Number.isFinite(opts.eastM) ? Math.round(opts.eastM) : 0;
+		var northM = opts && Number.isFinite(opts.northM) ? Math.round(opts.northM) : 0;
 		var isBasement = requestedDepth === 'basement' || requestedDepth === 'to basement';
 		var depth = isBasement ? 0 : Number(requestedDepth);
 		if (!isBasement && (!Number.isFinite(depth) || depth < 0)) throw new RangeError('core depth must be a nonnegative number or basement');
@@ -295,7 +311,7 @@ var Core = (function () {
 		}
 		if (wet && !rawLayers.length) addLayer(rawLayers, 0, 0, 'seawater', 'water column');
 		var hits = [];
-		intersections(records, water, depth, hits);
+		intersections(records, water, depth, eastM, northM, hits);
 		var finalLayers = splitOreLayers(rawLayers, hits);
 		if (wet && (water === 0 || !finalLayers.length)) finalLayers.unshift({
 			top: 0, bottom: 0, thickness: 0, lithology: 'seawater', detail: 'water column', ore: false
@@ -307,6 +323,8 @@ var Core = (function () {
 			epochMyr: Math.round(state.t * 10) / 10,
 			depth: depth,
 			requestedDepth: isBasement ? 'basement' : Math.round(Number(requestedDepth)),
+			eastM: eastM,
+			northM: northM,
 			datum: wet ? 'sea surface' : 'land surface',
 			wet: wet,
 			water: water,
