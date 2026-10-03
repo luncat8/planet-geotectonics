@@ -53,7 +53,7 @@ Open `index.html` directly in a browser.
   explicit O(V) catalogue (21 ms at L5, 74 ms at L7) that only an export or a regional request may
   start, and `Deposits.json` dumps it as `pgt-deposits` v2.
 - Single-cell prospecting (0.6.0): choose any combination of field observation, stream geochemistry,
-  gravity/magnetics, ground radar, shallow/deep drilling and lab assay, then click one cell. The
+  gravity/magnetics, ground radar, reflection seismic, shallow/deep drilling and lab assay, then click one cell. The
   report is pinned independently from the cheap pointer-follow column probe; hover never surveys
   or adds ledger entries. Reach, cover, drainage footprint and deterministic detection noise gate
   each tool, while independent readings, drilling and lab work build inferred/indicated/measured
@@ -61,6 +61,21 @@ Open `index.html` directly in a browser.
   buckets, and each found line now carries the 0.6.1 economics - variant, commodity, tonnage, size
   class, grades, body count, depth interval and the viability verdict. A local survey performs no
   world scan at all; hover remains a cheap column preview and never adds coverage.
+- Reflection seismic and the monetary scenario (0.6.3): the eighth instrument images crustal
+  structure rather than composition - a sediment base and a Moho, each with the uncertainty that
+  converting travel time to depth with an assumed velocity implies, plus a bright reflector where
+  a body happens to be one. It gains on massive, tabular and layered bodies and on a shear-zone
+  fabric, is blind to a diffuse porphyry stockwork and to unconsolidated basin fill, sees through
+  water and any cover, and never assays: its best verdict is `indicated` and its depths carry
+  ±10-20 %. A body is seismically quiet a little under half the time even when it is there, so a
+  null is not an absence. Beside the catalogue's geological `viable` screen (grade, size, depth -
+  it never mentions a price) `js/data/deposit-economics.js` answers the second question in USD,
+  with method-based costs across seven mining methods, because one flat rate per tonne is wrong
+  by an order of magnitude in both directions. Both verdicts print on every found line and both
+  counts on the regional summary, and on the L5 1500 Myr calibration world they disagree on 452
+  of 977 records - which is the reason to keep them apart. Prices are 2026 game values with their
+  derivations in the source; a price is refused rather than misapplied when its unit does not
+  match the one the catalogue counted in. See `0.6.3-merge-comparison.md`.
 - Stratigraphic cores plus the explicitly opt-in regional campaign (0.6.2): a local map click logs
   a deterministic core even with no instruments selected (without adding survey coverage in that
   case), with 500 m / 2 km / 5 km / to-basement depths measured from the land or sea surface (water
@@ -143,9 +158,12 @@ same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIB
 
 See `0.2-plan.md`, `0.1.5-final-design.md`, `0.4.0-Earth-map-plan.md` and the prospecting
 stages in `0.6.x-plan-deposit-prospector.md`; the reviews are in `0.6.0-review.md` and
-`0.6.1-review.md`, the current 0.6.2 work is tracked in
-`0.6.2-plan-core-and-viability-map.md`, and the catalogue's measured calibration is §10 of
-`0.6.1-plan-deposit-catalogue.md` (`node experiments/deposit-calibration.js`).
+`0.6.1-review.md`, the 0.6.2 core and regional campaign are in
+`0.6.2-plan-core-and-viability-map.md`, and the merge of the two independently written
+prospector implementations - with the monetary screen's measured calibration - is
+`0.6.3-merge-comparison.md`. Calibrations: `node experiments/deposit-calibration.js` for the
+class table (§10 of `0.6.1-plan-deposit-catalogue.md`) and
+`node experiments/economics-calibration.js` for the price screen.
 
 ## Test
 

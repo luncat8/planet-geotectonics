@@ -500,6 +500,15 @@
 			+ (totals.length ? totals.join('   ') : 'no viable contained metal in the ledger');
 		text += '\ndiscovered deposits ' + campaignCount(summary.records) + ' · sub-economic '
 			+ campaignCount(summary.records - summary.viable) + ' · kind ' + summary.kind;
+		// The monetary scenario is a second, independent question, so it gets its own line
+		// rather than replacing the count above. `viable` never mentions a price; this one
+		// never mentions a grade cutoff. The two columns are where they disagree.
+		if (summary.money && typeof DepositEconomics !== 'undefined') {
+			text += '\nmoney scenario-positive ' + campaignCount(summary.money.positive)
+				+ ' · net ' + DepositEconomics.money(summary.money.net)
+				+ ' · viable but does not pay ' + campaignCount(summary.money.geoOnly)
+				+ ' · pays but fails the class screen ' + campaignCount(summary.money.moneyOnly);
+		}
 		text += '\nlargest viable by contained metal';
 		var listed = 0;
 		for (var k = 0; k < summary.byKind.length; k++) {

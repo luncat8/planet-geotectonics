@@ -1,6 +1,10 @@
 var DepositParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var DepositDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
 var DepositExtract = typeof module !== 'undefined' && module.exports ? require('./extract.js') : Extract;
+// The monetary scenario (0.6.3). It reads a finished record and never writes one, so the
+// dependency is one way: the catalogue does not know a price exists, and changing a
+// price cannot change a record or its identity.
+var DepositMoney = typeof module !== 'undefined' && module.exports ? require('./data/deposit-economics.js') : DepositEconomics;
 
 // The deposit catalogue (0.6.1). Local, on-demand records: the cell grid is only a sampling
 // frame, identity comes from the column's plate-frame position, so a rigidly moving column does
@@ -557,6 +561,11 @@ var Deposits = (function () {
 		opts = opts || {};
 		var catalogue = opts.catalogue || build(s), perKind = [], all = {}, viable = {},
 			recordCount = 0, viableCount = 0, k;
+		// The monetary screen is counted alongside the geological one, not folded into it:
+		// `viable` is the class table's grade/size/depth verdict, `money` is the price
+		// scenario's, and the two disagree often enough that reporting only one would hide
+		// the other. Measured in experiments/economics-calibration.js.
+		var money = { positive: 0, net: 0, geoOnly: 0, moneyOnly: 0 };
 		for (k = 0; k < KINDS.length; k++) perKind.push({ kind: KINDS[k], records: 0, viable: 0, top: [] });
 		for (var i = 0; i < catalogue.records.length; i++) {
 			var r = catalogue.records[i];
@@ -564,12 +573,17 @@ var Deposits = (function () {
 			recordCount++;
 			perKind[r.kindIndex].records++;
 			addTotals(all, r.contained);
+			var screen = DepositMoney.screen(r);
+			if (screen.positive) { money.positive++; money.net += screen.net; }
+			if (r.viable && !screen.positive) money.geoOnly++;
+			if (!r.viable && screen.positive) money.moneyOnly++;
 			if (!r.viable) continue;
 			viableCount++;
 			perKind[r.kindIndex].viable++;
 			addTotals(viable, r.contained);
 			topInsert(perKind[r.kindIndex].top, r);
 		}
+		money.scenario = DepositMoney.describe();
 		return {
 			epochMyr: catalogue.epochMyr,
 			records: recordCount,
@@ -577,6 +591,7 @@ var Deposits = (function () {
 			byKind: perKind,
 			contained: viable,
 			containedAll: all,
+			money: money,
 			surveyedCells: opts.ledger ? opts.ledger.cellsN : 0,
 			kind: opts.kind || 'all',
 			stale: stale(s, catalogue)

@@ -1,31 +1,55 @@
 var InstrumentParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
 var InstrumentDeposits = typeof module !== 'undefined' && module.exports ? require('./deposits.js') : Deposits;
+var InstrumentEconomics = typeof module !== 'undefined' && module.exports ? require('./data/deposit-economics.js') : DepositEconomics;
 var Instruments = (function () {
 	var KINDS = InstrumentDeposits.KINDS;
 	var ALL = (1 << KINDS.length) - 1;
+	// `tier` states what kind of evidence an instrument can give, which is what the
+	// confidence ladder is built from. It used to be inferred from an instrument's position
+	// in this array (`instIndex <= 3` was indirect, 4 and 5 were a drill); appending the
+	// seismic line at the end made that arithmetic wrong, so the tier is now declared and
+	// the ladder no longer depends on list order.
+	//   indirect - images or infers a target; two independent ones reach `indicated`
+	//   direct   - intersects the body; `measured`
+	//   refine   - cannot discover; upgrades a sample already in the ledger
 	var LIST = [
-		{ id: 'obs', name: 'Field observation', reach: 50, coverMax: 5, footprint: 1, kinds: ALL, detect: 0.45 },
-		{ id: 'geo', name: 'Stream-sediment geochemistry', reach: 0, coverMax: 200, footprint: -1, kinds: ALL, detect: 0.25 },
+		{ id: 'obs', name: 'Field observation', reach: 50, coverMax: 5, footprint: 1, kinds: ALL, detect: 0.45, tier: 'indirect' },
+		{ id: 'geo', name: 'Stream-sediment geochemistry', reach: 0, coverMax: 200, footprint: -1, kinds: ALL, detect: 0.25, tier: 'indirect' },
 		{ id: 'mag', name: 'Gravity + magnetics', reach: 3000, coverMax: Infinity, footprint: 2,
-			kinds: (1 << 0) | (1 << 1) | (1 << 2) | (1 << 6), detect: 0.30 },
+			kinds: (1 << 0) | (1 << 1) | (1 << 2) | (1 << 6), detect: 0.30, tier: 'indirect' },
 		{ id: 'gpr', name: 'Shallow reflection / ground radar', reach: 1000, coverMax: Infinity, footprint: 0,
-			kinds: (1 << 4) | (1 << 5), detect: 0.25 },
-		{ id: 'd500', name: 'Shallow drill 500 m', reach: 500, coverMax: Infinity, footprint: 0, kinds: ALL, detect: 0.10 },
-		{ id: 'd5k', name: 'Deep drill 5 km', reach: 5000, coverMax: Infinity, footprint: 0, kinds: ALL, detect: 0.10 },
-		{ id: 'lab', name: 'Assay + isotopes', reach: 0, coverMax: Infinity, footprint: 0, kinds: ALL, detect: Infinity }
+			kinds: (1 << 4) | (1 << 5), detect: 0.25, tier: 'indirect' },
+		// Crustal-scale reflection seismic. It images impedance contrast and layering, so it
+		// sees a massive sulfide lens, a layered intrusion or a banded iron formation and is
+		// blind to a diffuse porphyry stockwork and to unconsolidated basin fill. It never
+		// assays: its best possible verdict is `indicated`, and its depths carry 10-20 %
+		// uncertainty, because a velocity model is an assumption rather than a measurement.
+		{ id: 'seis', name: 'Reflection seismic', reach: 15000, coverMax: Infinity, footprint: 2,
+			kinds: (1 << 0) | (1 << 1) | (1 << 3) | (1 << 6), detect: 0.32, tier: 'indirect',
+			uncertainty: [0.10, 0.20] },
+		{ id: 'd500', name: 'Shallow drill 500 m', reach: 500, coverMax: Infinity, footprint: 0, kinds: ALL, detect: 0.10, tier: 'direct' },
+		{ id: 'd5k', name: 'Deep drill 5 km', reach: 5000, coverMax: Infinity, footprint: 0, kinds: ALL, detect: 0.10, tier: 'direct' },
+		{ id: 'lab', name: 'Assay + isotopes', reach: 0, coverMax: Infinity, footprint: 0, kinds: ALL, detect: Infinity, tier: 'refine' }
 	];
 	// Rows are instruments, columns the seven deposit kinds. Magnetite-rich iron formation is
 	// the classic magnetic target; ground radar only reaches the shallow basin and placer hosts.
+	// Seismic is deliberately not magnetics' row: it gains where a body is massive, tabular or
+	// layered (vms, mafic, iron) and where a shear-zone fabric reflects (orogenic vein
+	// swarms), and it loses the diffuse porphyry stockwork that magnetics does pick up.
 	var KIND_GAIN = [
 		[1, 1, 1, 1, 1, 1, 1],
 		[1, 1, 1, 1, 1, 1, 1],
 		[1, 1, 0.5, 0, 0, 0, 1],
 		[0, 0, 0, 0, 1, 1, 0],
+		[1, 1, 0, 1, 0, 0, 1],
 		[1, 1, 1, 1, 1, 1, 1],
 		[1, 1, 1, 1, 1, 1, 1],
 		[0, 0, 0, 0, 0, 0, 0]
 	];
 	var CONFIDENCE = ['unknown', 'inferred', 'indicated', 'measured'];
+	// Seismic: a body returns a bright event a little over half the time and is
+	// seismically quiet the rest, even when it is there. A null is not an absence.
+	var SEIS_REFLECTOR_SALT = 0x5e15c0, SEIS_REFLECTOR_RATE = 0.55;
 	var reanchorBest = { entry: null, dot: -1 };
 	function zeroReadings() {
 		var out = [];
@@ -254,6 +278,13 @@ var Instruments = (function () {
 			sums = detailed ? zeroReadings() : campaignSums, contributing = 0;
 		if (!detailed) { values.fill(0); sums.fill(0); }
 		var isGeo = inst.id === 'geo';
+		// Seismic builds its own structural section for the clicked cell before any bright
+		// reflector is added to it, so a line with no target still reports the crust.
+		var seisReading = detailed && inst.id === 'seis' ? result.readings[result.readings.length - 1] : null;
+		if (seisReading) {
+			seisReading.interfaces = seismicSection(s, cell, cellMetrics(s, cell));
+			seisReading.reflectors = [];
+		}
 		for (var ci = 0; ci < nCells; ci++) {
 			var c = cells[ci], owner = s.owner[c];
 			if (owner < 0 || owner >= s.n || !s.alive[owner]) continue;
@@ -297,14 +328,30 @@ var Instruments = (function () {
 					if (reading.depthToSource < 0 || sourceDepth < reading.depthToSource)
 						reading.depthToSource = sourceDepth;
 				}
+				if (reading && inst.id === 'seis') {
+					// Whether a body is a good reflector is a property of the body, drawn
+					// from its own salted hash, so the same deposit is either always a
+					// bright event or never one - it does not flicker between surveys.
+					var reflectivity = InstrumentDeposits.hash32(
+						(s.seed ^ SEIS_REFLECTOR_SALT) >>> 0, record.kindIndex, record.anchorKey) / 4294967296;
+					if (reflectivity < SEIS_REFLECTOR_RATE) {
+						var fraction = inst.uncertainty[0]
+							+ (reflectivity / SEIS_REFLECTOR_RATE) * (inst.uncertainty[1] - inst.uncertainty[0]);
+						reading.reflectors.push({
+							name: 'bright reflector', depthM: record.top,
+							uncertaintyM: Math.round(record.top * fraction),
+							note: 'non-unique; no assay'
+						});
+					}
+				}
 				var wasKnown = !!ledger.byId[record.id], entry = findEntry(ledger, s, record);
 				moveSurveyCell(ledger, entry, cell);
 				entry.lastSeen = record.epochMyr;
 				entry.record = record;
-				if (instIndex <= 3) {
+				if (inst.tier === 'indirect') {
 					entry.evidence |= 1 << instIndex;
 					entry.confidence = Math.max(entry.confidence, popcount(entry.evidence) > 1 ? 2 : 1);
-				} else if (instIndex === 4 || instIndex === 5) {
+				} else if (inst.tier === 'direct') {
 					entry.confidence = 3;
 				}
 				if (detailed) {
@@ -342,6 +389,23 @@ var Instruments = (function () {
 			placer: s.mobilePla[cell],
 			elevation: Number.isFinite(s.z[cell]) ? Math.round(s.z[cell] / 10) * 10 : 0
 		};
+	}
+	// A seismic line images structure, not composition. It returns the two crustal
+	// interfaces a velocity model can place - the sediment base and the Moho - each with the
+	// uncertainty that converting travel time to depth with an assumed velocity implies.
+	// A bright reflector is added separately, from a detected body, and is non-unique: it
+	// says something dense or layered is at that depth, never what it is made of.
+	function seismicSection(s, cell, metrics) {
+		var owner = s.owner[cell], out = [];
+		if (owner < 0 || owner >= s.n || !s.alive[owner]) return out;
+		if (metrics.sediment > 0) {
+			out.push({ name: 'sediment base', depthM: metrics.sediment,
+				uncertaintyM: Math.round(metrics.sediment * 0.15), note: 'velocity contrast' });
+		}
+		var moho = Math.round((s.hSed[owner] + s.hFel[owner] + s.hMaf[owner]) / 50) * 50;
+		out.push({ name: 'Moho', depthM: moho, uncertaintyM: Math.round(moho * 0.12),
+			note: 'crust-mantle contrast' });
+		return out;
 	}
 	function reconcile(s, cell, ledger, result, foundNow) {
 		var list = ledger.bySurveyCell[String(cell)];
@@ -538,6 +602,22 @@ var Instruments = (function () {
 			line += reading.holeHits.length ? ' · intersections ' + reading.holeHits.join(', ') : ' · no intersections';
 			return line;
 		}
+		if (reading.id === 'seis') {
+			var parts = [];
+			for (var si = 0; si < reading.interfaces.length; si++) {
+				var iface = reading.interfaces[si];
+				parts.push(iface.name + ' ' + countText(iface.depthM) + ' ± ' + countText(iface.uncertaintyM) + ' m');
+			}
+			line += 'crust ' + ((m.sediment + m.mafic) / 1000).toFixed(1) + ' km · '
+				+ (parts.length ? parts.join(', ') : 'no interface resolved');
+			line += ' · reflectors ' + reading.reflectors.length;
+			for (var ri = 0; ri < reading.reflectors.length; ri++) {
+				var bright = reading.reflectors[ri];
+				line += '\n      ' + bright.name + ' ' + countText(bright.depthM) + ' ± '
+					+ countText(bright.uncertaintyM) + ' m (' + bright.note + ')';
+			}
+			return line + '\n      images structure, not composition: no assay, depths ±10-20 %';
+		}
 		if (reading.id === 'lab') {
 			line += !reading.hits.length ? 'no previously found sample'
 				: reading.refined ? 'refined ' + reading.hits.join(', ') + ' · confidence improved'
@@ -562,7 +642,11 @@ var Instruments = (function () {
 		var grades = gradeText(record);
 		if (grades) line += ' @ ' + grades;
 		line += ' · ' + record.bodies.length + (record.bodies.length === 1 ? ' body' : ' bodies');
-		return line + ' · ' + (record.viable ? 'viable' : 'sub-economic: ' + record.reason);
+		line += ' · ' + (record.viable ? 'viable' : 'sub-economic: ' + record.reason);
+		// The geological screen and the monetary one are separate questions, so both are
+		// printed: `viable` is the class table's grade/size/depth verdict, and the money
+		// line is the price scenario's. A record can pass one and fail the other.
+		return line + ' · ' + InstrumentEconomics.verdict(record);
 	}
 	function report(result) {
 		if (!result || !result.ok) return 'Select at least one instrument, then click a map cell.';
@@ -591,6 +675,7 @@ var Instruments = (function () {
 
 	return {
 		LIST: LIST,
+		KIND_GAIN: KIND_GAIN,
 		Ledger: Ledger,
 		selectedIndices: selectedIndices,
 		noise: noise,

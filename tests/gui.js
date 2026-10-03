@@ -160,7 +160,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'deposits', 'core', 'instruments', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
 	'data/plate-crosswalk', 'earth', 'render'];
 

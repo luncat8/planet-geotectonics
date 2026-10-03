@@ -35,7 +35,12 @@ function site(field, value, options = {}) {
 function selectLedger(s) { return new Instruments.Ledger(s.grid.V); }
 
 const instrumentIds = Instruments.LIST.map((instrument) => instrument.id);
-assert.deepEqual(instrumentIds, ['obs', 'geo', 'mag', 'gpr', 'd500', 'd5k', 'lab']);
+assert.deepEqual(instrumentIds, ['obs', 'geo', 'mag', 'gpr', 'seis', 'd500', 'd5k', 'lab']);
+// The confidence ladder is declared, not inferred from list order: appending the
+// seismic line at the end must not have promoted it to a drill.
+assert.deepEqual(Instruments.LIST.map((instrument) => instrument.tier),
+	['indirect', 'indirect', 'indirect', 'indirect', 'indirect', 'direct', 'direct', 'refine'],
+	'evidence tiers are declared per instrument');
 const emptyWorld = site('oVms', 1);
 assert.equal(Instruments.survey(emptyWorld, 0, [], selectLedger(emptyWorld)).ok, false,
 	'an empty instrument set makes no discovery');
@@ -78,8 +83,9 @@ const found = observation.found[0].record;
 assert.match(economics, new RegExp(found.top + '-' + found.bottom + ' m'), 'the found line gives the depth interval');
 assert.match(economics, /gold · Au · [\d.,]+ Mt \((small|medium|large|giant)\) @ Au [\d.]+g\/t/,
 	'and the variant, commodity, tonnage, size class and grade');
-assert.match(economics, /· \d+ (body|bodies) · (viable|sub-economic: (grade|size|depth))$/m,
-	'and the body count and the viability verdict');
+assert.match(economics,
+	/· \d+ (body|bodies) · (viable|sub-economic: (grade|size|depth)) · money (\+|[-\w ])/m,
+	'and the body count, the geological verdict and the monetary one');
 assert.ok(!/pending/.test(economics.split('found deposits')[1]), 'no size/grade placeholder is left');
 const buriedOutcrop = site('oPla', 0.95, { elevation: 500, sediment: 6 });
 const buriedObservation = Instruments.survey(buriedOutcrop, 0, ['obs'], selectLedger(buriedOutcrop));
@@ -262,4 +268,153 @@ assert.equal(remoteLedger.cellsN, 1);
 assert.equal(remoteLedger.coverage[0], (1 << 1) | (1 << 2));
 assert.equal(remoteLedger.calls, 1);
 
-console.log('PASS instruments: local footprints, deterministic noise, reach/cover, evidence ladder, lab, hysteresis, rebase and session-only state');
+
+// --- 0.6.3: the reflection seismic line, carried over from the alternate branch ----------
+// Seismic images structure rather than composition. It sees through water and cover, it
+// gains on massive/tabular/layered bodies and on a shear-zone fabric, and it is blind to a
+// diffuse porphyry stockwork and to unconsolidated basin fill. It never assays, so on its
+// own it can reach `indicated` but never `measured`.
+const seis = Instruments.LIST[Instruments.LIST.findIndex((instrument) => instrument.id === 'seis')];
+assert.equal(seis.tier, 'indirect', 'seismic is indirect evidence');
+assert.equal(seis.coverMax, Infinity, 'seismic sees through any cover');
+assert.ok(seis.reach >= 10000, 'seismic reaches crustal depth: ' + seis.reach);
+// The gain matrix is read back out of the module rather than restated here, so this pins
+// the shipped numbers: seismic is blind exactly where the physics says it is, and it is not
+// a copy of magnetics (which does see the porphyry stockwork that seismic cannot image).
+const seisAt = Instruments.LIST.findIndex((instrument) => instrument.id === 'seis');
+const magAt = Instruments.LIST.findIndex((instrument) => instrument.id === 'mag');
+assert.equal(Instruments.KIND_GAIN.length, Instruments.LIST.length,
+	'every instrument has a gain row');
+for (const row of Instruments.KIND_GAIN) assert.equal(row.length, Deposits.KINDS.length,
+	'every gain row covers every deposit kind');
+assert.notDeepEqual(Instruments.KIND_GAIN[seisAt], Instruments.KIND_GAIN[magAt],
+	'seismic is not a copy of magnetics');
+assert.equal(Instruments.KIND_GAIN[seisAt][Deposits.KINDS.indexOf('arc')], 0,
+	'seismic is blind to a diffuse porphyry stockwork');
+assert.ok(Instruments.KIND_GAIN[seisAt][Deposits.KINDS.indexOf('iron')] > 0,
+	'banded iron formation is a classic reflector');
+assert.ok(Instruments.KIND_GAIN[seisAt][Deposits.KINDS.indexOf('orogenic')] > 0,
+	'a shear-zone fabric reflects');
+assert.equal(Instruments.KIND_GAIN[Instruments.LIST.length - 1].reduce((a, b) => a + b, 0), 0,
+	'the lab discovers nothing on its own');
+
+const seisWorld = site('oVms', 0.95, { sediment: 240, elevation: -400 });
+const seisLedger = selectLedger(seisWorld);
+const seisResult = Instruments.survey(seisWorld, 0, ['seis'], seisLedger);
+assert.equal(seisResult.ok, true, 'a seismic line runs on its own');
+const seisReading = seisResult.readings.find((reading) => reading.id === 'seis');
+assert.ok(seisReading, 'the seismic reading is reported');
+assert.ok(Array.isArray(seisReading.interfaces) && seisReading.interfaces.length > 0,
+	'seismic reports at least one crustal interface');
+const moho = seisReading.interfaces.find((iface) => iface.name === 'Moho');
+assert.ok(moho, 'seismic places the Moho');
+assert.equal(moho.depthM, 40250, 'the Moho is the quantized crustal column: ' + moho.depthM);
+assert.ok(moho.uncertaintyM > 0, 'a converted depth carries uncertainty');
+assert.ok(moho.uncertaintyM / moho.depthM > 0.05, 'Moho uncertainty is a real fraction, not a rounding');
+const sedBase = seisReading.interfaces.find((iface) => iface.name === 'sediment base');
+assert.equal(sedBase.depthM, 250, 'the sediment base is the quantized pile');
+assert.ok(Array.isArray(seisReading.reflectors), 'the reflector list always exists');
+for (const reflector of seisReading.reflectors) {
+	assert.equal(reflector.note, 'non-unique; no assay', 'a bright reflector never claims a composition');
+	assert.ok(reflector.uncertaintyM >= reflector.depthM * 0.10 - 1
+		&& reflector.uncertaintyM <= reflector.depthM * 0.20 + 1,
+		'reflector uncertainty stays in the declared 10-20 % band: ' + reflector.uncertaintyM);
+}
+// Seismic is indirect: on its own it infers, it never measures, and it never assays.
+assert.ok(seisResult.found.length > 0, 'seismic detected the massive sulfide target');
+for (const item of seisResult.found) {
+	assert.ok(item.entry.confidence <= 2,
+		'seismic alone cannot reach `measured`: ' + item.entry.confidence);
+}
+assert.match(Instruments.report(seisResult), /images structure, not composition: no assay/,
+	'the report states the honest limit');
+// Determinism: the same line twice, and a wet cell is not a special case.
+const seisAgain = Instruments.survey(seisWorld, 0, ['seis'], selectLedger(seisWorld));
+assert.deepEqual(seisAgain.readings.find((r) => r.id === 'seis').interfaces, seisReading.interfaces,
+	'two seismic lines over the same cell agree exactly');
+// Blind where the physics says it is. A diffuse porphyry stockwork gives the seismic line
+// nothing, and the control for that is not a guess: the record is there, the deep drill
+// intersects it, so the empty seismic line is the instrument's limit rather than an
+// absent deposit. (Magnetics is not the control here - this stockwork's top sits at
+// 3,100 m, past its 3,000 m reach, so it cannot see it either.)
+const seisBlind = site('oArc', 0.95, { sediment: 240, elevation: 500 });
+assert.ok(Deposits.at(seisBlind, 'arc', 0), 'the porphyry record exists on that column');
+const seisBlindResult = Instruments.survey(seisBlind, 0, ['seis'], selectLedger(seisBlind));
+assert.equal(seisBlindResult.found.length, 0,
+	'seismic does not image a diffuse porphyry stockwork');
+const drillSeesIt = Instruments.survey(seisBlind, 0, ['d5k'], selectLedger(seisBlind));
+assert.ok(drillSeesIt.found.length > 0,
+	'the deep drill intersects the same stockwork, so the null is the seismic line\'s limit');
+
+// --- 0.6.3: the monetary scenario, carried over from the alternate branch -----------------
+// The catalogue's own `viable` is a geological screen that never mentions a price. This is
+// the second, independent question, kept separate so neither can hide behind the other.
+const Economics = require('../js/data/deposit-economics.js');
+assert.equal(Economics.version, 2, 'the monetary scenario is its own versioned object');
+assert.match(Economics.describe(), /game prices/, 'the prices are labelled game values');
+const econWorld = site('oArc', 0.99, { sediment: 200, elevation: 500 });
+const econRecord = Deposits.at(econWorld, 'arc', 0);
+assert.ok(econRecord, 'the porphyry record exists');
+const econScreen = Economics.screen(econRecord);
+assert.ok(Number.isFinite(econScreen.net), 'a sized record has a finite net');
+assert.equal(typeof econScreen.positive, 'boolean');
+assert.equal(econScreen.reason, econScreen.positive ? 'scenario-positive' : 'cost exceeds value');
+assert.match(Economics.verdict(econRecord), /^money /, 'the verdict names itself');
+// A record under the scale cutoff cannot carry the fixed capital whatever its grade.
+const small = { contained: { Cu: 1e3 }, sizeMt: 0.01, top: 100, water: 0 };
+assert.equal(Economics.screen(small).reason, 'below scale cutoff');
+assert.equal(Economics.screen(small).positive, false);
+assert.equal(Economics.screen(small).net, -Infinity, 'an unsized body has no net worth quoting');
+// Depth and water are separate penalties: both make the same ore worse, monotonically.
+const base = { contained: { Cu: 1e6 }, sizeMt: 50, top: 0, water: 0 };
+const deep = { contained: { Cu: 1e6 }, sizeMt: 50, top: 2000, water: 0 };
+const wet = { contained: { Cu: 1e6 }, sizeMt: 50, top: 0, water: 2000 };
+assert.ok(Economics.screen(deep).net < Economics.screen(base).net, 'burial costs money');
+assert.ok(Economics.screen(wet).net < Economics.screen(base).net, 'water costs money');
+assert.ok(Economics.screen(deep).opex > Economics.screen(base).opex, 'the penalty is in opex, not capex');
+assert.equal(Economics.screen(deep).capex, Economics.screen(base).capex, 'depth does not move capex');
+// The invariant the diamond bug broke: a price is only meaningful against the unit the
+// catalogue counted the commodity in, and `contained` is not uniformly tonnes. Every metal
+// the class table can emit must have a price, and that price's unit must be the one the
+// grade unit implies - so a new class row cannot silently inherit a mispriced metal.
+for (const row of Deposits.CLASSES) {
+	for (const grade of row.grades) {
+		const metal = grade[0], unit = grade[1];
+		assert.ok(Economics.prices[metal], 'every class metal has a price: ' + row.kind + '/' + row.variant + ' ' + metal);
+		const quoted = Economics.pricePer[metal] || 't';
+		assert.equal(quoted, Economics.gradeUnitTo[unit],
+			'the price of ' + metal + ' is quoted in the unit its ' + unit + ' grade counts in');
+	}
+	if (row.bulk) {
+		assert.ok(Economics.prices[row.bulk], 'the bulk commodity has a price: ' + row.bulk);
+		assert.equal(Economics.pricePer[row.bulk] || 't', 't', 'a bulk tonnage is tonnes');
+	}
+}
+// And the guard itself has to fire, not merely exist.
+assert.equal(Economics.screen({ kind: 'mafic', variant: 'diamond', contained: { Diamond: 4e7 },
+	gradeUnit: { Diamond: '%' }, sizeMt: 80, top: 300, water: 0 }).reason, Economics.badUnit,
+	'a unit mismatch is refused rather than mispriced');
+// A diamond priced per carat is a marginal mine, not a trillion-dollar one.
+const kimberlite = Economics.screen({ kind: 'mafic', variant: 'diamond', contained: { Diamond: 4e7 },
+	gradeUnit: { Diamond: 'ct/t' }, sizeMt: 80, top: 300, water: 0 });
+assert.ok(kimberlite.value > 1e9 && kimberlite.value < 1e11,
+	'an 80 Mt kimberlite at 0.5 ct/t is worth billions, not trillions: ' + kimberlite.value);
+// An unpriced commodity is refused rather than valued at zero by accident.
+const unpriced = { contained: { Unobtainium: 1e6 }, sizeMt: 50, top: 0, water: 0 };
+assert.equal(Economics.screen(unpriced).reason, Economics.noPrice);
+// The screen is a pure function of the record: it never writes to it or to the world.
+const econBefore = JSON.stringify(econRecord);
+const worldBefore = Checkpoint.save(econWorld);
+Economics.screen(econRecord); Economics.verdict(econRecord);
+assert.equal(JSON.stringify(econRecord), econBefore, 'the screen does not mutate the record');
+assert.deepEqual(Checkpoint.save(econWorld), worldBefore, 'the screen does not touch the world');
+// Both screens are printed on the found line, because they can disagree.
+const econLedger = selectLedger(econWorld);
+const econSurvey = Instruments.survey(econWorld, 0, ['d5k'], econLedger);
+assert.ok(econSurvey.found.length > 0, 'the deep drill found the porphyry');
+const econReport = Instruments.report(econSurvey);
+assert.match(econReport, /money /, 'the report carries the monetary verdict');
+assert.match(econReport, econSurvey.found[0].record.viable ? /viable/ : /sub-economic/,
+	'the report still carries the geological verdict');
+
+console.log('PASS instruments: local footprints, deterministic noise, reach/cover, evidence ladder, lab, hysteresis, rebase and session-only state, the seismic line and the monetary screen');

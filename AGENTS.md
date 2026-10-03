@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 35 kernel, rig and GUI tests, ~2 min here
+node tests/run-all.js		short profile (default): 36 kernel, rig and GUI tests, ~2.5 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 
@@ -75,6 +75,9 @@ contract, thresholds, module map and staging. the increments:
 	viability; §10 holds the measured calibration (experiments/deposit-calibration.js).
 0.6.1-review.md - implementation review of the catalogue: what the first measurement changed.
 0.6.2-plan-core-and-viability-map.md - the stratigraphic core, optional regional campaign and the opt-in viable map.
+0.6.3-merge-comparison.md - two sessions implemented the prospector independently; this is the
+	comparison, what was taken from which, what was deleted, and the measured calibration of the
+	monetary screen (experiments/economics-calibration.js).
 0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent

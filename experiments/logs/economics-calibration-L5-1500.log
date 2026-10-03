@@ -1,0 +1,31 @@
+monetary scenario v2 · USD 2026 game prices (Cu $9500/t, Au $64.3M/t, Fe $100/t) · method-based opex (7 methods, open pit $15/t ore + $0.008/t/m depth) · capex $250M + $6000000/Mt · floor 1.5 Mt ore
+world L5 · 1500 Myr · seed 7 · catalogue build 38 ms · 977 records
+
+geologically viable (grade/size/depth, no price): 584 / 977 (59.8 %)
+monetary positive (priced, method-based cost)  : 338 / 977 (34.6 %)
+both screens pass                              : 235
+geological only (real rock, does not pay)      : 349
+monetary only (pays, fails the class screen)   : 103
+neither                                        : 290
+median net over finite records                 : -0.16 G$
+monetary refusals                              : below scale cutoff 21, cost exceeds value 618
+
+class                 n  geo  money  both   median net   monetary refusals
+      arc/epithermal 112   34     37    14      -0.64 G$   cost exceeds value 75
+        arc/porphyry 111   29     47    22      -1.38 G$   cost exceeds value 64
+          basin/coal  38   31     38    31      10.76 G$   -
+        basin/potash  12   12      6     6      -0.30 G$   cost exceeds value 6
+       basin/uranium  38   32      4     4      -0.14 G$   below scale cutoff 17, cost exceeds value 17
+         iron/algoma   1    0      0     0      -1.65 G$   cost exceeds value 1
+            iron/bif  38   10     38    10       2.77 G$   -
+       mafic/diamond   3    3      3     3       0.77 G$   -
+       mafic/sulfide  25    8     19     8       0.90 G$   below scale cutoff 4, cost exceeds value 2
+    orogenic/sedhost  17    3      2     0      -0.30 G$   cost exceeds value 15
+       orogenic/vein  32   18      7     5      -0.17 G$   cost exceeds value 25
+         placer/gold  96   40      7     7      -0.06 G$   cost exceeds value 89
+         vms/sulfide 454  364    130   125      -0.31 G$   cost exceeds value 324
+
+The disagreement is the result, not noise: a body can be exactly the right grade,
+size and depth for its class and still not carry its capital, and a body the class
+screen rejects as too deep can still pay at a bulk tonnage. Both lines are printed
+on the found report so neither can hide behind the other.
