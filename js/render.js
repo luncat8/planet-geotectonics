@@ -9,6 +9,20 @@ var MapView = {
 		var lat = (0.5 - y / height) * Math.PI, c = Math.cos(lat);
 		out[0] = c * Math.cos(lon); out[1] = Math.sin(lat); out[2] = c * Math.sin(lon);
 	},
+	// Project a world direction through the current view quaternion onto the equirectangular
+	// canvas. The renderer samples with q^-1, so markers travel world->screen with q itself.
+	project: function (out, x, y, z, q, width, height) {
+		var qx = q[0], qy = q[1], qz = q[2], qw = q[3];
+		var tx = 2 * (qy * z - qz * y), ty = 2 * (qz * x - qx * z), tz = 2 * (qx * y - qy * x);
+		var wx = x + qw * tx + qy * tz - qz * ty;
+		var wy = y + qw * ty + qz * tx - qx * tz;
+		var wz = z + qw * tz + qx * ty - qy * tx;
+		var lon = atan2Fast(wz, wx), lat = atan2Fast(wy, Math.sqrt(wx * wx + wz * wz));
+		var px = (lon / MapView.TAU + 0.5) * width;
+		out[0] = px >= width ? px - width : px < 0 ? px + width : px;
+		out[1] = (0.5 - lat / Math.PI) * height;
+		return out;
+	},
 	// Apply the shortest screen-space rotation that takes a surface point from a to b.
 	// Incremental composition, rather than Euler clamps, means repeated drags can pass any
 	// number of latitude or longitude turns. Longitude motion naturally scales with cos(lat).

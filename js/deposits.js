@@ -1,492 +1,662 @@
-var DepositsExtract = typeof module !== 'undefined' && module.exports ? require('./extract.js') : Extract;
-var DepositsDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
-var DepositsModels = typeof module !== 'undefined' && module.exports ? require('./data/deposit-models.js') : DepositModels;
-var DepositsParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
-// Synthetic deposit catalogue (0.6.0, plan 0.6.x section 3). Not part of the simulation: it
-// reads a paused world once and never writes to it or draws from its RNG.
-//
-//   snapshot  frozen copy of the geology the catalogue is conditioned on, with a checksum;
-//   scenario  seed + generator version + snapshot; its bodies are a pure function of those;
-//   tiles     a fixed cube-sphere tiling (independent of the sim and render grids). A body
-//             belongs to the tile of its anchor, and every random draw is keyed by
-//             (seed, version, tile, family, ordinal, draw index), so a click, a whole-world
-//             scan and a re-import yield the same bodies in any order.
-//
-// Bodies are ellipsoids; one body model serves maps, drill intersections and resources.
-var Deposits = {
-	FORMAT: 'pgt-deposit-catalogue',
-	HOSTS: ['none', 'oceanic', 'continental', 'thick continental', 'sediment'],
-	FACES: 6,
-	// Face normal, then the two tangent axes of the face's (u, v) plane.
-	FACE_AXES: new Float64Array([
-		1, 0, 0, 0, 0, 1, 0, 1, 0,
-		-1, 0, 0, 0, 0, 1, 0, 1, 0,
-		0, 1, 0, 1, 0, 0, 0, 0, 1,
-		0, -1, 0, 1, 0, 0, 0, 0, 1,
-		0, 0, 1, 1, 0, 0, 0, 1, 0,
-		0, 0, -1, 1, 0, 0, 0, 1, 0
-	]),
-	// Anchors stay this far from a tile edge so that tileOf(dirOf(anchor)) always round-trips.
-	ANCHOR_MARGIN: 0.02,
-	MAX_QUERY_M: 40000,
-	MAX_DRAWS: 40,
+var DepositParams = typeof module !== 'undefined' && module.exports ? require('./params.js') : Params;
+var DepositDiag = typeof module !== 'undefined' && module.exports ? require('./diag.js') : Diag;
+var DepositExtract = typeof module !== 'undefined' && module.exports ? require('./extract.js') : Extract;
 
-	// ------------------------------------------------------------------ hashing and draws
-	mix32: function (h) {
-		h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
-		h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
-		return (h ^ (h >>> 16)) >>> 0;
-	},
-	combine: function (h, key) {
-		return Deposits.mix32((h ^ (key + 0x9e3779b9 + (h << 6) + (h >>> 2))) | 0);
-	},
-	// Fills `draws` with uniform (0,1) numbers keyed by the candidate alone, so a body's
-	// geometry never depends on which other candidates were visited or accepted.
-	drawCandidate: function (sc, tile, familyIndex, ordinal, draws) {
-		var h = Deposits.combine(Deposits.combine(sc.seed, sc.version), tile);
-		h = Deposits.combine(Deposits.combine(h, familyIndex), ordinal);
-		for (var k = 0; k < Deposits.MAX_DRAWS; k++) {
-			draws[k] = (Deposits.combine(h, k + 1) + 0.5) / 4294967296;
-		}
-		return draws;
-	},
-	// Normal score from two uniforms, truncated: the priors are truncated distributions.
-	truncatedNormal: function (u1, u2) {
-		var z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-		var limit = DepositsModels.truncationSigma;
-		return Math.max(-limit, Math.min(limit, z));
-	},
-	// Stored numbers carry six significant digits, so JSON round trips are exact.
-	round: function (v) {
-		return +v.toPrecision(6);
-	},
-	hex: function (hi, lo) {
-		return ('0000000' + hi.toString(16)).slice(-8) + ('0000000' + lo.toString(16)).slice(-8);
-	},
-	// Two interleaved FNV-1a lanes over bytes: a 64-bit identity, not a security hash.
-	fnvBytes: function (bytes, lanes) {
-		var a = lanes[0], b = lanes[1];
-		for (var i = 0; i < bytes.length; i++) {
-			a = Math.imul(a ^ bytes[i], 16777619);
-			b = Math.imul(b ^ bytes[i] ^ 0x5a, 0x01000193 + 2);
-		}
-		lanes[0] = a >>> 0; lanes[1] = b >>> 0;
-		return lanes;
-	},
-	fnvText: function (text) {
-		var a = 0x811c9dc5, b = 0x9747b28c;
-		for (var i = 0; i < text.length; i++) {
-			var c = text.charCodeAt(i);
-			a = Math.imul(a ^ c, 16777619);
-			b = Math.imul(b ^ c ^ 0x5a, 0x01000193 + 2);
-		}
-		return Deposits.hex(a >>> 0, b >>> 0);
-	},
+// The deposit catalogue (0.6.1). Local, on-demand records: the cell grid is only a sampling
+// frame, identity comes from the column's plate-frame position, so a rigidly moving column does
+// not reroll a prospect. Every number is a function of integer buckets (stability contract S1)
+// and of an integer hash of (seed, class, anchorKey) - never of the clock or of Math.random (S2).
+var Deposits = (function () {
+	var FIELDS = DepositDiag.ORE_FIELDS;
+	// `iron` is derived, not stored (design §8): it has no potential of its own and rides the
+	// blurred value of the mafic / VMS / basin fields where mafic crust is exposed.
+	var KINDS = DepositDiag.ORE_NAMES.concat(['iron']);
+	var IRON = KINDS.length - 1, K_VMS = 0, K_MAFIC = 1, K_BASIN = 4;
+	// Exposed mafic crust, the design §8 rule that derives iron: felsic cover under 2 km, above
+	// sea level. It is the BIF/supergene setting, not the basin threshold that happens to share
+	// the number.
+	// Design §8 derives iron from two settings: exposed mafic crust (felsic cover under 2 km,
+	// above sea level - the supergene/Algoma case) and `oBas` in old basins (the Superior-type
+	// BIF that supplies most of Earth's iron). The second is why a planet has more than a
+	// handful of iron records.
+	var IRON_FEL_MAX = 2000, IRON_BASIN_SED = 2000, IRON_BASIN_AGE = 500;
+	// The six potentials do not share a scale. `oPla` is a transported load rather than a
+	// saturating accumulator: on the L5 1500 Myr calibration history its blurred field tops out
+	// at 0.144, so on the common `depositMin` it would never produce a single record and the
+	// placer half of the prospector would be dead code. FIELD_SCALE maps each kind's own field
+	// onto the shared 0..1 deposit scale before quantization, so one threshold still means one
+	// thing. It is measured (experiments/deposit-calibration.js prints each field's maximum)
+	// and 1.0 wherever a field already uses the range.
+	var FIELD_SCALE = [1, 1, 1, 1, 1, 7, 1];
+	var DEPTH_STEP = 50, COVER_CAP = 4000, BODY_SCALE = 32768, POTENTIAL_BUCKETS = 255;
+	var SHARE_UNITS = 1024;
+	// Independent draws from one anchor: each is its own salted hash, so adding a draw later
+	// cannot shift the ones already committed.
+	var SALT_SIZE = 1, SALT_BODIES = 2, SALT_VARIANT = 3, SALT_EMPLACE = 4;
+	var SALT_SHARE = 10, SALT_ASPECT = 30, SALT_GAP = 50, SALT_GRADE = 70;
+	var CONFIDENCE_NONE = 'ok';
 
-	// ------------------------------------------------------------------ cube-sphere tiles
-	tileCount: function () {
-		return Deposits.FACES * DepositsModels.tileN * DepositsModels.tileN;
-	},
-	faceOf: function (x, y, z) {
-		var ax = Math.abs(x), ay = Math.abs(y), az = Math.abs(z);
-		if (ax >= ay && ax >= az) return x > 0 ? 0 : 1;
-		if (ay >= az) return y > 0 ? 2 : 3;
-		return z > 0 ? 4 : 5;
-	},
-	// Equiangular face coordinates in [-1, 1) for a direction on `face`.
-	faceCoords: function (face, x, y, z, out) {
-		var f = Deposits.FACE_AXES, o = face * 9;
-		var m = x * f[o] + y * f[o + 1] + z * f[o + 2];
-		var u = (x * f[o + 3] + y * f[o + 4] + z * f[o + 5]) / m;
-		var v = (x * f[o + 6] + y * f[o + 7] + z * f[o + 8]) / m;
-		out[0] = Math.atan(u) * 4 / Math.PI; out[1] = Math.atan(v) * 4 / Math.PI;
-		return out;
-	},
-	tileOf: function (x, y, z) {
-		var n = DepositsModels.tileN, face = Deposits.faceOf(x, y, z);
-		var c = Deposits.faceCoords(face, x, y, z, Deposits.scratchUv);
-		var i = Math.min(n - 1, Math.floor((c[0] + 1) / 2 * n));
-		var j = Math.min(n - 1, Math.floor((c[1] + 1) / 2 * n));
-		return (face * n + j) * n + i;
-	},
-	// Unit direction of the point (fu, fv) in [0, 1)^2 inside a tile.
-	dirOf: function (tile, fu, fv, out) {
-		var n = DepositsModels.tileN, i = tile % n, j = Math.floor(tile / n) % n, face = Math.floor(tile / (n * n));
-		var u = Math.tan(((i + fu) / n * 2 - 1) * Math.PI / 4), v = Math.tan(((j + fv) / n * 2 - 1) * Math.PI / 4);
-		var f = Deposits.FACE_AXES, o = face * 9;
-		var x = f[o] + u * f[o + 3] + v * f[o + 6], y = f[o + 1] + u * f[o + 4] + v * f[o + 7];
-		var z = f[o + 2] + u * f[o + 5] + v * f[o + 8], len = Math.sqrt(x * x + y * y + z * z);
-		out[0] = x / len; out[1] = y / len; out[2] = z / len;
-		return out;
-	},
-	// East, north and up unit vectors at a direction (the sim's +y is north). At a pole east
-	// is arbitrary but fixed.
-	frame: function (x, y, z, out) {
-		var ex = z, ey = 0, ez = -x, len = Math.sqrt(ex * ex + ez * ez);
-		if (len < 1e-12) { ex = 1; ez = 0; len = 1; }
-		ex /= len; ez /= len;
-		out[0] = ex; out[1] = ey; out[2] = ez;
-		out[3] = y * ez - z * ey; out[4] = z * ex - x * ez; out[5] = x * ey - y * ex;
-		out[6] = x; out[7] = y; out[8] = z;
-		return out;
-	},
-	nearestCell: function (grid, x, y, z) {
-		var w = grid.lookupW, h = grid.lookupH;
-		var col = Math.min(w - 1, Math.floor((Math.atan2(z, x) / (2 * Math.PI) + 0.5) * w));
-		var row = Math.min(h - 1, Math.floor((Math.asin(Math.max(-1, Math.min(1, y))) / Math.PI + 0.5) * h));
-		var cell = grid.lookup[row * w + col], pos = grid.pos;
-		var best = pos[cell * 3] * x + pos[cell * 3 + 1] * y + pos[cell * 3 + 2] * z;
-		for (var moved = true; moved;) {
-			moved = false;
-			for (var k = 0; k < grid.ringN[cell]; k++) {
-				var j = grid.ring[cell * 6 + k], dot = pos[j * 3] * x + pos[j * 3 + 1] * y + pos[j * 3 + 2] * z;
-				if (dot <= best) continue;
-				best = dot; cell = j; moved = true;
-			}
-		}
-		return cell;
-	},
+	// The class table. `ladder` is a percentile ladder in the row's `unit`, not a range:
+	// [min, T10, T50, T90, max], so a size class can be checked against published percentiles.
+	// `grades` are [metal, unit, lo, hi] log-uniform bands; the first metal is the principal and
+	// the only one the economic screen looks at. `aspect` is k = thickness / sqrt(area), the one
+	// shape degree of freedom - a second footprint band could contradict the tonnage ladder.
+	// Sources are named in 0.6.1-plan-deposit-catalogue.md §2; a published band written "0-x"
+	// gets a small positive floor here because the draw is log-uniform.
+	var CLASSES = [
+		{ kind: 'vms', variant: 'sulfide', hosted: 'basement', commodity: 'Cu-Zn-Pb-Ag', unit: 'Mt',
+			ladder: [0.5, 2, 10, 40, 150], rho: 3.0, bodies: [1, 8], aspect: [0.1, 0.6], emplace: [0, 2000],
+			grades: [['Cu', '%', 0.2, 6], ['Zn', '%', 0.3, 12], ['Pb', '%', 0.02, 2], ['Ag', 'g/t', 5, 120], ['Au', 'g/t', 0.02, 3]],
+			screen: { type: 'sum', weights: [1, 1, 0.5], cutOff: 1.5, label: 'Cu+Zn+½Pb ≥ 1.5 %' },
+			minSize: 2, maxTop: 2500, anchorMedian: 2, source: '904-deposit VMS compilation; Manitoba VMS short course' },
+		{ kind: 'mafic', variant: 'sulfide', hosted: 'basement', commodity: 'Ni-Cu-PGE', unit: 'Mt',
+			ladder: [0.5, 3, 20, 120, 600], rho: 3.0, bodies: [1, 5], aspect: [0.1, 0.6], emplace: [0, 2000],
+			grades: [['Ni', '%', 0.2, 3.5], ['Cu', '%', 0.1, 2], ['PGE', 'g/t', 0.05, 8]],
+			screen: { type: 'grade', cutOff: 0.4, label: '0.4 % Ni' },
+			minSize: 3, maxTop: 2000, anchorMedian: null, source: 'USGS SIR 2010-5070-i' },
+		{ kind: 'mafic', variant: 'diamond', hosted: 'basement', commodity: 'Diamond', unit: 'Mt',
+			ladder: [5, 20, 80, 300, 900], rho: 2.5, bodies: [1, 3], aspect: [0.3, 1.5], emplace: [0, 800],
+			grades: [['Diamond', 'ct/t', 0.05, 2]],
+			screen: { type: 'grade', cutOff: 0.15, label: '0.15 ct/t' },
+			minSize: 5, maxTop: 1000, anchorMedian: null, source: 'cratonic kimberlite literature' },
+		{ kind: 'arc', variant: 'porphyry', hosted: 'basement', commodity: 'Cu-Mo-Au', unit: 'Mt',
+			ladder: [20, 60, 220, 800, 3000], rho: 2.6, bodies: [1, 6], aspect: [0.2, 0.8], emplace: [300, 3000],
+			grades: [['Cu', '%', 0.15, 1.2], ['Mo', '%', 0.002, 0.08], ['Au', 'g/t', 0.01, 1.2], ['Ag', 'g/t', 0.5, 20]],
+			screen: { type: 'grade', cutOff: 0.25, label: '0.25 % Cu' },
+			minSize: 20, maxTop: 2500, anchorMedian: 220, source: 'USGS OFR 2007-1214 §5 table 5.1-1; USGS OFR 95-0831 model 17' },
+		{ kind: 'arc', variant: 'epithermal', hosted: 'basement', commodity: 'Au-Ag', unit: 'Mt',
+			ladder: [5, 10, 25, 60, 150], rho: 2.6, bodies: [1, 4], aspect: [0.05, 0.3], emplace: [100, 1200],
+			grades: [['Au', 'g/t', 0.8, 8], ['Ag', 'g/t', 2, 60]],
+			screen: { type: 'grade', cutOff: 0.8, label: '0.8 g/t Au' },
+			minSize: 5, maxTop: 500, anchorMedian: 15, source: 'low-sulfidation Au vein models' },
+		{ kind: 'orogenic', variant: 'vein', hosted: 'basement', commodity: 'Au-W', unit: 'Mt',
+			ladder: [0.5, 2, 8, 40, 200], rho: 2.7, bodies: [1, 6], aspect: [0.005, 0.05], emplace: [500, 3500],
+			grades: [['Au', 'g/t', 1.5, 15], ['Ag', 'g/t', 0.5, 20]],
+			screen: { type: 'grade', cutOff: 1.0, label: '1.0 g/t Au' },
+			minSize: 1, maxTop: 2500, anchorMedian: 1, source: 'USGS OFR 94-250 (Archean Au-quartz veins)' },
+		{ kind: 'orogenic', variant: 'sedhost', hosted: 'sediment', commodity: 'Au', unit: 'Mt',
+			ladder: [1, 5, 20, 80, 300], rho: 2.5, bodies: [1, 4], aspect: [0.01, 0.1], emplace: [100, 1200],
+			grades: [['Au', 'g/t', 0.5, 6]],
+			screen: { type: 'grade', cutOff: 0.6, label: '0.6 g/t Au' },
+			minSize: 5, maxTop: 1500, anchorMedian: 7.1, source: 'USGS OFR 2014-1074 (sediment-hosted Au)' },
+		{ kind: 'basin', variant: 'uranium', hosted: 'sediment', commodity: 'U', unit: 't U3O8',
+			ladder: [200, 1000, 9500, 30000, 100000], rho: 2.2, bodies: [1, 6], aspect: [0.005, 0.05], emplace: [30, 800],
+			grades: [['U3O8', '%', 0.05, 0.45]],
+			screen: { type: 'grade', cutOff: 0.05, label: '0.05 % U₃O₈' },
+			minSize: 500, maxTop: 1200, anchorMedian: 9500, source: 'IAEA classification; New Mexico Grants district' },
+		{ kind: 'basin', variant: 'coal', hosted: 'sediment', commodity: 'Coal', unit: 'Mt',
+			ladder: [50, 200, 800, 2500, 5000], rho: 1.4, bodies: [1, 4], aspect: [0.0002, 0.003], emplace: [20, 1000],
+			grades: [], bulk: 'Coal',
+			screen: { type: 'seam', cutOff: 1, label: '≥ 1 m seam' },
+			minSize: 100, maxTop: 1000, anchorMedian: null, source: 'game assumption - no published grade-tonnage model' },
+		{ kind: 'basin', variant: 'potash', hosted: 'sediment', commodity: 'K2O', unit: 'Mt',
+			ladder: [100, 250, 700, 2000, 5000], rho: 2.1, bodies: [1, 3], aspect: [0.001, 0.02], emplace: [200, 2000],
+			grades: [['K2O', '%', 15, 30]],
+			screen: { type: 'grade', cutOff: 15, label: '15 % K₂O' },
+			minSize: 100, maxTop: 2000, anchorMedian: 392, source: 'USGS 2014 potash overview; Russell deposit' },
+		{ kind: 'placer', variant: 'gold', hosted: 'sediment', commodity: 'Au', unit: 'Mt',
+			ladder: [0.5, 2, 10, 50, 200], rho: 2.0, bodies: [1, 5], aspect: [0.002, 0.03], emplace: [0, 30],
+			grades: [['Au', 'g/t', 0.02, 0.5]],
+			screen: { type: 'grade', cutOff: 0.05, label: '0.05 g/t Au, 0.3 t contained' }, minContained: 0.3,
+			minSize: 1, maxTop: 60, anchorMedian: null, source: 'USGS Bulletin 1693 model 39b (g/m³ at 2.0 t/m³)' },
+		{ kind: 'iron', variant: 'bif', hosted: 'sediment', commodity: 'Fe', unit: 'Mt',
+			ladder: [100, 500, 2500, 12000, 50000], rho: 3.1, bodies: [1, 3], aspect: [0.01, 0.1], emplace: [0, 400],
+			grades: [['Fe', '%', 25, 62]],
+			screen: { type: 'grade', cutOff: 30, label: '30 % Fe' },
+			minSize: 300, maxTop: 500, anchorMedian: null, source: 'Hamersley / Superior-type BIF literature' },
+		{ kind: 'iron', variant: 'algoma', hosted: 'basement', commodity: 'Fe', unit: 'Mt',
+			ladder: [20, 80, 300, 1200, 5000], rho: 3.2, bodies: [1, 4], aspect: [0.02, 0.2], emplace: [0, 600],
+			grades: [['Fe', '%', 25, 55]],
+			screen: { type: 'grade', cutOff: 30, label: '30 % Fe' },
+			minSize: 50, maxTop: 500, anchorMedian: null, source: 'Algoma-type BIF in greenstone belts' }
+	];
+	var SIZE_CLASSES = ['small', 'medium', 'large', 'giant'];
+	// q buckets that select the ladder segment (plan §3.3). Below the first there is no record.
+	var BAND_Q = [77, 115, 179, 230];
 
-	// ------------------------------------------------------------------ snapshot and scenario
-	// Everything the generator reads about the world, frozen. Potentials are the one-cell blur
-	// the extraction diagnostic uses, so an uncovered cell cannot hide a deposit.
-	snapshot: function (s, source) {
-		var g = s.grid, V = g.V, fields = DepositsDiag.ORE_FIELDS, blurred = new Float64Array(V);
-		var snap = {
-			level: g.level, gridSeed: g.seed, simSeed: s.seed, t: s.t, epoch0: s.epoch0,
-			source: source || '', grid: g, cells: V,
-			pot: new Float32Array(fields.length * V), host: new Uint8Array(V),
-			alt: new Float32Array(V), thick: new Float32Array(V), age: new Float32Array(V), checksum: ''
-		};
-		for (var k = 0; k < fields.length; k++) {
-			DepositsExtract.blur(s, s[fields[k]], blurred);
-			snap.pot.set(blurred, k * V);
-		}
-		for (var c = 0; c < V; c++) {
-			var o = s.owner[c];
-			snap.host[c] = Deposits.HOSTS.indexOf(DepositsExtract.host(s, c));
-			if (o < 0) continue;
-			snap.alt[c] = s.z[c]; snap.age[c] = s.age[o];
-			snap.thick[c] = s.hFel[o] + s.hMaf[o] + s.hSed[o];
-		}
-		snap.checksum = Deposits.snapshotChecksum(snap);
-		return snap;
-	},
-	snapshotChecksum: function (snap) {
-		var head = new Float64Array([snap.level, snap.gridSeed, snap.simSeed, snap.t, snap.epoch0, snap.cells]);
-		var lanes = Deposits.fnvBytes(new Uint8Array(head.buffer), [0x811c9dc5, 0x9747b28c]);
-		var parts = [snap.pot, snap.host, snap.alt, snap.thick, snap.age];
-		for (var i = 0; i < parts.length; i++) {
-			var p = parts[i];
-			Deposits.fnvBytes(new Uint8Array(p.buffer, p.byteOffset, p.byteLength), lanes);
-		}
-		return Deposits.hex(lanes[0], lanes[1]);
-	},
-	describeSnapshot: function (snap) {
-		return {
-			level: snap.level, gridSeed: snap.gridSeed, simSeed: snap.simSeed, t: +snap.t.toFixed(3),
-			epoch0: snap.epoch0, source: snap.source, cells: snap.cells, checksum: snap.checksum
-		};
-	},
-	scenario: function (snap, seed) {
-		return {
-			seed: seed >>> 0, version: DepositsModels.version, snapshot: snap,
-			meta: Deposits.describeSnapshot(snap), tiles: new Map(), complete: false
-		};
-	},
-
-	// ------------------------------------------------------------------ bodies
-	axisUnits: function (strikeDeg, dipDeg, out) {
-		var st = strikeDeg * Math.PI / 180, dp = dipDeg * Math.PI / 180;
-		var sinS = Math.sin(st), cosS = Math.cos(st), sinD = Math.sin(dp), cosD = Math.cos(dp);
-		// East-north-up unit axes: along strike, down dip, across (the cross product).
-		out[0] = sinS; out[1] = cosS; out[2] = 0;
-		out[3] = cosS * cosD; out[4] = -sinS * cosD; out[5] = -sinD;
-		out[6] = out[1] * out[5] - out[2] * out[4]; out[7] = out[2] * out[3] - out[0] * out[5];
-		out[8] = out[0] * out[4] - out[1] * out[3];
-		return out;
-	},
-	// Half the vertical extent of the oriented ellipsoid.
-	verticalHalfExtent: function (axes, units) {
-		var sum = 0;
-		for (var k = 0; k < 3; k++) sum += axes[k] * axes[k] * units[k * 3 + 2] * units[k * 3 + 2];
-		return Math.sqrt(sum);
-	},
-	metalTonnes: function (oreTonnes, grade, unit) {
-		return oreTonnes * grade / (unit === '%' ? 100 : 1e6);
-	},
-	recoverableTonnes: function (metalTonnes, recovery) {
-		return metalTonnes * recovery;
-	},
-	volumeOf: function (axes) {
-		return 4 * Math.PI * axes[0] * axes[1] * axes[2] / 3;
-	},
-	// Anchor, host and favourability of one candidate, or null when the slot stays empty.
-	// `draws` holds the candidate's uniforms: 0 acceptance, 1-2 anchor, 3-4 tonnage score.
-	site: function (sc, tile, family, draws) {
-		var snap = sc.snapshot, V = snap.cells, dir = Deposits.scratchDir;
-		// Rounded here, so the sampled anchor is exactly the stored one.
-		var fu = Deposits.round(Deposits.ANCHOR_MARGIN + (1 - 2 * Deposits.ANCHOR_MARGIN) * draws[1]);
-		var fv = Deposits.round(Deposits.ANCHOR_MARGIN + (1 - 2 * Deposits.ANCHOR_MARGIN) * draws[2]);
-		Deposits.dirOf(tile, fu, fv, dir);
-		var cell = Deposits.nearestCell(snap.grid, dir[0], dir[1], dir[2]);
-		var host = Deposits.HOSTS[snap.host[cell]];
-		if (family.hosts.indexOf(host) < 0) return null;
-		var potential = snap.pot[DepositsDiag.ORE_FIELDS.indexOf(family.potential) * V + cell];
-		var floor = DepositsModels.potentialFloor;
-		if (potential < floor) return null;
-		var accept = family.maxAccept * Math.pow(Math.min(1, (potential - floor) / (1 - floor)), family.acceptGamma);
-		if (draws[0] >= accept) return null;
-		return { fu: fu, fv: fv, cell: cell, host: host, potential: potential };
-	},
-	grades: function (family, zTonnage, draws, out) {
-		for (var c = 0; c < family.commodities.length; c++) {
-			var m = family.commodities[c], rho = m.tonnageGradeCorr;
-			var eps = Deposits.truncatedNormal(draws[5 + 2 * c], draws[6 + 2 * c]);
-			out[c] = m.median * Math.exp(m.sigmaLn * (rho * zTonnage + Math.sqrt(1 - rho * rho) * eps));
-		}
-		return out;
-	},
-	formationAge: function (family, site, crustAge, draw) {
-		var lo = family.ageMa.min, hi = family.ageMa.max;
-		// Oceanic crust cannot host a deposit older than itself; continents carry no such bound.
-		if (site.host === 'oceanic') hi = Math.max(lo, Math.min(hi, crustAge));
-		var age = lo + (hi - lo) * draw, width = Math.max(1, 0.1 * age);
-		return [Deposits.round(Math.max(0, age - width)), Deposits.round(age + width)];
-	},
-	candidate: function (sc, tile, familyIndex, ordinal) {
-		var family = DepositsModels.families[familyIndex], snap = sc.snapshot;
-		var draws = Deposits.drawCandidate(sc, tile, familyIndex, ordinal, Deposits.scratchDraws);
-		var site = Deposits.site(sc, tile, family, draws);
-		if (!site) return null;
-		var model = DepositsModels, cell = site.cell, units = Deposits.scratchUnits;
-		var zTonnage = Deposits.truncatedNormal(draws[3], draws[4]);
-		var tonnage = family.tonnage;
-		var oreTarget = Math.exp(Math.log(tonnage.median) + tonnage.sigmaLn * zTonnage + tonnage.favourGain * (site.potential - 0.5));
-		var gradeValues = Deposits.grades(family, zTonnage, draws, Deposits.scratchGrades);
-		var ratioSd = family.axisRatioSigmaLn;
-		var rb = family.axisRatio[0] * Math.exp(ratioSd * Deposits.truncatedNormal(draws[22], draws[23]));
-		var rc = family.axisRatio[1] * Math.exp(ratioSd * Deposits.truncatedNormal(draws[24], draws[25]));
-		var volumeTarget = oreTarget / (family.rockDensity * family.oreFraction);
-		var a = Math.cbrt(3 * volumeTarget / (4 * Math.PI * rb * rc));
-		var strike = 360 * draws[20], dip = family.dipDeg[0] + (family.dipDeg[1] - family.dipDeg[0]) * draws[21];
-		var axes = [Deposits.round(a), Deposits.round(a * rb), Deposits.round(a * rc)];
-		if (Math.max(axes[0], axes[1], axes[2]) > model.maxExtentM) return null;
-		Deposits.axisUnits(strike, dip, units);
-		var vertical = 2 * Deposits.verticalHalfExtent(axes, units);
-		var crust = snap.thick[cell], room = 0.9 * crust - vertical;
-		if (room < 0) return null;
-		var burial = Math.min(room, family.burial.median * Math.exp(family.burial.sigmaLn * Deposits.truncatedNormal(draws[26], draws[27])));
-		return Deposits.assemble(sc, tile, familyIndex, ordinal, site, {
-			axes: axes, strike: strike, dip: dip, burial: burial, grades: gradeValues,
-			age: Deposits.formationAge(family, site, snap.age[cell], draws[28])
-		});
-	},
-	// Rounds the drawn parameters, then derives every dependent quantity from the rounded
-	// values, so the stored body reproduces its own resources exactly.
-	assemble: function (sc, tile, familyIndex, ordinal, site, drawn) {
-		var family = DepositsModels.families[familyIndex], snap = sc.snapshot, cell = site.cell, round = Deposits.round;
-		var dir = Deposits.dirOf(tile, site.fu, site.fv, Deposits.scratchDir);
-		var alt = snap.alt[cell];
-		var volume = round(Deposits.volumeOf(drawn.axes));
-		var ore = round(volume * family.rockDensity * family.oreFraction);
-		var body = {
-			id: 'D' + ('0000' + tile).slice(-5) + '-' + family.key + '-' + ordinal,
-			tile: tile, family: family.key, fu: site.fu, fv: site.fv,
-			lat: +(Math.asin(dir[1]) * 180 / Math.PI).toFixed(4), lon: +(Math.atan2(dir[2], dir[0]) * 180 / Math.PI).toFixed(4),
-			host: site.host, surfaceAltM: round(alt), waterDepthM: round(Math.max(0, -alt)),
-			crustThicknessM: round(snap.thick[cell]), potential: round(site.potential),
-			burialTopM: round(drawn.burial), strikeDeg: round(drawn.strike), dipDeg: round(drawn.dip),
-			axesM: drawn.axes, volumeM3: volume, rockDensityTm3: family.rockDensity, oreFraction: family.oreFraction,
-			oreTonnes: ore, commodities: [], ageMa: drawn.age, confidence: 'synthetic', status: family.status
-		};
-		for (var c = 0; c < family.commodities.length; c++) {
-			var m = family.commodities[c], grade = round(drawn.grades[c]);
-			body.commodities.push({ id: m.id, grade: grade, unit: m.unit, metalTonnes: round(Deposits.metalTonnes(ore, grade, m.unit)) });
-		}
-		return body;
-	},
-	// Reasons a body is not a valid catalogue record; '' when it is.
-	validate: function (b) {
-		var family = DepositsModels.families.find(function (f) { return f.key === b.family; });
-		if (!family) return 'unknown family ' + b.family;
-		if (!(b.axesM.length === 3 && b.axesM.every(function (v) { return v > 0 && v <= DepositsModels.maxExtentM; }))) return 'axes';
-		if (!(b.burialTopM >= 0 && b.waterDepthM >= 0)) return 'burial or water depth';
-		if (family.hosts.indexOf(b.host) < 0) return 'host ' + b.host;
-		if (!(b.rockDensityTm3 > 0 && b.oreFraction > 0 && b.oreFraction <= 1)) return 'density or ore fraction';
-		if (b.commodities.length !== family.commodities.length) return 'commodity count';
-		if (!(b.ageMa[0] >= 0 && b.ageMa[1] >= b.ageMa[0])) return 'age range';
-		if (!(b.fu > 0 && b.fu < 1 && b.fv > 0 && b.fv < 1)) return 'anchor';
-		if (Deposits.tileOf.apply(null, Deposits.dirOf(b.tile, b.fu, b.fv, [0, 0, 0])) !== b.tile) return 'anchor outside its tile';
-		var units = Deposits.axisUnits(b.strikeDeg, b.dipDeg, Deposits.scratchUnits);
-		if (b.burialTopM + 2 * Deposits.verticalHalfExtent(b.axesM, units) > b.crustThicknessM * 0.9 + 1) return 'deeper than the crust';
-		var ore = Deposits.round(Deposits.round(Deposits.volumeOf(b.axesM)) * b.rockDensityTm3 * b.oreFraction);
-		if (Math.abs(ore - b.oreTonnes) > 1e-5 * ore) return 'ore tonnes disagree with the envelope';
-		for (var c = 0; c < b.commodities.length; c++) {
-			var m = b.commodities[c];
-			if (!(Number.isFinite(m.grade) && m.grade > 0 && m.id === family.commodities[c].id && m.unit === family.commodities[c].unit)) return 'grade';
-			var metal = Deposits.metalTonnes(b.oreTonnes, m.grade, m.unit);
-			if (Math.abs(metal - m.metalTonnes) > 1e-5 * metal) return 'metal tonnes disagree with grade';
-		}
-		return '';
-	},
-	topAltitudeM: function (b) {
-		return b.surfaceAltM - b.burialTopM;
-	},
-
-	// ------------------------------------------------------------------ catalogue queries
-	tileBodies: function (sc, tile) {
-		var cached = sc.tiles.get(tile);
-		if (cached) return cached;
-		if (!sc.snapshot) throw new Error('tile ' + tile + ' is not in this imported catalogue');
-		var bodies = [], families = DepositsModels.families;
-		for (var f = 0; f < families.length; f++) {
-			for (var o = 0; o < DepositsModels.slots; o++) {
-				var body = Deposits.candidate(sc, tile, f, o);
-				if (body) bodies.push(body);
-			}
-		}
-		sc.tiles.set(tile, bodies);
-		if (sc.tiles.size === Deposits.tileCount()) sc.complete = true;
-		return bodies;
-	},
-	// Generates tiles [from, from + count) in index order; returns the next index. A job loops
-	// on this with its own progress and cancel checks, and never publishes a partial result.
-	scan: function (sc, from, count) {
-		var end = Math.min(Deposits.tileCount(), from + count);
-		for (var tile = from; tile < end; tile++) Deposits.tileBodies(sc, tile);
-		return end;
-	},
-	// Tiles within `radiusM` of a point: the point's own tile plus those reached by stepping
-	// to the corners and edge midpoints of the query square, which is smaller than any tile.
-	tilesNear: function (x, y, z, radiusM, out) {
-		var f = Deposits.frame(x, y, z, Deposits.scratchFrame), r = radiusM / DepositsParams.radius;
-		out.length = 0;
-		for (var dn = -1; dn <= 1; dn++) {
-			for (var de = -1; de <= 1; de++) {
-				var px = x + r * (de * f[0] + dn * f[3]), py = y + r * (de * f[1] + dn * f[4]), pz = z + r * (de * f[2] + dn * f[5]);
-				var tile = Deposits.tileOf(px, py, pz);
-				if (out.indexOf(tile) < 0) out.push(tile);
-			}
-		}
-		return out.sort(function (a, b) { return a - b; });
-	},
-	// Bodies whose ellipsoid may come within `radiusM` of a point, sorted by id.
-	near: function (sc, x, y, z, radiusM) {
-		if (radiusM > Deposits.MAX_QUERY_M) throw new RangeError('query radius above ' + Deposits.MAX_QUERY_M + ' m');
-		var reach = radiusM + DepositsModels.maxExtentM, tiles = Deposits.tilesNear(x, y, z, reach, []);
-		var found = [], pos = [0, 0, 0];
-		for (var i = 0; i < tiles.length; i++) {
-			var bodies = Deposits.tileBodies(sc, tiles[i]);
-			for (var k = 0; k < bodies.length; k++) {
-				var b = bodies[k];
-				Deposits.dirOf(b.tile, b.fu, b.fv, pos);
-				var dot = Math.max(-1, Math.min(1, pos[0] * x + pos[1] * y + pos[2] * z));
-				var gap = Math.acos(dot) * DepositsParams.radius - Math.max(b.axesM[0], b.axesM[1], b.axesM[2]);
-				if (gap <= radiusM) found.push(b);
-			}
-		}
-		return found.sort(Deposits.compareId);
-	},
-	compareId: function (a, b) {
-		return a.tile !== b.tile ? a.tile - b.tile : (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-	},
-	allBodies: function (sc) {
-		var tiles = Array.from(sc.tiles.keys()).sort(function (a, b) { return a - b; }), all = [];
-		for (var i = 0; i < tiles.length; i++) all.push.apply(all, sc.tiles.get(tiles[i]));
-		return all.sort(Deposits.compareId);
-	},
-	// Local east/north offset in metres of a direction from a body's anchor.
-	offsetFrom: function (b, x, y, z, out) {
-		var a = Deposits.dirOf(b.tile, b.fu, b.fv, Deposits.scratchDir);
-		var f = Deposits.frame(a[0], a[1], a[2], Deposits.scratchFrame), R = DepositsParams.radius;
-		var dx = x - a[0], dy = y - a[1], dz = z - a[2];
-		out[0] = R * (dx * f[0] + dy * f[1] + dz * f[2]);
-		out[1] = R * (dx * f[3] + dy * f[4] + dz * f[5]);
-		return out;
-	},
-	// Depth interval [top, bottom] below the solid surface where a vertical line through
-	// (east, north) metres from the body's centre cuts its ellipsoid; false when it misses.
-	verticalIntersection: function (b, east, north, out) {
-		var u = Deposits.axisUnits(b.strikeDeg, b.dipDeg, Deposits.scratchUnits), qa = 0, qb = 0, qc = -1;
-		for (var k = 0; k < 3; k++) {
-			var inv = 1 / (b.axesM[k] * b.axesM[k]), h = east * u[k * 3] + north * u[k * 3 + 1], up = u[k * 3 + 2];
-			qa += up * up * inv; qb += 2 * h * up * inv; qc += h * h * inv;
-		}
-		var disc = qb * qb - 4 * qa * qc;
-		if (!(disc > 0)) return false;
-		var root = Math.sqrt(disc), centre = b.burialTopM + Deposits.verticalHalfExtent(b.axesM, u);
-		// u is height above the centre; depth is the centre's depth minus u.
-		out[0] = centre - (-qb + root) / (2 * qa); out[1] = centre - (-qb - root) / (2 * qa);
-		return true;
-	},
-
-	// ------------------------------------------------------------------ export and import
-	identity: function (sc) {
-		return { seed: sc.seed, version: sc.version, tileN: DepositsModels.tileN, snapshot: sc.meta };
-	},
-	json: function (sc) {
-		var bodies = Deposits.allBodies(sc), tiles = Array.from(sc.tiles.keys()).sort(function (a, b) { return a - b; });
-		var body = JSON.stringify(bodies);
-		return JSON.stringify({
-			format: Deposits.FORMAT, generator: Deposits.identity(sc), complete: sc.complete,
-			tiles: tiles, count: bodies.length, checksum: Deposits.fnvText(body), bodies: bodies
-		});
-	},
-	// Parses and validates an export without touching any scenario; throws before returning.
-	parse: function (text) {
-		var rec = JSON.parse(text), gen = rec.generator;
-		if (rec.format !== Deposits.FORMAT) throw new Error('not a deposit catalogue');
-		if (!gen || gen.version !== DepositsModels.version) throw new Error('generator version ' + (gen && gen.version) + ' is not ' + DepositsModels.version);
-		if (gen.tileN !== DepositsModels.tileN) throw new Error('tile grid ' + gen.tileN + ' is not ' + DepositsModels.tileN);
-		if (rec.bodies.length !== rec.count || Deposits.fnvText(JSON.stringify(rec.bodies)) !== rec.checksum) throw new Error('catalogue checksum mismatch');
-		var tileSet = new Set(rec.tiles);
-		for (var i = 0; i < rec.bodies.length; i++) {
-			var why = Deposits.validate(rec.bodies[i]);
-			if (why) throw new Error(rec.bodies[i].id + ': ' + why);
-			if (!tileSet.has(rec.bodies[i].tile)) throw new Error(rec.bodies[i].id + ': tile not listed');
-		}
-		return rec;
-	},
-	groupByTile: function (rec) {
-		var tiles = new Map();
-		for (var t = 0; t < rec.tiles.length; t++) tiles.set(rec.tiles[t], []);
-		for (var i = 0; i < rec.bodies.length; i++) tiles.get(rec.bodies[i].tile).push(rec.bodies[i]);
-		return tiles;
-	},
-	// A catalogue without its snapshot: answers queries for the tiles it carries.
-	fromExport: function (rec) {
-		var gen = rec.generator;
-		return { seed: gen.seed, version: gen.version, snapshot: null, meta: gen.snapshot, tiles: Deposits.groupByTile(rec), complete: rec.complete };
-	},
-	// Fills a scenario's cache from a validated export of the same scenario. A foreign
-	// export is refused before the scenario changes.
-	adopt: function (sc, rec) {
-		var gen = rec.generator;
-		if (gen.seed !== sc.seed || gen.snapshot.checksum !== sc.meta.checksum) throw new Error('export belongs to another scenario');
-		var tiles = Deposits.groupByTile(rec);
-		tiles.forEach(function (bodies, tile) { sc.tiles.set(tile, bodies); });
-		if (sc.tiles.size === Deposits.tileCount()) sc.complete = true;
-	},
-	// Short text for the debug view: counts per family and the largest contained metal.
-	summary: function (sc, top) {
-		var all = Deposits.allBodies(sc), counts = {}, lines = [];
-		for (var i = 0; i < all.length; i++) counts[all[i].family] = (counts[all[i].family] || 0) + 1;
-		lines.push(sc.tiles.size + ' of ' + Deposits.tileCount() + ' tiles, ' + all.length + ' synthetic bodies '
-			+ JSON.stringify(counts) + ' · snapshot ' + sc.meta.checksum);
-		var ranked = all.slice().sort(function (a, b) { return b.oreTonnes - a.oreTonnes; });
-		for (var k = 0; k < top && k < ranked.length; k++) {
-			var b = ranked[k], grades = b.commodities.map(function (m) { return m.id + ' ' + m.grade + m.unit; }).join(', ');
-			lines.push(b.id + '  ' + (b.oreTonnes / 1e6).toFixed(1) + ' Mt  ' + grades + '  burial ' + Math.round(b.burialTopM)
-				+ ' m  ' + b.host + '  ' + b.lat + ', ' + b.lon);
-		}
-		return lines.join('\n');
+	function kindIndex(kind) {
+		if (Number.isInteger(kind) && kind >= 0 && kind < KINDS.length) return kind;
+		return KINDS.indexOf(kind);
 	}
-};
-Deposits.scratchUv = [0, 0];
-Deposits.scratchDir = [0, 0, 0];
-Deposits.scratchFrame = new Float64Array(9);
-Deposits.scratchUnits = new Float64Array(9);
-Deposits.scratchDraws = new Float64Array(Deposits.MAX_DRAWS);
-Deposits.scratchGrades = new Float64Array(4);
+	function potential(value) {
+		return Math.floor(Math.max(0, Math.min(1, value)) * POTENTIAL_BUCKETS) / POTENTIAL_BUCKETS;
+	}
+	function anchorKey(s, cell) {
+		var owner = s.owner[cell];
+		if (owner < 0 || owner >= s.n || !s.alive[owner]) return null;
+		var b = owner * 3;
+		return [Math.round(s.body[b] * BODY_SCALE), Math.round(s.body[b + 1] * BODY_SCALE),
+			Math.round(s.body[b + 2] * BODY_SCALE)];
+	}
+	function hash32(seed, kind, key) {
+		var k = kindIndex(kind);
+		if (k < 0 || !key || key.length < 3) return 0;
+		var h = (seed ^ Math.imul(k + 1, 0x9e3779b1)) >>> 0;
+		for (var i = 0; i < 3; i++) {
+			h = Math.imul(h ^ (key[i] | 0), 0x85ebca6b);
+			h ^= h >>> 13;
+		}
+		h = Math.imul(h ^ (h >>> 16), 0x7feb352d);
+		h = Math.imul(h ^ (h >>> 15), 0x846ca68b);
+		return (h ^ (h >>> 16)) >>> 0;
+	}
+	function salted(seed, k, key, salt) {
+		return hash32((seed ^ Math.imul(salt + 1, 0x27d4eb2f)) >>> 0, k, key);
+	}
+	// Every draw is one byte of its own salted hash, so a record is a function of integers only.
+	function draw(seed, k, key, salt) {
+		return (salted(seed, k, key, salt) & 255) / 255;
+	}
+	function hex32(value) {
+		return ('00000000' + (value >>> 0).toString(16)).slice(-8);
+	}
+	function idFor(seed, kind, key) {
+		return hex32(hash32(seed, kind, key));
+	}
+	function ironExposed(s, owner, cell) {
+		return s.hFel[owner] < IRON_FEL_MAX && s.z[cell] > 0;
+	}
+	function ironBasin(s, owner) {
+		return s.hSed[owner] >= IRON_BASIN_SED && s.age[owner] > IRON_BASIN_AGE;
+	}
+	function ironAt(s, owner, cell) {
+		var best = 0;
+		if (ironExposed(s, owner, cell)) {
+			var mafic = blurAt(s, K_MAFIC, cell), vms = blurAt(s, K_VMS, cell);
+			best = mafic > vms ? mafic : vms;
+		}
+		if (!ironBasin(s, owner)) return best;
+		var basin = blurAt(s, K_BASIN, cell);
+		return basin > best ? basin : best;
+	}
+	function blurAt(s, kind, cell) {
+		var k = kindIndex(kind), g = s.grid, owner = s.owner[cell];
+		if (k < 0 || owner < 0 || owner >= s.n || !s.alive[owner]) return 0;
+		if (k === IRON) return ironAt(s, owner, cell);
+		var field = s[FIELDS[k]], sum = field[owner], count = 1;
+		for (var n = 0; n < g.ringN[cell]; n++) {
+			var neighbor = g.ring[cell * 6 + n], adjacent = s.owner[neighbor];
+			if (adjacent < 0 || adjacent >= s.n || !s.alive[adjacent]) continue;
+			sum += field[adjacent]; count++;
+		}
+		return potential(sum / count * FIELD_SCALE[k]);
+	}
+	function isPeak(s, kind, cell, value) {
+		var g = s.grid;
+		for (var n = 0; n < g.ringN[cell]; n++) {
+			var neighbor = g.ring[cell * 6 + n], other = blurAt(s, kind, neighbor);
+			if (other > value || (other === value && neighbor < cell)) return false;
+		}
+		return true;
+	}
+	function currentDirection(s, cell, owner) {
+		var b = owner * 3, x = s.world[b], y = s.world[b + 1], z = s.world[b + 2];
+		var length = Math.hypot(x, y, z);
+		if (!(length > 0) || !Number.isFinite(length)) {
+			b = cell * 3; x = s.grid.pos[b]; y = s.grid.pos[b + 1]; z = s.grid.pos[b + 2];
+			length = Math.hypot(x, y, z) || 1;
+		}
+		return [x / length, y / length, z / length];
+	}
+
+	// --- the class row -------------------------------------------------------------------
+	// Contexts are exclusive wherever the geology is exclusive (a craton is not an ordinary
+	// mafic host, a thick sedimentary pile is not a quartz-vein host), so the same cell always
+	// names the same commodity. Only the basin variants genuinely overlap, and there the row
+	// is picked by hash among the ones the cell qualifies for. A kind with no qualifying
+	// variant emits nothing: the same geology then yields a different commodity, which is
+	// the point.
+	function variantOk(row, s, cell, owner, latitude) {
+		if (row.kind === 'mafic') {
+			var craton = s.hFel[owner] > DepositParams.hOro && s.age[owner] > 300;
+			return row.variant === 'diamond' ? craton : !craton;
+		}
+		if (row.kind === 'arc') {
+			var island = s.hFel[owner] < DepositParams.hOceanic;
+			return row.variant === 'epithermal' ? island : !island;
+		}
+		if (row.kind === 'orogenic') {
+			var covered = s.hSed[owner] >= 500;
+			return row.variant === 'sedhost' ? covered : !covered;
+		}
+		if (row.kind === 'iron') {
+			// Superior-type BIF is the basin fill itself; Algoma-type sits in the exposed
+			// volcanic pile. The basin takes precedence where a cell could be either.
+			return row.variant === 'bif' ? ironBasin(s, owner) : !ironBasin(s, owner);
+		}
+		if (row.kind !== 'basin') return true;
+		var wet = s.z[cell] < DepositParams.sea;
+		if (row.variant === 'potash') return wet && Math.abs(latitude) < 40 * Math.PI / 180;
+		if (row.variant === 'coal') return s.z[cell] > -200;
+		return s.hFel[owner] >= DepositParams.hOceanic && s.hSed[owner] >= 300;
+	}
+	function rowsOf(k) {
+		var out = [];
+		for (var i = 0; i < CLASSES.length; i++) if (CLASSES[i].kind === KINDS[k]) out.push(CLASSES[i]);
+		return out;
+	}
+	var ROWS_BY_KIND = (function () {
+		var table = [];
+		for (var k = 0; k < KINDS.length; k++) table.push(rowsOf(k));
+		return table;
+	}());
+	function pickRow(s, k, cell, owner, key, latitude) {
+		var rows = ROWS_BY_KIND[k], eligible = null, count = 0, only = null;
+		for (var i = 0; i < rows.length; i++) {
+			if (!variantOk(rows[i], s, cell, owner, latitude)) continue;
+			count++;
+			if (count === 1) { only = rows[i]; continue; }
+			if (!eligible) eligible = [only];
+			eligible.push(rows[i]);
+		}
+		if (count <= 1) return only;
+		return eligible[salted(s.seed, k, key, SALT_VARIANT) % eligible.length];
+	}
+
+	// --- numbers -------------------------------------------------------------------------
+	function logLerp(lo, hi, u) {
+		return Math.pow(10, Math.log10(lo) + u * (Math.log10(hi) - Math.log10(lo)));
+	}
+	function sig2(value) {
+		return value > 0 ? +value.toPrecision(2) : 0;
+	}
+	function sig3(value) {
+		return value > 0 ? +value.toPrecision(3) : 0;
+	}
+	// The 1-2-5 tonnage ladder: the snap is what makes a size insensitive to sub-bucket drift.
+	function snap125(value, lo, hi) {
+		var exponent = Math.floor(Math.log10(value)), scale = Math.pow(10, exponent);
+		var mantissa = value / scale, steps = [1, 2, 5, 10], best = 1;
+		for (var i = 0; i < steps.length; i++) {
+			if (Math.abs(Math.log(steps[i] / mantissa)) < Math.abs(Math.log(best / mantissa))) best = steps[i];
+		}
+		return Math.min(hi, Math.max(lo, +(best * scale).toPrecision(6)));
+	}
+	function bandOf(q) {
+		for (var i = BAND_Q.length - 1; i >= 0; i--) if (q >= BAND_Q[i]) return i;
+		return -1;
+	}
+	function sizeClassOf(row, size) {
+		if (size < row.ladder[1]) return SIZE_CLASSES[0];
+		if (size < row.ladder[2]) return SIZE_CLASSES[1];
+		if (size < row.ladder[3]) return SIZE_CLASSES[2];
+		return SIZE_CLASSES[3];
+	}
+	function depthStep(span) {
+		return span >= 500 ? DEPTH_STEP : 10;
+	}
+	function bandDepth(row, hash) {
+		var span = row.emplace[1] - row.emplace[0], step = depthStep(span);
+		return row.emplace[0] + (hash % (Math.floor(span / step) + 1)) * step;
+	}
+	// Broken stick in 1/1024ths: shares are integers that sum exactly, so the volume ledger of
+	// §8.4 closes without a floating residue.
+	function shareOf(seed, k, key, count, out) {
+		var weights = 0, i;
+		for (i = 0; i < count; i++) {
+			out[i] = (count - i) + 0.5 + draw(seed, k, key, SALT_SHARE + i);
+			weights += out[i];
+		}
+		var used = 0;
+		for (i = 0; i < count; i++) {
+			out[i] = Math.max(1, Math.round(out[i] / weights * SHARE_UNITS));
+			used += out[i];
+		}
+		out[0] += SHARE_UNITS - used;
+		return out;
+	}
+	function containedOf(row, grade, oreTonnes, out) {
+		if (!row.grades.length) { out[row.bulk] = sig3(oreTonnes); return out; }
+		for (var i = 0; i < row.grades.length; i++) {
+			var metal = row.grades[i][0], unit = row.grades[i][1], value = grade[metal];
+			var factor = unit === '%' ? 0.01 : unit === 'g/t' ? 1e-6 : 1;
+			out[metal] = sig3(oreTonnes * value * factor);
+		}
+		return out;
+	}
+	function screenGrade(row, grade, bodies) {
+		var screen = row.screen;
+		if (screen.type === 'seam') {
+			var thickest = 0;
+			for (var i = 0; i < bodies.length; i++) if (bodies[i].thicknessM > thickest) thickest = bodies[i].thicknessM;
+			return thickest >= screen.cutOff;
+		}
+		if (screen.type === 'sum') {
+			var total = 0;
+			for (var w = 0; w < screen.weights.length; w++) total += screen.weights[w] * grade[row.grades[w][0]];
+			return total >= screen.cutOff;
+		}
+		return grade[row.grades[0][0]] >= screen.cutOff;
+	}
+
+	function buildRecord(s, k, cell, value) {
+		var owner = s.owner[cell], key = anchorKey(s, cell);
+		if (!key) return null;
+		var direction = currentDirection(s, cell, owner);
+		var lat = Math.asin(Math.max(-1, Math.min(1, direction[1]))), lon = Math.atan2(direction[2], direction[0]);
+		var row = pickRow(s, k, cell, owner, key, lat);
+		if (!row) return null;
+		var q = Math.round(value * POTENTIAL_BUCKETS), band = bandOf(q);
+		if (band < 0) return null;
+
+		var w = draw(s.seed, k, key, SALT_SIZE);
+		var size = snap125(logLerp(row.ladder[band], row.ladder[band + 1], w), row.ladder[0], row.ladder[4]);
+		var grade = {}, gradeUnit = {}, gi;
+		for (gi = 0; gi < row.grades.length; gi++) {
+			var metal = row.grades[gi];
+			// The 0.25·(1 − w) term reproduces the published negative grade-tonnage correlation
+			// (r ≈ −0.35…−0.49) without carrying a distribution object.
+			var u = 0.75 * draw(s.seed, k, key, SALT_GRADE + gi) + 0.25 * (1 - w);
+			grade[metal[0]] = sig2(logLerp(metal[2], metal[3], u));
+			gradeUnit[metal[0]] = metal[1];
+		}
+		// A `t`-unit ladder counts contained metal, so the ore tonnage it implies is what the
+		// geometry has to carry; a `Mt` ladder is already the ore tonnage.
+		var oreMt = size;
+		if (row.unit !== 'Mt') oreMt = size / 1e6 / (grade[row.grades[0][0]] * 0.01);
+
+		var spread = 1 + 7 * q / POTENTIAL_BUCKETS;   // a strong anomaly is a bigger cluster
+		var drawn = 1 + Math.floor(draw(s.seed, k, key, SALT_BODIES) * spread);
+		var count = Math.max(row.bodies[0], Math.min(row.bodies[1], drawn));
+		var shares = shareOf(s.seed, k, key, count, []);
+		var bodies = [], offsets = [], stack = 0, step = depthStep(row.emplace[1] - row.emplace[0]), b;
+		for (b = 0; b < count; b++) {
+			var k3 = +logLerp(row.aspect[0], row.aspect[1], draw(s.seed, k, key, SALT_ASPECT + b)).toPrecision(3);
+			var volume = shares[b] / SHARE_UNITS * oreMt * 1e6 / row.rho;
+			var area = Math.pow(volume / k3, 2 / 3);
+			var thickness = Math.round(k3 * Math.sqrt(area));
+			var gap = b ? (salted(s.seed, k, key, SALT_GAP + b) % 5) * step : 0;
+			offsets.push(stack + gap);
+			bodies.push({ top: 0, bottom: 0, footprintKm2: sig3(area / 1e6), thicknessM: thickness,
+				share: shares[b] / SHARE_UNITS, aspect: k3 });
+			stack += gap + thickness;
+		}
+		// Cover is what lies above the shallowest body, and that depends on where the class
+		// sits. A basement-hosted body (porphyry, vein, massive sulfide, BIF) is buried by the
+		// whole sediment pile; a sediment-hosted one (placer, coal, potash, roll front,
+		// Carlin-style Au) is *inside* that pile, so adding the pile on top of it would bury
+		// every one of them below its own mining depth.
+		var sediment = Math.min(COVER_CAP, Math.max(0, Math.round(s.hSed[owner] / DEPTH_STEP) * DEPTH_STEP));
+		var buried = row.hosted === 'sediment' ? 0 : sediment;
+		var crust = s.hSed[owner] + s.hFel[owner] + s.hMaf[owner];
+		// A cluster is emplaced inside the crust it belongs to: the stack is shifted up rather
+		// than allowed to hang below the Moho, and never above its own burial depth.
+		var emplaced = buried + bandDepth(row, salted(s.seed, k, key, SALT_EMPLACE));
+		var top = Math.max(buried, Math.min(emplaced, crust - stack));
+		var cover = row.hosted === 'sediment' ? Math.min(top, sediment) : sediment;
+		for (b = 0; b < count; b++) {
+			bodies[b].top = top + offsets[b];
+			bodies[b].bottom = bodies[b].top + bodies[b].thicknessM;
+		}
+		var bottom = bodies[count - 1].bottom;
+		var contained = containedOf(row, grade, oreMt * 1e6, {});
+		var principal = row.grades.length ? contained[row.grades[0][0]] : contained[row.bulk];
+		var gradeOk = screenGrade(row, grade, bodies);
+		var sizeOk = size >= row.minSize && (!row.minContained || principal >= row.minContained);
+		var depthOk = top <= row.maxTop;
+		var surfaceZ = s.z[cell], wet = surfaceZ < DepositParams.sea;
+
+		return {
+			id: hex32(hash32(s.seed, k, key)), kind: KINDS[k], kindIndex: k, variant: row.variant,
+			commodity: row.commodity, cell: cell, owner: owner, plate: s.plate[owner],
+			anchorKey: key, direction: direction, potential: value,
+			host: DepositExtract.host(s, cell), ageMyr: Math.round(s.age[owner]),
+			epochMyr: Math.round(s.t * 10) / 10,
+			lat: Math.round(lat * 10000) / 10000, lon: Math.round(lon * 10000) / 10000,
+			cover: cover, surfaceZ: Number.isFinite(surfaceZ) ? Math.round(surfaceZ / 10) * 10 : 0,
+			water: wet ? Math.round((DepositParams.sea - surfaceZ) / 10) * 10 : 0,
+			top: top, bottom: bottom, bodies: bodies,
+			unit: row.unit, size: size, sizeMt: row.unit === 'Mt' ? size : sig3(oreMt),
+			sizeClass: sizeClassOf(row, size), grade: grade, gradeUnit: gradeUnit, contained: contained,
+			viable: gradeOk && sizeOk && depthOk,
+			reason: !gradeOk ? 'grade' : !sizeOk ? 'size' : !depthOk ? 'depth' : CONFIDENCE_NONE
+		};
+	}
+	// The local primitive: one cell, one kind, no world builder behind it.
+	function recordAt(s, kind, cell) {
+		var k = kindIndex(kind);
+		if (k < 0) return null;
+		var value = blurAt(s, k, cell);
+		if (value < DepositParams.depositMin || !isPeak(s, k, cell, value)) return null;
+		return buildRecord(s, k, cell, value);
+	}
+
+	// --- the explicit O(V) catalogue -------------------------------------------------------
+	// One blur store per level, allocated on the first explicit build and reused afterwards
+	// (the same policy the old extract scratch had): 7 x V x 8 B, 0.6 MB at L5 and 9.2 MB at L7.
+	var scratch = null, cache = null;
+	function fieldScratch(V) {
+		if (!scratch || scratch.length !== KINDS.length * V) scratch = new Float64Array(KINDS.length * V);
+		return scratch;
+	}
+	function blurKind(s, k, out, offset) {
+		var g = s.grid, field = s[FIELDS[k]], scale = FIELD_SCALE[k];
+		for (var c = 0; c < g.V; c++) {
+			var owner = s.owner[c];
+			if (owner < 0 || owner >= s.n || !s.alive[owner]) { out[offset + c] = 0; continue; }
+			var sum = field[owner], count = 1;
+			for (var n = 0; n < g.ringN[c]; n++) {
+				var adjacent = s.owner[g.ring[c * 6 + n]];
+				if (adjacent < 0 || adjacent >= s.n || !s.alive[adjacent]) continue;
+				sum += field[adjacent]; count++;
+			}
+			out[offset + c] = potential(sum / count * scale);
+		}
+	}
+	// Iron reads the parent fields the same pass already blurred, so the whole build stays one
+	// blur per potential instead of four.
+	function blurIron(s, out, V) {
+		var offset = IRON * V;
+		for (var c = 0; c < V; c++) {
+			var owner = s.owner[c];
+			if (owner < 0 || owner >= s.n || !s.alive[owner]) { out[offset + c] = 0; continue; }
+			var best = 0;
+			if (ironExposed(s, owner, c)) {
+				var mafic = out[K_MAFIC * V + c], vms = out[K_VMS * V + c];
+				best = mafic > vms ? mafic : vms;
+			}
+			var basin = ironBasin(s, owner) ? out[K_BASIN * V + c] : 0;
+			out[offset + c] = basin > best ? basin : best;
+		}
+	}
+	function rankCompare(a, b) {
+		return a.weight !== b.weight ? b.weight - a.weight : a.index - b.index;
+	}
+	function principalOf(record) {
+		for (var metal in record.contained) return record.contained[metal];
+		return 0;
+	}
+	function buildCatalogue(s) {
+		var g = s.grid, store = fieldScratch(g.V), records = [], k, c;
+		for (k = 0; k < IRON; k++) blurKind(s, k, store, k * g.V);
+		blurIron(s, store, g.V);
+		for (k = 0; k < KINDS.length; k++) {
+			var field = store.subarray(k * g.V, (k + 1) * g.V);
+			var peaks = DepositExtract.peaks(s, field, DepositParams.depositMin, []);
+			for (var at = 0; at < peaks.length; at++) {
+				var record = buildRecord(s, k, peaks[at].cell, peaks[at].value);
+				if (record) records.push(record);
+			}
+		}
+		records.sort(function (a, b) {
+			return a.cell !== b.cell ? a.cell - b.cell : a.kindIndex - b.kindIndex;
+		});
+		var cellStart = new Int32Array(g.V + 1), i;
+		for (i = 0; i < records.length; i++) cellStart[records[i].cell + 1]++;
+		for (c = 0; c < g.V; c++) cellStart[c + 1] += cellStart[c];
+		var byKind = [], viableCount = 0, containedTotals = {};
+		for (k = 0; k < KINDS.length; k++) byKind.push([]);
+		for (i = 0; i < records.length; i++) {
+			var r = records[i];
+			if (r.viable) viableCount++;
+			byKind[r.kindIndex].push({ index: i, weight: principalOf(r) });
+			for (var metal in r.contained) containedTotals[metal] = (containedTotals[metal] || 0) + r.contained[metal];
+		}
+		for (k = 0; k < KINDS.length; k++) {
+			byKind[k].sort(rankCompare);
+			byKind[k] = byKind[k].slice(0, 64).map(function (entry) { return entry.index; });
+		}
+		return {
+			epochMyr: Math.round(s.t * 10) / 10, time: s.t, threshold: DepositParams.depositMin, classes: CLASSES,
+			records: records, cellStart: cellStart, byKind: byKind,
+			viableCount: viableCount, containedTotals: containedTotals, signature: s.frame, level: s.grid.level
+		};
+	}
+	// The explicit path. Never called by a click: only a regional view, a campaign or an export
+	// may pay O(V), and the result is cached until the frame moves.
+	function build(s, opts) {
+		var reconEpoch = s.reconEpoch || 0;
+		if (cache && cache.state === s && cache.frame === s.frame && cache.t === s.t
+			&& cache.V === s.grid.V && cache.sea === DepositParams.sea
+			&& cache.reconEpoch === reconEpoch && cache.threshold === DepositParams.depositMin)
+			return opts && opts.min === 'viable' ? filterViable(cache.catalogue) : cache.catalogue;
+		var catalogue = buildCatalogue(s);
+		cache = {
+			state: s, frame: s.frame, t: s.t, V: s.grid.V, sea: DepositParams.sea,
+			reconEpoch: reconEpoch, threshold: DepositParams.depositMin, catalogue: catalogue
+		};
+		if (opts && opts.min === 'viable') return filterViable(catalogue);
+		return catalogue;
+	}
+	function filterViable(catalogue) {
+		var out = [];
+		for (var i = 0; i < catalogue.records.length; i++) if (catalogue.records[i].viable) out.push(catalogue.records[i]);
+		return out;
+	}
+	function viable(s) {
+		return filterViable(build(s));
+	}
+	function stale(s, catalogue) {
+		var snapshotTime = catalogue.time === undefined ? catalogue.epochMyr : catalogue.time;
+		return Math.abs(s.t - snapshotTime) > 5;
+	}
+	function atCell(s, cell) {
+		var catalogue = build(s), out = [];
+		for (var i = catalogue.cellStart[cell]; i < catalogue.cellStart[cell + 1]; i++) out.push(catalogue.records[i]);
+		return out;
+	}
+	function allowed(record, opts) {
+		if (!opts) return true;
+		if (opts.kind && opts.kind !== 'all' && opts.kind !== record.kind) return false;
+		return !opts.ledger || !!opts.ledger.byId[record.id];
+	}
+	function addTotals(target, source) {
+		for (var metal in source) target[metal] = (target[metal] || 0) + source[metal];
+	}
+	function topInsert(top, record) {
+		var weight = principalOf(record), at = 0;
+		while (at < top.length) {
+			var current = top[at], currentWeight = principalOf(current);
+			if (weight > currentWeight || (weight === currentWeight && record.id < current.id)) break;
+			at++;
+		}
+		top.splice(at, 0, record);
+		if (top.length > 10) top.pop();
+	}
+	function summary(s, opts) {
+		opts = opts || {};
+		var catalogue = opts.catalogue || build(s), perKind = [], all = {}, viable = {},
+			recordCount = 0, viableCount = 0, k;
+		for (k = 0; k < KINDS.length; k++) perKind.push({ kind: KINDS[k], records: 0, viable: 0, top: [] });
+		for (var i = 0; i < catalogue.records.length; i++) {
+			var r = catalogue.records[i];
+			if (!allowed(r, opts)) continue;
+			recordCount++;
+			perKind[r.kindIndex].records++;
+			addTotals(all, r.contained);
+			if (!r.viable) continue;
+			viableCount++;
+			perKind[r.kindIndex].viable++;
+			addTotals(viable, r.contained);
+			topInsert(perKind[r.kindIndex].top, r);
+		}
+		return {
+			epochMyr: catalogue.epochMyr,
+			records: recordCount,
+			viable: viableCount,
+			byKind: perKind,
+			contained: viable,
+			containedAll: all,
+			surveyedCells: opts.ledger ? opts.ledger.cellsN : 0,
+			kind: opts.kind || 'all',
+			stale: stale(s, catalogue)
+		};
+	}
+	function publicRecord(r) {
+		return {
+			id: r.id, kind: r.kind, variant: r.variant, commodity: r.commodity, cell: r.cell,
+			plate: r.plate, anchorKey: r.anchorKey, lat: r.lat, lon: r.lon,
+			potential: Math.round(r.potential * 10000) / 10000,
+			host: r.host, ageMyr: r.ageMyr, epochMyr: r.epochMyr, cover: r.cover, surfaceZ: r.surfaceZ,
+			water: r.water, top: r.top, bottom: r.bottom, bodies: r.bodies, unit: r.unit, size: r.size,
+			sizeClass: r.sizeClass, grade: r.grade, gradeUnit: r.gradeUnit, contained: r.contained,
+			viable: r.viable, reason: r.reason
+		};
+	}
+	function json(s, opts) {
+		opts = opts || {};
+		var catalogue = opts.catalogue || build(s), classes = [], i;
+		for (i = 0; i < CLASSES.length; i++) {
+			classes.push({ kind: CLASSES[i].kind, variant: CLASSES[i].variant, unit: CLASSES[i].unit,
+				cutOff: CLASSES[i].screen.label, minSize: CLASSES[i].minSize, maxTop: CLASSES[i].maxTop,
+				source: CLASSES[i].source });
+		}
+		var deposits = [], contained = {}, viableContained = {}, viableCount = 0;
+		for (i = 0; i < catalogue.records.length; i++) {
+			var record = catalogue.records[i];
+			if (!allowed(record, opts) || (opts.viableOnly && !record.viable)) continue;
+			deposits.push(publicRecord(record));
+			addTotals(contained, record.contained);
+			if (record.viable) {
+				viableCount++;
+				addTotals(viableContained, record.contained);
+			}
+		}
+		return JSON.stringify({
+			format: 'pgt-deposits', version: 2, level: s.grid.level, seed: s.seed,
+			t: +s.t.toFixed(3), epoch: catalogue.epochMyr,
+			thresholds: { traceMin: DepositParams.traceMin, depositMin: DepositParams.depositMin },
+			classes: classes,
+			totals: { records: deposits.length, viable: viableCount,
+				contained: contained, viableContained: viableContained },
+			deposits: deposits
+		}, null, 1);
+	}
+	function release() {
+		scratch = null; cache = null;
+	}
+
+	return {
+		KINDS: KINDS,
+		FIELDS: FIELDS,
+		CLASSES: CLASSES,
+		SIZE_CLASSES: SIZE_CLASSES,
+		FIELD_SCALE: FIELD_SCALE,
+		IRON: IRON,
+		TRACE_MIN: DepositParams.traceMin,
+		DEPOSIT_MIN: DepositParams.depositMin,
+		HYSTERESIS: DepositParams.depositHysteresis,
+		POTENTIAL_BUCKETS: POTENTIAL_BUCKETS,
+		potential: potential,
+		blurAt: blurAt,
+		anchorKey: anchorKey,
+		hash32: hash32,
+		idFor: idFor,
+		isPeak: isPeak,
+		rowFor: function (s, kind, cell) {
+			var k = kindIndex(kind), owner = s.owner[cell], key = anchorKey(s, cell);
+			if (k < 0 || !key) return null;
+			var direction = currentDirection(s, cell, owner);
+			return pickRow(s, k, cell, owner, key, Math.asin(Math.max(-1, Math.min(1, direction[1]))));
+		},
+		at: recordAt,
+		build: build,
+		atCell: atCell,
+		viable: viable,
+		stale: stale,
+		summary: summary,
+		json: json,
+		release: release
+	};
+}());
 if (typeof module !== 'undefined' && module.exports) module.exports = Deposits;

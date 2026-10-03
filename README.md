@@ -39,17 +39,42 @@ Open `index.html` directly in a browser.
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
   placer is liberated by erosion and rides the sediment load downhill.
-- Synthetic deposit catalogue (0.6.0): Freeze catalogue pauses the world, snapshots its geology and
-  generates deterministic ellipsoidal bodies (VMS, porphyry, orogenic Au) on a fixed cube-sphere tile
-  grid, each with host, burial depth, orientation, ore tonnes and grades. Bodies are a pure function of
-  seed + generator version + snapshot, so clicks, whole-world scans and re-imports agree byte for byte;
-  the simulation is never touched. Priors are game parameters (`data/deposits/SOURCES.md`), not
-  reserves. See `0.6.x-plan-deposit-prospector.md`.
-- Prospecting instruments (0.6.1): the frozen snapshot is lazily materialised — a survey of the pinned cell generates only its tiles, so `Freeze catalogue` is only for a whole-world export. Visual, sample-assay, 500 m / 5 km drilling, magnetic/EM and seismic each have an honest footprint, depth and host limit, deterministic noise and a repeat index; a null result means not detected within support, not absent. Only ~19 % of synthetic bodies are scenario-positive under the game economics (`js/data/deposit-economics.js` — prices, recovery, opex, depth/water penalties, scale cutoff), so most cells are barren or sub-economic. The ledger of discovered bodies grows with surveys and survives until the world is reset.
-- Potential-maxima diagnostic on demand (the "Potential maxima JSON" button): a one-cell blur of each potential, its ranked local maxima,
-  and a context tag per deposit, dumped as JSON.
+- Deposit catalogue on demand (0.6.1): a one-cell blur of each potential and its ranked local
+  maxima become records with numbers. A flat class table of thirteen Earth-anchored rows
+  (porphyry, epithermal, VMS, Ni-Cu-PGE, cratonic diamond, orogenic vein, Carlin-style Au,
+  sandstone uranium, coal, potash, placer Au, Superior- and Algoma-type iron) turns a quantized
+  potential into a tonnage off a percentile ladder, log-uniform grades with the published negative
+  grade-tonnage correlation, 1-8 ore bodies whose shape follows one aspect ratio and reproduces
+  the tonnage exactly, a depth that knows whether the class is hosted in the basement or inside
+  the sediment pile, contained metal, and the industry's own grade / size / depth viability screen
+  with the failing leg named. Every number is a function of integer buckets and of a hash of
+  (seed, class, quantized body direction), so it does not move when the sim drifts under a bucket
+  or the clock advances. `Deposits.at` answers one cell for a click; `Deposits.build` is an
+  explicit O(V) catalogue (21 ms at L5, 74 ms at L7) that only an export or a regional request may
+  start, and `Deposits.json` dumps it as `pgt-deposits` v2.
+- Single-cell prospecting (0.6.0): choose any combination of field observation, stream geochemistry,
+  gravity/magnetics, ground radar, shallow/deep drilling and lab assay, then click one cell. The
+  report is pinned independently from the cheap pointer-follow column probe; hover never surveys
+  or adds ledger entries. Reach, cover, drainage footprint and deterministic detection noise gate
+  each tool, while independent readings, drilling and lab work build inferred/indicated/measured
+  confidence in a page-local ledger. Candidates have stable column-frame identities and depth
+  buckets, and each found line now carries the 0.6.1 economics - variant, commodity, tonnage, size
+  class, grades, body count, depth interval and the viability verdict. A local survey performs no
+  world scan at all; hover remains a cheap column preview and never adds coverage.
+- Stratigraphic cores plus the explicitly opt-in regional campaign (0.6.2): a local map click logs
+  a deterministic core even with no instruments selected (without adding survey coverage in that
+  case), with 500 m / 2 km / 5 km / to-basement depths measured from the land or sea surface (water
+  consumes hole depth). `Export core` writes `pgt-core` JSON. `Survey all cells · build viable map`
+  is a separate deliberate action: it pauses
+  playback, builds one coherent catalogue snapshot, then sweeps at most 256 cells per frame with
+  a 1.25 ms budget checked every eight cells. It never starts on load, hover or a local click.
+  Campaign discoveries use the same selected-tool, noise and session-ledger rules as local surveys;
+  the filtered summary, filled viable / hollow sub-economic markers and export reveal only ledger
+  discoveries. A snapshot becomes stale more than 5 Myr from its exact campaign time; the first refresh press
+  explains this and the second starts a fresh paused campaign. `Deposits JSON` remains the separate
+  explicit all-catalogue export.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
-  views, plus a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
+  views, plus the optional viable-deposit overlay, a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
   the surface; the trackball view has no latitude/longitude clamp and slows horizontal motion
   naturally near a pole. The sim never pauses for the pointer as such: a frame defers its step
   only while the view is moving, and for `VIEW_HOLD_FRAMES` after it stops, on both engines — the CPU
@@ -116,12 +141,16 @@ same driver, browser paths overridable via `PGT_CHROME`/`PGT_PUPPETEER`/`PGT_LIB
   see the 0.4.6 plan §10.3). Every epoch on the `0.4.0-Earth-map-plan.md` §8.5 roadmap is now
   baked and staged (see `0.4.6-review.md` and that plan's §8).
 
-See `0.2-plan.md`, `0.1.5-final-design.md` and `0.4.0-Earth-map-plan.md`.
+See `0.2-plan.md`, `0.1.5-final-design.md`, `0.4.0-Earth-map-plan.md` and the prospecting
+stages in `0.6.x-plan-deposit-prospector.md`; the reviews are in `0.6.0-review.md` and
+`0.6.1-review.md`, the current 0.6.2 work is tracked in
+`0.6.2-plan-core-and-viability-map.md`, and the catalogue's measured calibration is §10 of
+`0.6.1-plan-deposit-catalogue.md` (`node experiments/deposit-calibration.js`).
 
 ## Test
 
 ```
-node tests/run-all.js            short profile: every test except the four histories (~1 min)
+node tests/run-all.js            short profile: 36 tests except the four histories (~2 min)
 node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
 node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```

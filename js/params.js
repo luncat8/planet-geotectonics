@@ -34,6 +34,7 @@ var Params = Object.seal({
 	mergeTime: 20, vRift: 10000, splitAge: 40,
 	Tm0: 1, TmHot: 1.6, tauCool: 2500, Tfloor: 0.35, kPlume: 0.01, plumeRad: 500000,
 	kV: 0.3, kM: 0.2, kM2: 0.15, kA: 0.02, kRec: 3, kO: 0.02, kB: 2e-4, kB2: 0.002, kDecay: 0.002,
+	traceMin: 0.15, depositMin: 0.30, depositHysteresis: 0.7,
 	fertLo: 0.5, hOro: 45000, hBas: 2000, zBasin: 300,
 	nWave: 8, nPhi: 4, nPlume: 4, histCap: 256, hotStart: 0, eventCadence: 1,
 	// ckptCap is the ring length at L5; ckptBytes caps the ring by bytes so a full-mirror

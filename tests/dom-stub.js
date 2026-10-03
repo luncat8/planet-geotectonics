@@ -36,6 +36,7 @@ function El(tag, doc) {
 	this.selected = false;
 	this.clicks = 0;
 	this.puts = 0;
+	this.fills = 0; this.strokes = 0; this.clears = 0;
 	this.classes = [];
 	this._value = undefined;
 	var self = this;
@@ -125,7 +126,11 @@ El.prototype.getContext = function (kind) {
 		createImageData: function (w, h) { return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; },
 		// lastImage / lastPut let a test read what was actually placed: the pan tests assert
 		// on the painted pixels, not on a counter.
-		putImageData: function (image, dx, dy) { self.puts++; self.lastImage = image; self.lastPut = { dx: dx, dy: dy }; }
+		putImageData: function (image, dx, dy) { self.puts++; self.lastImage = image; self.lastPut = { dx: dx, dy: dy }; },
+		clearRect: function () { self.clears++; },
+		beginPath: function () {}, moveTo: function () {}, lineTo: function () {}, closePath: function () {},
+		fill: function () { self.fills++; }, stroke: function () { self.strokes++; },
+		save: function () {}, translate: function () {}, restore: function () {}
 	};
 	return this.context;
 };

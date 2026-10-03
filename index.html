@@ -14,9 +14,12 @@
 				<fieldset id="layer" class="view-modes"><legend>View mode</legend>
 					<label title="3D planet: displaced terrain, translucent sea; drag orbits, wheel zooms"><input id="v3d" type="checkbox">3D view</label><label><input type="radio" name="layer" value="plate" checked>Plate identity</label><label><input type="radio" name="layer" value="type">Boundary: 🔴 SUBDUCTION · 🟡 RIDGE · ⚪ TRANSFORM · 🟣 COLLISION</label><label><input type="radio" name="layer" value="z">Elevation</label><label><input type="radio" name="layer" value="damage">Rift damage</label><label><input type="radio" name="layer" value="owner">Column coverage</label><label><input type="radio" name="layer" value="sediment">Sediment</label><label><input type="radio" name="layer" value="speed">Plate speed</label><label><input type="radio" name="layer" value="dir">Motion amount + direction</label><label><input type="radio" name="layer" value="age">Crust age</label><label><input type="radio" name="layer" value="force">Force amount</label><label><input type="radio" name="layer" value="forceDir">Force amount + direction</label><label><input type="radio" name="layer" value="oVms">Ore · VMS</label><label><input type="radio" name="layer" value="oMaf">Ore · mafic</label><label><input type="radio" name="layer" value="oArc">Ore · arc</label><label><input type="radio" name="layer" value="oOro">Ore · orogenic</label><label><input type="radio" name="layer" value="oBas">Ore · basin</label><label><input type="radio" name="layer" value="oPla">Ore · placer</label>
 				</fieldset></div>
-			<canvas id="map" aria-label="Equirectangular map of moving plates; drag to pan">Canvas support is required.</canvas>
-			<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU); drag to pan"></canvas>
-			<canvas id="map3d" width="2048" height="1024" hidden aria-label="3D planet view; drag to orbit, wheel to zoom"></canvas>
+			<div class="map-stage">
+				<canvas id="map" aria-label="Equirectangular map of moving plates; drag to pan">Canvas support is required.</canvas>
+				<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU); drag to pan"></canvas>
+				<canvas id="map3d" width="2048" height="1024" hidden aria-label="3D planet view; drag to orbit, wheel to zoom"></canvas>
+				<canvas id="markers" hidden aria-label="Discovered deposit map overlay"></canvas>
+			</div>
 			<div class="perf" id="perf"><div class="rows" id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report" title="Click to copy the performance report"><span>performance counter idle</span></div></div>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
@@ -36,21 +39,7 @@
 				<label title="Volume: conserved water as a multiple of the sea-0 volume; the level is solved">Water ×<input id="sea-vol" type="range" min="0" max="4" step="0.05" value="1"><span class="value" id="sea-vol-value">1.00×</span></label>
 				<label title="3D: vertical exaggeration of the relief">Displacement ×<input id="disp" type="range" min="1" max="40" step="0.5" value="10"><span class="value" id="disp-value">10.0×</span></label>
 				<label title="3D: mesh - the icosphere (even facets, no pole rows) or the equirectangular lattice (even texels, pole rows)">Mesh<select id="mesh3d"><option value="ico" selected>Icosphere</option><option value="grid">Heightmap</option></select></label><label title="3D: mesh detail; the mesh is level-independent and rebuilds once on change">3D detail<select id="k3d"><option value="k6">k6 · 41k vertices</option><option value="k7">k7 · 164k</option><option value="k8" selected>k8 · 655k</option><option value="k9">k9 · 2.6M</option></select></label><label title="3D: surface normals - screen-space derivatives (flat per triangle) or per-vertex from the height field">Normals<select id="norm3d"><option value="deriv" selected>Derivative</option><option value="analytic">Analytic</option></select></label>
-				<button id="save">Save world</button><button id="deposits">Potential maxima JSON</button>
-				<button id="catalogue" title="Pause, snapshot the geology and generate the whole synthetic deposit catalogue (0.6.0)">Freeze catalogue</button><button id="catalogue-json" disabled>Catalogue JSON</button>
-			</fieldset>
-			<fieldset id="prospect"><legend>Prospecting · instruments survey the frozen snapshot</legend>
-				<label class="check"><input id="prospect-visual" type="checkbox" checked> Visual</label>
-				<label class="check"><input id="prospect-sample" type="checkbox"> Sample+assay</label>
-				<label class="check"><input id="prospect-drill500" type="checkbox"> Drill 500 m</label>
-				<label class="check"><input id="prospect-drill5000" type="checkbox"> Drill 5 km</label>
-				<label class="check"><input id="prospect-mag" type="checkbox"> Mag/EM</label>
-				<label class="check"><input id="prospect-seismic" type="checkbox"> Seismic</label>
-				<button id="prospect-survey" title="Survey the pinned cell with the selected instruments; first use snapshots the paused world lazily without scanning all tiles">Survey pinned cell</button>
-				<button id="prospect-repeat" title="Explicit repeat survey of the same site (improves confidence at a cost, does not reroll hidden geology)">Repeat survey</button>
-				<label class="check"><input id="prospect-reveal" type="checkbox"> Reveal ground truth (debug)</label>
-				<label class="check"><input id="prospect-econ" type="checkbox" checked> Scenario-positive only</label>
-				<button id="prospect-viable" title="Export viable bodies within instrument support or, after freeze, whole-world viable map">Export viable JSON</button>
+				<button id="save">Save world</button><button id="deposits">Deposits JSON</button>
 			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
 				<label>Resolution<select id="level"><option value="5" selected>L5 · 10,242 cells</option><option value="6">L6 · 40,962 cells</option><option value="7">L7 · 163,842 cells</option></select></label>
@@ -58,10 +47,30 @@
 				<label id="preset-label" hidden title="Earth starts only: Realistic holds the real NNR-MORVEL poles (present day) and pins the thermal budget; Game lets the procedural mantle drive the continents. Historical packs have no poles, so Realistic there is a frozen-pole game run">Preset<select id="preset"><option value="realistic" selected>Realistic · real poles</option><option value="game">Game · mantle-driven</option></select></label>
 				<label id="recon-label" hidden title="Reconstruct: put the modern pack at a past epoch using the PALEOMAP rotation model (Mode K). Exact, reversible, display-side - writes no sim parameter.">Reconstruct<input id="recon" type="range" min="0" max="540" step="1" value="0"><span class="value" id="recon-value">0 Ma</span></label>
 				<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
-				<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
-			</fieldset>
-		</section>
-		<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div>Column inspector: <label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p><p id="catalogue-readout">Freeze the paused world to generate its synthetic deposit catalogue.</p><p id="prospect-readout" style="white-space:pre-line; min-height:6em; font-size:0.85em;">Select instruments and Survey pinned cell. First survey snapshots the paused world; not every cell hosts a commercial deposit.</p><p id="prospect-ledger" style="white-space:pre-line; font-size:0.8em; color:#aab9bd;"></p></div></section>
+					<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
+				</fieldset>
+				<fieldset id="prospect-tools"><legend>Prospecting · one cell per click</legend>
+					<label class="check" title="Outcrop, structure and placer pans; shallow exposure only"><input id="inst-obs" name="inst" value="obs" type="checkbox">Field observation</label>
+					<label class="check" title="Upstream catchment geochemistry; up to three drainage hops"><input id="inst-geo" name="inst" value="geo" type="checkbox">Stream geochemistry</label>
+					<label class="check" title="Depth-integrated response across a two-ring footprint"><input id="inst-mag" name="inst" value="mag" type="checkbox">Gravity + magnetics</label>
+					<label class="check" title="Sediment reflectors and shallow placer horizons"><input id="inst-gpr" name="inst" value="gpr" type="checkbox">Ground radar</label>
+					<label class="check" title="A 500 m hole; assay only where a candidate is intersected"><input id="inst-d500" name="inst" value="d500" type="checkbox">Drill 500 m</label>
+					<label class="check" title="A 5 km hole; assay only where a candidate is intersected"><input id="inst-d5k" name="inst" value="d5k" type="checkbox">Drill 5 km</label>
+					<label class="check" title="Refines a deposit already found; cannot discover one by itself"><input id="inst-lab" name="inst" value="lab" type="checkbox">Lab assay</label>
+					<small class="prospect-hint">Click a cell to survey it. Hover only updates the column inspector; it never surveys a cell.</small>
+					<div class="core-controls">
+						<label for="core-depth">Hole depth<select id="core-depth"><option value="500">500 m</option><option value="2000">2,000 m</option><option value="5000" selected>5,000 m</option><option value="basement">To basement</option></select></label>
+						<button id="export-core" disabled>Export core</button>
+					</div>
+					<div class="campaign-controls">
+						<button id="campaign">Survey all cells · build viable map</button>
+						<label for="deposit-kind">Kinds<select id="deposit-kind"><option value="all" selected>All kinds</option><option value="vms">VMS</option><option value="mafic">Mafic</option><option value="arc">Arc</option><option value="orogenic">Orogenic</option><option value="basin">Basin</option><option value="placer">Placer</option><option value="iron">Iron</option></select></label>
+						<button id="export-discovered" disabled>Export deposits</button>
+					</div>
+					<small id="campaign-progress" class="campaign-progress" role="status" aria-live="polite">No regional campaign. Local clicks survey only the selected cell footprint.</small>
+				</fieldset>
+			</section>
+			<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div class="inspectors"><div><h2>Column inspector</h2><label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p></div><div><h2>Prospecting report</h2><pre id="prospect" aria-live="polite">Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.</pre></div></div></section>
 	</main>
 	<script src="js/env.js"></script>
 	<script src="js/geodesics.js"></script>
@@ -84,10 +93,9 @@
 	<script src="js/perf.js"></script>
 	<script src="js/clipboard.js"></script>
 	<script src="js/extract.js"></script>
-	<script src="js/data/deposit-models.js"></script>
 	<script src="js/deposits.js"></script>
-	<script src="js/data/deposit-economics.js"></script>
-	<script src="js/prospector.js"></script>
+	<script src="js/core.js"></script>
+	<script src="js/instruments.js"></script>
 	<script src="js/sim.js"></script>
 	<script src="js/data/earth-1deg.js"></script>
 	<script src="js/data/earth-05deg.js"></script>

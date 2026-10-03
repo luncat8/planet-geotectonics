@@ -50,27 +50,18 @@
 	function seaKm(sea) { return (sea >= 0 ? '+' : '') + (sea / 1000).toFixed(1); }
 	var levelInput = document.getElementById('level'), gridInfo = document.getElementById('grid-info');
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
-	var extractScratch = null;
-	// The frozen exploration scenario (0.6.0): null until a pause-time freeze completes, and
-	// void again whenever the world is replaced. freezeJob is the cancel token of a running scan.
-	var catalogue = null, freezeJob = 0;
-	var catalogueReadout = document.getElementById('catalogue-readout');
-	// Prospecting (0.6.1): lazy snapshot + instruments. The catalogue above doubles as the
-	// exploration snapshot; surveys generate only the tiles they touch, so a whole-world
-	// scan is not required. The ledger accumulates discovery knowledge.
-	var prospectReadout = document.getElementById('prospect-readout');
-	var prospectLedgerEl = document.getElementById('prospect-ledger');
-	var prospectLedger = Prospector.createLedger();
-	var lastPinned = null; // {x,y,z, cell, tile, lat,lon}
-	var prospectRepeats = new Map(); // key "tile:cell" -> count
-	function downloadBlob(name, blob) {
-		var link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-		link.download = name;
-		link.click();
-		URL.revokeObjectURL(link.href);
-	}
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
+	var prospectPanel = document.getElementById('prospect'), prospectLedger = null, prospectClickSerial = 0;
+	var campaignButton = document.getElementById('campaign'), campaignProgress = document.getElementById('campaign-progress');
+	var campaignKind = document.getElementById('deposit-kind'), campaignExport = document.getElementById('export-discovered');
+	var coreDepth = document.getElementById('core-depth'), coreExport = document.getElementById('export-core');
+	var lastCoreState = null, lastCoreCell = -1, lastCoreSection = null, lastInstrumentText = '';
+	var markerCanvas = document.getElementById('markers'), markerContext = markerCanvas.getContext('2d');
+	var campaignPreparing = false, campaignRequest = 0, campaignJob = null, campaignView = null, campaignReadback = null;
+	var campaignRefreshArmed = false, campaignMarkersDirty = false;
+	var instrumentInputs = [];
+	for (var inst = 0; inst < Instruments.LIST.length; inst++)
+		instrumentInputs.push(document.getElementById('inst-' + Instruments.LIST[inst].id));
 	var perfStrip = document.getElementById('perf-rows');
 	// --- Adjust: the live sliders (0.3.3) --------------------------------------------------
 	// Four knobs that apply mid-play on both engines with no restart: the mantle temperature
@@ -294,6 +285,7 @@
 		// The engine's own canvas takes the map slot back (bootEngine keeps it that way).
 		(gpu.on && gpu.ready ? gpuCanvas : canvas).hidden = false;
 		layerGroup.classList.remove('off');
+		paintCampaignMarkers();
 	}
 	// The session's init options, read when the device is finally in hand - a mesh or
 	// detail change made while the adapter promise was in flight lands on the session
@@ -323,6 +315,7 @@
 				r3d.exag = v3dDisp;
 				v3d.r3d = r3d; v3d.on = true;
 				map3d.hidden = false; canvas.hidden = true; gpuCanvas.hidden = true;
+				markerCanvas.hidden = true;
 				layerGroup.classList.add('off');
 				probe.textContent = '3D on · ' + (v3dMesh === 'grid' ? 'heightmap ' : 'icosphere ') + v3dDetail
 					+ ' · ' + r3d.vCount.toLocaleString() + ' vertices · drag orbits, wheel zooms.';
@@ -433,6 +426,177 @@
 	// pre-fill rides the same list: ?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9 is exactly the
 	// header line a non-default capture copies.
 	var query = new URLSearchParams(location.search);
+	var prospectIntro = 'Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.';
+	function selectedInstrumentIds() {
+		var ids = [];
+		for (var i = 0; i < instrumentInputs.length; i++)
+			if (instrumentInputs[i].checked) ids.push(Instruments.LIST[i].id);
+		return ids;
+	}
+	function prospectCapture() {
+		var ids = selectedInstrumentIds(), line = ids.length ? 'prospect inst ' + ids.join(',') : '';
+		if (coreDepth.value !== '5000') {
+			if (line) line += ' · ';
+			line += 'core ' + (coreDepth.value === 'basement' ? 'basement' : campaignCount(+coreDepth.value) + 'm');
+		}
+		if (campaignView && campaignView.summary) {
+			if (line) line += ' · ';
+			line += 'campaign ' + campaignView.epochMyr.toFixed(1) + ' Myr · '
+				+ campaignView.summary.records + ' found · ' + campaignView.summary.viable + ' viable'
+				+ (campaignView.partial ? ' · partial' : '');
+		}
+		return line;
+	}
+	function campaignCount(value) { return Math.floor(value).toLocaleString('en-US'); }
+	function massText(value) {
+		var amount = value, unit = 't';
+		if (amount >= 1e9) { amount /= 1e9; unit = 'Gt'; }
+		else if (amount >= 1e6) { amount /= 1e6; unit = 'Mt'; }
+		else if (amount >= 1e3) { amount /= 1e3; unit = 'kt'; }
+		return Number(amount.toPrecision(3)).toLocaleString('en-US') + ' ' + unit;
+	}
+	function campaignContained(record) {
+		var parts = [];
+		for (var metal in record.contained) parts.push(metal + ' ' + massText(record.contained[metal]));
+		return parts.join(' ');
+	}
+	function sampleMarkerClass(catalogue, ledger, kind, viable, cap) {
+		var groups = [], quotas = [], fractions = [], total = 0, k, i;
+		for (k = 0; k < Deposits.KINDS.length; k++) groups.push([]);
+		for (i = 0; i < catalogue.records.length; i++) {
+			var record = catalogue.records[i];
+			if (!ledger.byId[record.id] || record.viable !== viable || (kind !== 'all' && record.kind !== kind)) continue;
+			groups[record.kindIndex].push(record); total++;
+		}
+		var out = [];
+		if (total <= cap) {
+			for (k = 0; k < groups.length; k++) out = out.concat(groups[k]);
+		} else {
+			var allocated = 0;
+			for (k = 0; k < groups.length; k++) {
+				var ideal = cap * groups[k].length / total;
+				quotas[k] = Math.floor(ideal); fractions[k] = ideal - quotas[k]; allocated += quotas[k];
+			}
+			while (allocated < cap) {
+				var best = -1, fraction = -1;
+				for (k = 0; k < groups.length; k++) {
+					if (quotas[k] < groups[k].length && fractions[k] > fraction) { best = k; fraction = fractions[k]; }
+				}
+				if (best < 0) break;
+				quotas[best]++; fractions[best] = -1; allocated++;
+			}
+			for (k = 0; k < groups.length; k++) {
+				var n = groups[k].length, take = quotas[k];
+				for (i = 0; i < take; i++) out.push(groups[k][Math.min(n - 1, Math.floor((i + 0.5) * n / take))]);
+			}
+		}
+		out.sort(function (a, b) { return a.cell !== b.cell ? a.cell - b.cell : a.kindIndex - b.kindIndex; });
+		return { records: out, total: total };
+	}
+	function campaignSummaryText(view) {
+		var summary = view.summary, totals = [], key;
+		for (key in summary.contained) totals.push(key + ' ' + massText(summary.contained[key]));
+		var text = 'viable deposits ' + campaignCount(summary.viable) + ' · contained in the ground\n  '
+			+ (totals.length ? totals.join('   ') : 'no viable contained metal in the ledger');
+		text += '\ndiscovered deposits ' + campaignCount(summary.records) + ' · sub-economic '
+			+ campaignCount(summary.records - summary.viable) + ' · kind ' + summary.kind;
+		text += '\nlargest viable by contained metal';
+		var listed = 0;
+		for (var k = 0; k < summary.byKind.length; k++) {
+			var group = summary.byKind[k];
+			if (!group.top.length) continue;
+			for (var r = 0; r < group.top.length; r++) {
+				var record = group.top[r], entry = prospectLedger.byId[record.id];
+				text += '\n  #' + record.id + '  ' + record.kind + ' · '
+					+ (entry ? Instruments.confidence[entry.confidence] + ' · ' : '')
+					+ campaignContained(record) + '   ' + Number(record.size.toPrecision(3)).toLocaleString('en-US')
+					+ ' ' + record.unit + ' · ' + record.variant + ' · ' + record.host + ', '
+					+ record.ageMyr + ' Ma';
+				listed++;
+			}
+		}
+		if (!listed) text += '\n  no viable discoveries for this filter';
+		text += '\nepoch ' + view.epochMyr.toFixed(1) + ' Myr · surveyed '
+			+ campaignCount(prospectLedger.cellsN) + ' cells · instruments ' + view.instruments.join(',');
+		text += '\nmarkers filled viable ' + campaignCount(view.viableMarkers.records.length) + '/'
+			+ campaignCount(view.viableMarkers.total) + ' · hollow sub-economic '
+			+ campaignCount(view.nonviableMarkers.records.length) + '/'
+			+ campaignCount(view.nonviableMarkers.total);
+		if (view.stale) text += '\nSTALE snapshot · refresh to survey the current world';
+		if (view.partial) text += '\npartial campaign · the valid surveyed ledger is retained';
+		return text;
+	}
+	function campaignProgressText() {
+		if (campaignPreparing) return 'Preparing a coherent snapshot · playback is paused. Click Cancel setup to stop.';
+		if (campaignJob && campaignJob.running) {
+			return 'campaign ' + Math.floor(100 * campaignJob.cursor / campaignJob.total) + '% · '
+				+ campaignCount(campaignJob.cursor) + ' cells · ' + campaignCount(campaignJob.found)
+				+ ' found · ' + campaignCount(campaignJob.viable) + ' viable';
+		}
+		if (!campaignView) return 'No regional campaign. Local clicks survey only the selected cell footprint.';
+		var line = (campaignView.partial ? 'partial campaign' : 'campaign complete') + ' · '
+			+ campaignCount(campaignView.summary.records) + ' found · '
+			+ campaignCount(campaignView.summary.viable) + ' viable · snapshot '
+			+ campaignView.epochMyr.toFixed(1) + ' Myr';
+		if (campaignView.stale) line = 'stale — press again to refresh · ' + line;
+		else if (campaignRefreshArmed) line = 'press again to refresh · ' + line;
+		return line;
+	}
+	function refreshLastCore() {
+		if (lastCoreState !== state || lastCoreCell < 0) return;
+		try {
+			lastCoreSection = Core.section(state, lastCoreCell, coreDepth.value);
+			coreExport.disabled = !lastCoreSection;
+			prospectPanel.textContent = (lastInstrumentText ? lastInstrumentText + '\n\n' : '') + Core.text(lastCoreSection);
+		} catch (error) {
+			lastCoreSection = null; coreExport.disabled = true;
+			prospectPanel.textContent = 'Core failed: ' + error.message;
+		}
+	}
+	function paintCampaignControls() {
+		campaignButton.textContent = campaignPreparing ? 'Cancel setup'
+			: campaignJob && campaignJob.running ? 'Cancel campaign'
+			: campaignView && campaignView.stale ? 'Refresh stale campaign'
+			: 'Survey all cells · build viable map';
+		campaignProgress.textContent = campaignProgressText();
+		campaignExport.disabled = !campaignView;
+	}
+	function refreshCampaignView(preserveReport) {
+		if (!campaignView) { markerCanvas.hidden = true; campaignExport.disabled = true; return; }
+		var kind = campaignKind.value || 'all';
+		campaignView.summary = Deposits.summary(state, {
+			catalogue: campaignView.catalogue, ledger: prospectLedger, kind: kind
+		});
+		campaignView.viableMarkers = sampleMarkerClass(campaignView.catalogue, prospectLedger, kind, true, 1536);
+		campaignView.nonviableMarkers = sampleMarkerClass(campaignView.catalogue, prospectLedger, kind, false, 512);
+		campaignView.stale = !!campaignView.invalidated || Deposits.stale(state, campaignView.catalogue);
+		campaignExport.disabled = false;
+		if (!preserveReport) prospectPanel.textContent = campaignSummaryText(campaignView);
+		paintCampaignControls();
+		campaignMarkersDirty = true;
+		paintCampaignMarkers();
+	}
+	var kindPrefill = query.get('depkind');
+	if (kindPrefill !== null) {
+		var kindName = kindPrefill.toLowerCase();
+		for (var ki = 0; ki < campaignKind.options.length; ki++)
+			if (campaignKind.options[ki].value === kindName) campaignKind.value = kindName;
+	}
+	var corePrefill = query.get('core');
+	if (corePrefill !== null) {
+		var coreValue = corePrefill.toLowerCase(), coreAliases = {
+			'500m': '500', '500': '500', '2k': '2000', '2km': '2000', '2000': '2000',
+			'5k': '5000', '5km': '5000', '5000': '5000', 'basement': 'basement', 'to basement': 'basement'
+		};
+		if (coreAliases[coreValue]) coreDepth.value = coreAliases[coreValue];
+	}
+	var instPrefill = query.get('inst');
+	if (instPrefill !== null) {
+		var requested = Object.create(null), names = instPrefill.toLowerCase().split(',');
+		for (var n = 0; n < names.length; n++) requested[names[n].trim()] = 1;
+		for (var p = 0; p < instrumentInputs.length; p++)
+			instrumentInputs[p].checked = !!requested[Instruments.LIST[p].id];
+	}
 	function offeredLevel(level) {
 		for (var i = 0; i < levelInput.options.length; i++) {
 			if (+levelInput.options[i].value === level) return true;
@@ -451,6 +615,7 @@
 	if (query.get('seed')) Params.seed = +query.get('seed') >>> 0;
 	var grid = new Grid(Params.level, Params.seed).build(), state = new State(grid, Params.seed);
 	var renderer = new Renderer(canvas, state), gpuRenderer = null, playing = false, runTarget = Infinity, dirty = true, lastUpdate = 0;
+	prospectLedger = new Instruments.Ledger(grid.V);
 	// The view is independent of the simulated world. Its quaternion is deliberately not
 	// clamped: each pointer move composes one small surface rotation, so many full turns stay
 	// usable instead of snapping at a latitude or longitude limit. `viewVersion` is bumped by
@@ -592,10 +757,14 @@
 	// the frame loop is already paused and `busy` refuses a new Step click, so nothing else can
 	// start in between.
 	function whenGpuIdle(done) {
-		var inflight = gpu.pending;
+		var inflight = gpu.pending, readback = campaignReadback, waits = [];
 		gpu.pending = null;
-		if (!inflight) { done(); return; }
-		inflight.then(done, done);
+		if (inflight) waits.push(inflight);
+		if (readback && readback !== inflight) waits.push(readback);
+		if (!waits.length) { done(); return; }
+		Promise.all(waits.map(function (promise) {
+			return Promise.resolve(promise).then(function () {}, function () {});
+		})).then(done);
 	}
 	// The canvas blit rides a drained queue, never a heavy encoder: the spec vends a
 	// fresh transparent-black drawing buffer on each getCurrentTexture after the
@@ -615,6 +784,7 @@
 	// Lagrangian on one grid, so a different level is a different world and there is nothing to
 	// carry over. `after` runs once the engine is ready on the new world.
 	function rebuildWorld(level, seed, start, after) {
+		prospectClickSerial++;
 		Params.level = level;
 		grid = new Grid(level, seed).build();
 		state = new State(grid, seed, start === 'hot');
@@ -641,12 +811,9 @@
 		syncAdjust();
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
-		extractScratch = null;   // sized to the old grid.V
-		freezeJob++; catalogue = null;   // a scan of the old world must not publish
-		catalogueSave.disabled = true; catalogueReadout.textContent = 'Freeze the paused world to generate its synthetic deposit catalogue.';
-		prospectLedger = Prospector.createLedger(); prospectRepeats.clear(); lastPinned = null;
-		if (prospectReadout) prospectReadout.textContent = 'Select instruments and Survey pinned cell. First survey snapshots the paused world; not every cell hosts a commercial deposit.';
-		if (prospectLedgerEl) prospectLedgerEl.textContent = '';
+		Deposits.release();      // catalogue scratch and cache were sized to the old grid.V
+		prospectLedger = new Instruments.Ledger(grid.V);
+		prospectPanel.textContent = prospectIntro;
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
@@ -663,9 +830,172 @@
 		});
 	}
 	function rebuildWhenIdle(level, seed, start, after) {
+		discardCampaignForRebuild();
 		setPlaying(false); runTarget = Infinity;
 		whenGpuIdle(function () { rebuildWorld(level, seed, start, after); });
 	}
+	function paintCampaignMarkers() {
+		if (!campaignView || campaignPreparing || (campaignJob && campaignJob.running) || v3d.on) {
+			markerCanvas.hidden = true;
+			return;
+		}
+		var base = gpu.on && gpu.ready ? gpuCanvas : canvas;
+		var width = base.width || grid.lookupW, height = base.height || grid.lookupH;
+		if (markerCanvas.width !== width) markerCanvas.width = width;
+		if (markerCanvas.height !== height) markerCanvas.height = height;
+		markerCanvas.hidden = false;
+		markerContext.clearRect(0, 0, width, height);
+		var pos = grid.pos, projected = campaignProject || (campaignProject = new Float64Array(2));
+		function diamond(record, viable) {
+			var b = record.cell * 3;
+			MapView.project(projected, pos[b], pos[b + 1], pos[b + 2], viewQ, width, height);
+			var x = projected[0], y = projected[1], radius = 3.5;
+			markerContext.beginPath();
+			markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+			markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+			if (viable) { markerContext.fillStyle = '#8ce1b2'; markerContext.fill(); }
+			else { markerContext.strokeStyle = '#f2c46d'; markerContext.lineWidth = 1.5; markerContext.stroke(); }
+			if (x < radius) {
+				markerContext.save(); markerContext.translate(width, 0);
+				markerContext.beginPath(); markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+				markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+				if (viable) markerContext.fill(); else markerContext.stroke(); markerContext.restore();
+			} else if (x > width - radius) {
+				markerContext.save(); markerContext.translate(-width, 0);
+				markerContext.beginPath(); markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+				markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+				if (viable) markerContext.fill(); else markerContext.stroke(); markerContext.restore();
+			}
+		}
+		var nonviable = campaignView.nonviableMarkers.records, viable = campaignView.viableMarkers.records;
+		for (var i = 0; i < nonviable.length; i++) diamond(nonviable[i], false);
+		for (var j = 0; j < viable.length; j++) diamond(viable[j], true);
+		campaignMarkersDirty = false;
+	}
+	var campaignProject = null;
+	function noteCampaignSurvey(result) {
+		if (!campaignJob || !campaignJob.running || !result || !result.found) return;
+		var catalogue = campaignJob.catalogue;
+		for (var i = 0; i < result.found.length; i++) {
+			var record = result.found[i].record;
+			if (campaignJob.seen[record.id]) continue;
+			for (var at = catalogue.cellStart[record.cell]; at < catalogue.cellStart[record.cell + 1]; at++) {
+				var snapshotRecord = catalogue.records[at];
+				if (snapshotRecord.id !== record.id) continue;
+				campaignJob.seen[record.id] = 1; campaignJob.found++;
+				if (snapshotRecord.viable) campaignJob.viable++;
+				break;
+			}
+		}
+		paintCampaignControls();
+	}
+	function finalizeCampaign(job) {
+		if (!job || state !== job.state) return;
+		campaignView = {
+			catalogue: job.catalogue, instruments: job.instruments.slice(0), epochMyr: job.epochMyr,
+			frame: job.frame, time: job.time, partial: !!(job.cancelled || job.invalidated || !job.done),
+			invalidated: !!job.invalidated
+		};
+		campaignJob = null; campaignPreparing = false; campaignRefreshArmed = false;
+		setPlaying(false);
+		refreshCampaignView();
+	}
+	function discardCampaignForRebuild() {
+		campaignRequest++;
+		if (campaignJob && campaignJob.running) Instruments.cancelCampaign(campaignJob);
+		campaignJob = null; campaignPreparing = false; campaignView = null;
+		campaignRefreshArmed = false; campaignMarkersDirty = false;
+		lastCoreState = null; lastCoreCell = -1; lastCoreSection = null; lastInstrumentText = '';
+		coreExport.disabled = true;
+		markerCanvas.hidden = true; markerContext.clearRect(0, 0, markerCanvas.width, markerCanvas.height);
+		prospectPanel.textContent = prospectIntro;
+		paintCampaignControls();
+	}
+	function failCampaignSetup(error, token) {
+		if (token !== campaignRequest) return;
+		campaignPreparing = false;
+		paintCampaignControls();
+		campaignProgress.textContent = 'Campaign could not start: ' + error.message;
+		if (campaignView) paintCampaignMarkers();
+		setPlaying(false);
+	}
+	function beginCampaign(world, selected, token) {
+		if (token !== campaignRequest || state !== world) return;
+		try {
+			var catalogue = Deposits.build(world);
+			var job = Instruments.startCampaign(world, catalogue, selected, prospectLedger);
+			if (!job.ok) { failCampaignSetup(new Error(job.reason), token); return; }
+			campaignView = null; campaignJob = job; campaignPreparing = false;
+			campaignRefreshArmed = false; markerCanvas.hidden = true; campaignExport.disabled = true;
+			setPlaying(false); paintCampaignControls();
+		} catch (error) { failCampaignSetup(error, token); }
+	}
+	function startRegionalCampaign() {
+		if (campaignPreparing) {
+			campaignRequest++; campaignPreparing = false; campaignRefreshArmed = false;
+			paintCampaignControls(); setPlaying(false);
+			if (campaignView) { campaignMarkersDirty = true; paintCampaignMarkers(); }
+			return;
+		}
+		if (campaignJob && campaignJob.running) {
+			var cancelled = campaignJob;
+			Instruments.cancelCampaign(cancelled);
+			finalizeCampaign(cancelled);
+			return;
+		}
+		var selected = selectedInstrumentIds();
+		if (!selected.length) {
+			campaignProgress.textContent = 'No instruments selected. Choose at least one, then start the regional campaign.';
+			return;
+		}
+		if (campaignView && Deposits.stale(state, campaignView.catalogue) && !campaignRefreshArmed) {
+			campaignRefreshArmed = true;
+			campaignProgress.textContent = 'stale — press again to refresh; the new campaign pauses playback.';
+			campaignButton.textContent = 'Refresh stale campaign';
+			return;
+		}
+		campaignRefreshArmed = false;
+		var world = state, token = ++campaignRequest;
+		campaignPreparing = true; markerCanvas.hidden = true;
+		setPlaying(false); runTarget = Infinity; paintCampaignControls();
+		if (gpu.on && gpu.ready) {
+			whenGpuIdle(function () {
+				if (token !== campaignRequest || state !== world) return;
+				var readback;
+				try { readback = Promise.resolve(GpuSim.download(world)); }
+				catch (error) { failCampaignSetup(error, token); return; }
+				campaignReadback = readback;
+				readback.then(function () {
+					if (campaignReadback === readback) campaignReadback = null;
+					beginCampaign(world, selected, token);
+				}, function (error) {
+					if (campaignReadback === readback) campaignReadback = null;
+					failCampaignSetup(error, token);
+				});
+			});
+		} else beginCampaign(world, selected, token);
+	}
+	campaignButton.addEventListener('click', startRegionalCampaign);
+	campaignKind.addEventListener('change', function () { if (campaignView) refreshCampaignView(); });
+	coreDepth.addEventListener('change', refreshLastCore);
+	coreExport.addEventListener('click', function () {
+		if (!lastCoreSection) return;
+		var blob = new Blob([Core.json(lastCoreSection)], { type: 'application/json' });
+		var link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+		link.download = 'core-cell-' + lastCoreCell + '-' + (coreDepth.value === 'basement' ? 'basement' : coreDepth.value + 'm') + '.json';
+		link.click(); URL.revokeObjectURL(link.href);
+	});
+	campaignExport.addEventListener('click', function () {
+		if (!campaignView) return;
+		var json = Deposits.json(state, {
+			catalogue: campaignView.catalogue, ledger: prospectLedger, kind: campaignKind.value || 'all'
+		});
+		var blob = new Blob([json], { type: 'application/json' }), link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+		link.download = 'discovered-deposits-' + Math.round(campaignView.epochMyr) + 'myr.json';
+		link.click(); URL.revokeObjectURL(link.href);
+	});
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
@@ -729,6 +1059,7 @@
 	var switching = false;
 	engineInput.addEventListener('change', function () {
 		if (switching) { engineInput.value = gpu.on && gpu.ready ? 'gpu' : 'cpu'; return; }
+		if (campaignLocked()) startRegionalCampaign();
 		var wasGpu = gpu.on && gpu.ready;
 		switching = true; gpu.ready = false;
 		Perf.reset();
@@ -746,12 +1077,18 @@
 		Params.eventCadence = +cadenceInput.value;
 	});
 	speedInput.addEventListener('change', paintSlow);
+	function campaignLocked() { return campaignPreparing || !!(campaignJob && campaignJob.running); }
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
-		play.setAttribute('aria-pressed', String(playing)); step.disabled = playing;
+		play.setAttribute('aria-pressed', String(playing));
+		play.disabled = campaignLocked(); step.disabled = playing || campaignLocked();
 	}
-	play.addEventListener('click', function () { runTarget = Infinity; setPlaying(!playing); });
+	play.addEventListener('click', function () {
+		if (campaignLocked()) return;
+		runTarget = Infinity; setPlaying(!playing);
+	});
 	step.addEventListener('click', function () {
+		if (campaignLocked()) return;
 		runTarget = Infinity;
 		if (gpu.on && gpu.ready) {
 			if (gpu.busy) return;
@@ -777,6 +1114,7 @@
 		}
 	});
 	runToStart.addEventListener('click', function () {
+		if (campaignLocked()) return;
 		if (!runToInput.checkValidity()) { runToInput.reportValidity(); return; }
 		runTarget = +runToInput.value;
 		if (runTarget <= state.t) { probe.textContent = 'Run-to target must be later than the current time.'; return; }
@@ -824,153 +1162,28 @@
 		}
 		saveBlob();
 		function saveBlob() {
-			downloadBlob('planet-' + startInput.value + '-' + Math.round(state.t) + 'myr.pgt',
-				new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' }));
+			var blob = new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' });
+		var link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+			link.download = 'planet-' + startInput.value + '-' + Math.round(state.t) + 'myr.pgt';
+			link.click();
+			URL.revokeObjectURL(link.href);
 		}
 	});
-	// Deposit extraction is on demand, so its scratch is allocated on first use, never per frame.
+	// The full catalogue is an explicit, user-requested O(V) build - the one place a click is
+	// allowed to pay for every cell. Its scratch is allocated on first use, never per frame.
 	// On the GPU engine it first pulls the mirror so the potentials are current.
 	document.getElementById('deposits').addEventListener('click', function () {
 		var extract = function () {
-			if (!extractScratch) extractScratch = new Float64Array(grid.V);
-			downloadBlob('potential-maxima-' + Math.round(state.t) + 'myr.json',
-				new Blob([Extract.json(state, 0.15, 12, extractScratch)], { type: 'application/json' }));
+			var blob = new Blob([Deposits.json(state)], { type: 'application/json' });
+			var link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = 'deposits-' + Math.round(state.t) + 'myr.json';
+			link.click();
+			URL.revokeObjectURL(link.href);
 		};
 		if (gpu.on && gpu.ready) { GpuSim.download(state).then(extract, extract); return; }
 		extract();
-	});
-	// Freeze (0.6.0): pause, pull one coherent mirror, snapshot the geology and generate the
-	// whole catalogue in timed chunks. The scenario is published only when the scan completes,
-	// and a reset or reload cancels it. Resuming play leaves the frozen scenario as history.
-	function scanCatalogue(job, scenario, from, world) {
-		if (job !== freezeJob) return;
-		var next = Deposits.scan(scenario, from, 2048);
-		if (next < Deposits.tileCount()) {
-			catalogueReadout.textContent = 'Generating catalogue: ' + Math.round(100 * next / Deposits.tileCount()) + ' %';
-			setTimeout(scanCatalogue, 0, job, scenario, next, world);
-			return;
-		}
-		catalogue = scenario;
-		catalogueReadout.textContent = 'Frozen catalogue at ' + world.t.toFixed(1) + ' Myr (synthetic, game priors):\n'
-			+ Deposits.summary(scenario, 8);
-		catalogueSave.disabled = false;
-	}
-	var catalogueSave = document.getElementById('catalogue-json');
-	document.getElementById('catalogue').addEventListener('click', function () {
-		setPlaying(false);
-		var job = ++freezeJob;
-		catalogue = null; catalogueSave.disabled = true;
-		catalogueReadout.textContent = 'Freezing the world...';
-		var world = state;
-		var begin = function () {
-			if (job !== freezeJob) return;
-			var scenario = Deposits.scenario(Deposits.snapshot(world, startInput.value + ' ' + presetInput.value), world.seed);
-			scanCatalogue(job, scenario, 0, world);
-		};
-		if (gpu.on && gpu.ready) { GpuSim.download(state).then(begin, begin); return; }
-		begin();
-	});
-	catalogueSave.addEventListener('click', function () {
-		if (!catalogue) return;
-		downloadBlob('deposit-catalogue-' + Math.round(catalogue.meta.t) + 'myr.json',
-			new Blob([Deposits.json(catalogue)], { type: 'application/json' }));
-	});
-	// Prospecting 0.6.1: instruments on the frozen snapshot, lazy tiles.
-	function getProspectConfig() {
-		return {
-			visual: !!document.getElementById('prospect-visual').checked,
-			sample: !!document.getElementById('prospect-sample').checked,
-			drill500: !!document.getElementById('prospect-drill500').checked,
-			drill5000: !!document.getElementById('prospect-drill5000').checked,
-			mag: !!document.getElementById('prospect-mag').checked,
-			seismic: !!document.getElementById('prospect-seismic').checked
-		};
-	}
-	function hasAnyInstrument(cfg) { return cfg.visual || cfg.sample || cfg.drill500 || cfg.drill5000 || cfg.mag || cfg.seismic; }
-	function ensureProspectScenario(done) {
-		if (catalogue && catalogue.snapshot) { done(catalogue); return; }
-		// Snapshot now; do not scan whole world.
-		var world = state;
-		var begin = function () {
-			try {
-				var sc = Deposits.scenario(Deposits.snapshot(world, startInput.value + ' ' + presetInput.value), world.seed);
-				catalogue = sc;
-				catalogueReadout.textContent = 'Snapshot at ' + world.t.toFixed(1) + ' Myr (lazy, ' + DepositEconomics.describe() + '): surveys generate only touched tiles; Freeze scans all ' + Deposits.tileCount() + ' tiles.';
-				catalogueSave.disabled = true;
-				done(sc);
-			} catch (e) { prospectReadout.textContent = 'Snapshot failed: ' + e.message; }
-		};
-		if (gpu.on && gpu.ready) { GpuSim.download(state).then(begin, begin); }
-		else begin();
-	}
-	function pinFromProbe(cell) {
-		var g = grid, pos = g.pos;
-		var x = pos[cell*3], y = pos[cell*3+1], z = pos[cell*3+2];
-		var len = Math.hypot(x,y,z); x/=len; y/=len; z/=len;
-		lastPinned = { x:x, y:y, z:z, cell:cell, tile: Deposits.tileOf(x,y,z), lat: +(Math.asin(y)*180/Math.PI).toFixed(4), lon: +(Math.atan2(z,x)*180/Math.PI).toFixed(4) };
-	}
-	function runProspect(repeat) {
-		if (!lastPinned) { prospectReadout.textContent = 'Click the map to pin a cell, then Survey.'; return; }
-		var cfg = getProspectConfig();
-		if (!hasAnyInstrument(cfg)) { prospectReadout.textContent = 'Select at least one instrument.'; return; }
-		var repeatKey = lastPinned.tile + ':' + lastPinned.cell;
-		var count = prospectRepeats.get(repeatKey) || 0;
-		if (repeat) { count++; prospectRepeats.set(repeatKey, count); }
-		else prospectRepeats.set(repeatKey, count);
-		var doSurvey = function (sc) {
-			var survey = Prospector.survey(sc, lastPinned.x, lastPinned.y, lastPinned.z, cfg, count);
-			// Attach ground truth when reveal is on, but keep it separate from observations.
-			if (document.getElementById('prospect-reveal').checked) {
-				var truth = Prospector._candidates(sc, lastPinned.x, lastPinned.y, lastPinned.z, 600);
-				// filter to those within 200 m to avoid huge truth dump
-				var filtered = [];
-				for (var i=0;i<truth.length;i++) { var b=truth[i], o=[0,0]; Deposits.offsetFrom(b, lastPinned.x, lastPinned.y, lastPinned.z, o); if (Math.hypot(o[0],o[1])<400) filtered.push(b); }
-				survey.truth = filtered.slice(0,4);
-			}
-			Prospector.addToLedger(prospectLedger, survey);
-			var text = Prospector.formatSurvey(survey, !!document.getElementById('prospect-reveal').checked);
-			var econFilter = !!document.getElementById('prospect-econ').checked;
-			if (econFilter && survey.economics.length) {
-				var pos = survey.economics.filter(function(e){return e.positive;});
-				text += '\nEconomics filter (scenario-positive only ' + DepositEconomics.describe() + '): ' + (pos.length? pos.map(function(e){return e.id;}).join(', ') : 'none of the detected bodies pass; barren or sub-economic (not detected ≠ absent)') ;
-			} else if (survey.detected.length) {
-				text += '\nEconomics (' + DepositEconomics.describe() + '): ' + survey.economics.map(function(e){return e.id + ' ' + (e.positive? 'POSITIVE':'sub-econ') + ' $' + (e.net/1e6).toFixed(1) + 'M';}).join('; ');
-			}
-			if (!survey.detected.length) text += '\n\nNot every cell hosts an economic deposit: favourability is continuous, ore bodies are discrete and price/cost filters thin them further.';
-			prospectReadout.textContent = text;
-			var ledgerText = 'Ledger: ' + prospectLedger.discovered.size + ' distinct bodies detected across ' + prospectLedger.surveys.length + ' survey(s).';
-			if (prospectLedger.discovered.size) {
-				var ids = Array.from(prospectLedger.discovered).slice(0,20);
-				ledgerText += '\n' + ids.join(', ') + (prospectLedger.discovered.size>20? ' …':'');
-			}
-			if (catalogue && catalogue.tiles) ledgerText += '\nTiles materialised: ' + catalogue.tiles.size + ' / ' + Deposits.tileCount();
-			prospectLedgerEl.textContent = ledgerText;
-		};
-		ensureProspectScenario(doSurvey);
-	}
-	document.getElementById('prospect-survey').addEventListener('click', function(){ runProspect(false); });
-	document.getElementById('prospect-repeat').addEventListener('click', function(){ runProspect(true); });
-	document.getElementById('prospect-viable').addEventListener('click', function(){
-		var doExport = function(sc){
-			var econOnly = document.getElementById('prospect-econ').checked;
-			if (sc.complete) {
-				var all = Deposits.allBodies(sc);
-				var filtered = econOnly ? all.filter(function(b){ return DepositEconomics.screen(b).positive;}) : all;
-				var name = econOnly ? 'viable-deposits-' : 'all-deposits-';
-				downloadBlob(name + Math.round(sc.meta.t) + 'myr.json', new Blob([JSON.stringify(filtered,null,1)],{type:'application/json'}));
-				prospectReadout.textContent = (econOnly? 'Viable ':'All ') + filtered.length + ' of ' + all.length + ' bodies at ' + sc.meta.t.toFixed(1) + ' Myr (' + DepositEconomics.describe() + ')';
-			} else {
-				// Export the ledger's discovered bodies, filtered.
-				var discoveredBodies = [];
-				var seen = new Set();
-				for(var s=0;s<prospectLedger.surveys.length;s++){ var surv=prospectLedger.surveys[s]; var cands=Prospector._candidates(sc, surv.anchor.x, surv.anchor.y, surv.anchor.z, 700); for(var ci=0; ci<cands.length; ci++){ var b=cands[ci]; if(seen.has(b.id))continue; if(surv.detected.indexOf(b.id)>=0){ seen.add(b.id); discoveredBodies.push(b); } } }
-				if(econOnly) discoveredBodies = discoveredBodies.filter(function(b){return DepositEconomics.screen(b).positive;});
-				if(!discoveredBodies.length){ prospectReadout.textContent = 'No discovered bodies to export; survey some cells and freeze for a whole-world map.'; return; }
-				downloadBlob((econOnly?'viable-':'')+'discovered-' + Math.round(sc.meta.t) + 'myr.json', new Blob([JSON.stringify(discoveredBodies,null,1)],{type:'application/json'}));
-			}
-		};
-		if(!catalogue){ prospectReadout.textContent='Survey a cell first to snapshot, or Freeze for a whole-world export.'; return; }
-		doExport(catalogue);
 	});
 	loadInput.addEventListener('change', function () {
 		var file = loadInput.files[0];
@@ -1014,41 +1227,44 @@
 		};
 		reader.readAsArrayBuffer(file);
 	});
-	function probeAt(event, target) {
-		if (v3d.on && target === map3d) { probeAt3d(event); return; }
+	function cellAt(x, y, target) {
+		if (v3d.on && target === map3d) return cellAt3d(x, y);
 		var rect = mapRect(target);
-		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((event.clientX - rect.left) / rect.width * grid.lookupW)));
-		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((event.clientY - rect.top) / rect.height * grid.lookupH)));
+		var px = Math.min(grid.lookupW - 1, Math.max(0, Math.floor((x - rect.left) / rect.width * grid.lookupW)));
+		var py = Math.min(grid.lookupH - 1, Math.max(0, Math.floor((y - rect.top) / rect.height * grid.lookupH)));
 		if (renderer.updateViewLookup) renderer.updateViewLookup();
 		var mapLookup = renderer.viewLookup || grid.lookup;
-		probeReport(mapLookup[(grid.lookupH - 1 - y) * grid.lookupW + x]);
+		return mapLookup[(grid.lookupH - 1 - py) * grid.lookupW + px];
+	}
+	function probeAt(event, target) {
+		var cell = cellAt(event.clientX, event.clientY, target);
+		if (cell >= 0) probeReport(cell);
 	}
 	// The 3D inspector: the pointer ray is intersected with the unit planet (Render3D.pick,
-	// the camera's own basis maths), the hit direction maps to uv exactly like the gather
-	// kernel maps texels (u = lon/tau + 1/2, v = lat/pi + 1/2, row 0 = south - no flip,
-	// unlike the 2D screen path), and the cell under it reports from the CPU state. probeClick
-	// has already pulled a fresh mirror on the GPU engine; a hover reads it as it is, one
-	// event cycle old - the same split as the 2D map.
+	// the camera's own basis maths), then maps the hit direction to the gather's uv convention.
+	// Hover reads the CPU mirror as it is; a click pulls it first, exactly like the 2D map.
 	var pickDir = new Float64Array(3);
-	function probeAt3d(event) {
+	function cellAt3d(x, y) {
 		var r3d = v3d.r3d;
-		if (!r3d || !r3d.pick) return;
+		if (!r3d || !r3d.pick) return -1;
 		var rect = mapRect(map3d);
-		if (!r3d.pick(pickDir, event.clientX - rect.left, event.clientY - rect.top, rect.width, rect.height)) {
+		if (!r3d.pick(pickDir, x - rect.left, y - rect.top, rect.width, rect.height)) {
 			probe.textContent = 'Off the planet.';
-			return;
+			return -1;
 		}
 		var u = Math.atan2(pickDir[2], pickDir[0]) / MapView.TAU + 0.5;
 		var v = Math.asin(Math.max(-1, Math.min(1, pickDir[1]))) / Math.PI + 0.5;
-		var x = Math.min(grid.lookupW - 1, Math.max(0, Math.floor(u * grid.lookupW)));
-		var y = Math.min(grid.lookupH - 1, Math.max(0, Math.floor(v * grid.lookupH)));
-		probeReport(grid.lookup[y * grid.lookupW + x]);
+		var px = Math.min(grid.lookupW - 1, Math.max(0, Math.floor(u * grid.lookupW)));
+		var py = Math.min(grid.lookupH - 1, Math.max(0, Math.floor(v * grid.lookupH)));
+		return grid.lookup[py * grid.lookupW + px];
+	}
+	function probeAt3d(event) {
+		var cell = cellAt3d(event.clientX, event.clientY);
+		if (cell >= 0) probeReport(cell);
 	}
 	function probeReport(cell) {
 		var owner = state.owner[cell];
-		if (owner < 0) { probe.textContent = 'Cell ' + cell + ' · uncovered gap, ' + state.gapFrames[cell] + ' frames old.'; lastPinned = null; return; }
-		try { pinFromProbe(cell); } catch (e) {}
-		
+		if (owner < 0) { probe.textContent = 'Cell ' + cell + ' · uncovered gap, ' + state.gapFrames[cell] + ' frames old.'; return; }
 		var rank = 0, names = ['interior', 'transform', 'divergent', 'subduction', 'collision'];
 		for (var k = 0; k < grid.ringN[cell]; k++) {
 			var e = cell * 6 + k, t = state.edgeType[e], r = t === 1 && state.polarity[e] === 2 ? 4 : t === 1 ? 3 : t === 2 ? 2 : t === 3 ? 1 : 0;
@@ -1069,14 +1285,43 @@
 		' · basin ' + state.oBas[owner].toFixed(2) + ' · placer ' + state.oPla[owner].toFixed(2) +
 		' · fert ' + state.fert[owner].toFixed(2);
 	}
-	// The inspector reads the CPU state, so on the GPU engine a click first pulls the mirror
-	// back (one readback, on demand only) and then reports from it.
+	function inspectCell(cell, selected) {
+		probeReport(cell);
+		try {
+			if (selected.length) {
+				var result = Instruments.survey(state, cell, selected, prospectLedger);
+				noteCampaignSurvey(result);
+				lastInstrumentText = Instruments.report(result);
+			} else lastInstrumentText = 'No instruments selected; this click logs a core without adding survey coverage.';
+			lastCoreCell = cell; lastCoreState = state;
+			refreshLastCore();
+			if (campaignView) refreshCampaignView(true);
+		} catch (error) {
+			prospectPanel.textContent = (selected.length ? 'Survey' : 'Core') + ' failed: ' + error.message;
+			console.error('Prospecting/core report failed', error);
+		}
+	}
+	// Resolve the cell while the event and current view are still live; then snapshot the
+	// selected tools and world before GPU readback. Neither a cleared currentTarget, a later pan,
+	// nor a world rebuild can redirect this survey to a different cell or session.
 	function probeClick(event) {
+		var cell = cellAt(event.clientX, event.clientY, event.currentTarget);
+		if (!Number.isInteger(cell) || cell < 0) return;
+		var selected = selectedInstrumentIds(), world = state, serial = ++prospectClickSerial;
 		if (gpu.on && gpu.ready) {
-			GpuSim.download(state).then(function () { probeAt(event, event.currentTarget); });
+			var transfer = campaignJob && campaignJob.running && campaignJob.state === world
+				? Promise.resolve() : campaignReadback || GpuSim.download(world);
+			Promise.resolve(transfer).then(function () {
+				if (state === world && serial === prospectClickSerial) inspectCell(cell, selected);
+			}).catch(function (error) {
+				if (state !== world || serial !== prospectClickSerial) return;
+				probe.textContent = 'GPU readback failed: ' + error.message;
+				if (selected.length) prospectPanel.textContent = 'Survey failed: ' + error.message;
+				console.error('Prospecting readback failed', error);
+			});
 			return;
 		}
-		probeAt(event, event.currentTarget);
+		inspectCell(cell, selected);
 	}
 	function mapRect(target) {
 		if (target.getBoundingClientRect) return target.getBoundingClientRect();
@@ -1239,7 +1484,7 @@
 	function perfReport() {
 		var engine = gpu.on && gpu.ready ? 'gpu' : 'cpu';
 		var rig = Env.line() + (engine === 'gpu' && GpuSim.adapter ? ' · gpu ' + Env.gpu(GpuSim.adapter) : '');
-		var viewGate = viewGateReport(), adjust = adjustReport();
+		var viewGate = viewGateReport(), adjust = adjustReport(), prospect = prospectCapture();
 		var recon = reconInput && +reconInput.value ? 'recon ' + (+reconInput.value).toFixed(0) + ' Ma' : '';
 		// The 3D is a view setting, so it names itself only when it differs from the
 		// default (off); its knobs follow the adj line's convention.
@@ -1261,6 +1506,7 @@
 			+ '\n' + Perf.report(stripRows())
 			+ (viewGate ? '\n' + viewGate : '')
 			+ (adjust ? '\n' + adjust : '')
+			+ (prospect ? '\n' + prospect : '')
 			+ '\nt ' + state.t.toFixed(1) + ' Myr · ' + badge.textContent;
 	}
 	Clipboard.bind(perfStrip, perfReport, Clipboard.classAck(perfStrip));
@@ -1276,6 +1522,20 @@
 		// Set by the render tail the moment this rAF's play encoder is built with the
 		// draw inside it; the bottom repaint gate then skips the standalone draw submit.
 		var mergedThisFrame = false;
+		if (campaignJob && campaignJob.running) {
+			var activeCampaign = campaignJob;
+			try {
+				Instruments.campaignStep(activeCampaign, 256, 1.25);
+				paintCampaignControls();
+				if (activeCampaign.done || activeCampaign.cancelled || activeCampaign.invalidated)
+					finalizeCampaign(activeCampaign);
+			} catch (error) {
+				Instruments.cancelCampaign(activeCampaign);
+				activeCampaign.reason = error.message;
+				finalizeCampaign(activeCampaign);
+				campaignProgress.textContent = 'Campaign stopped: ' + error.message + ' · partial ledger retained.';
+			}
+		}
 		// The step gate is the view, never the pointer: it closes on the frame a move lands and
 		// stays closed for VIEW_HOLD_FRAMES more, so a held-still button pauses nothing and a
 		// resting pointer resumes the sim whether or not it is still down. Both engines need it,
@@ -1405,10 +1665,16 @@
 			shownVersion = viewVersion;
 		}
 	}
+		if (campaignMarkersDirty || viewMoved) paintCampaignMarkers();
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.v3dText = v3d.on && v3d.r3d ? v3d.r3d.tsLine() : '';
 			Perf.update(now);
+			if (campaignView && Deposits.stale(state, campaignView.catalogue) !== campaignView.stale) {
+				if (!Deposits.stale(state, campaignView.catalogue)) campaignView.invalidated = false;
+				campaignRefreshArmed = false;
+				refreshCampaignView();
+			}
 			showStrip(stripRows());
 			if (waterActive === 'volume' && waterDirty) solveWater();
 			// The Mantle Tm slider follows the sim on the strip's own 2 Hz tick while cooling

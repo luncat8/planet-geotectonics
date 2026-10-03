@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
-for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'data/deposit-models', 'deposits', 'data/deposit-economics', 'prospector', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
+for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'deposits', 'core', 'instruments', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
 'render3d', 'gpu/d1diff']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
@@ -23,14 +23,16 @@ Sim.advance(state, 0.1, 190);
 renderer.draw('plate'); renderer.draw('type'); renderer.draw('z'); renderer.draw('owner');
 renderer.draw('damage'); renderer.draw('sediment'); renderer.draw('speed'); renderer.draw('age'); renderer.draw('force');
 for (const ore of Renderer.ORE) renderer.draw(ore);
-const deposits = Extract.deposits(state, 0.01, 4, new Float64Array(state.grid.V));
-if (!Array.isArray(deposits)) throw new Error('extraction returns a list');
-if (JSON.parse(Extract.json(state, 0.01, 2, new Float64Array(state.grid.V))).format !== 'pgt-deposits') {
-	throw new Error('deposit json carries its format tag');
+var ledger = new Instruments.Ledger(state.grid.V);
+var survey = Instruments.survey(state, 0, ['d5k'], ledger);
+if (!survey.ok || ledger.cellsN !== 1 || !Instruments.report(survey).startsWith('cell 0')) {
+	throw new Error('single-cell instrument survey did not load');
 }
-var scenario = Deposits.scenario(Deposits.snapshot(state, 'smoke'), 1);
-Deposits.scan(scenario, 0, 600);
-if (JSON.parse(Deposits.json(scenario)).format !== 'pgt-deposit-catalogue') throw new Error('catalogue json carries its format tag');
+const catalogue = Deposits.build(state);
+if (!Array.isArray(catalogue.records)) throw new Error('the catalogue returns a record list');
+const dump = JSON.parse(Deposits.json(state));
+if (dump.format !== 'pgt-deposits' || dump.version !== 2) throw new Error('deposit json carries its v2 format tag');
+if (!dump.classes.length || !dump.totals) throw new Error('deposit json carries the class table and its totals');
 var blob = Checkpoint.save(state);
 Checkpoint.load(state, blob);
 Sim.raster(state);

@@ -1678,21 +1678,59 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	hexagonal mesas. True continuous heightmap relief requires spatial interpolation (e.g.
 	spherical Delaunay barycentric gather or ring neighbor blend) during the gather pass.
 
+## a shared threshold across fields that do not share a scale kills a whole feature (0.6.1, 2026-10-02)
 
-## a deterministic catalogue on top of a drifting sim (0.6.0)
+	The prospector screens six ore potentials against one `depositMin = 0.30`. Five of them are
+	accumulators that saturate near 1; `oPla` is a transported load whose blurred field tops out
+	at 0.144 over a 1500 Myr L5 history. Result: zero placer records ever, and half the
+	prospecting feature was unreachable dead code that every test still "passed" because no test
+	asserted a class is non-empty. Before trusting a shared threshold, measure each field's own
+	maximum over a long history and print them side by side. The fix that keeps the single-
+	threshold contract intact is a per-field scale applied before quantization, not a per-class
+	threshold override. Add the per-class "emits at least one record" check to the calibration
+	run, because a silently empty class looks exactly like a correct one.
 
-- Key every random draw by the candidate (seed, version, tile, family, ordinal, draw index) through
-  an integer counter hash, and draw ALL of a candidate's numbers before deciding acceptance. Then
-  neither visiting order, chunk size nor a changed potential elsewhere can reroll a body. A
-  sequential PRNG consumed during a scan fails this at the first click-order test.
-- Tile the sphere with an equiangular cube, not with the sim grid or lat/lon: direction-to-tile is
-  closed form, there is no pole or seam branch, and the catalogue stays valid when the sim
-  resolution changes. Keep anchors 2 % inside the tile so tileOf(dirOf(anchor)) round-trips.
-- A point query must also read neighbouring tiles (bodies overhang). Sampling the 3x3 square of
-  offsets around the point is enough while the square is narrower than a tile; the test compares
-  `near` against a brute-force scan at poles, cube corners and seams.
-- Round stored numbers to six significant digits and derive volume, ore and metal from the rounded
-  inputs; JSON then round-trips byte for byte and a record reproduces its own resources.
-- The blurred potentials are broad (arc median ~0.4 on a grown hot-start world), so a linear
-  acceptance gave ~18k bodies at L4. Acceptance exponent 2 and lower caps give ~5k.
-  `node experiments/deposit-stats.js 4 800 7` prints the counts and percentiles.
+## changing a field scale silently rewrites every raw fixture built on it (0.6.1, 2026-10-02)
+
+	Introducing `FIELD_SCALE[placer] = 7` promoted a deliberately sub-threshold test fixture
+	(`site('oPla', 0.08)`) into a deposit, which broke an unrelated assertion in another file
+	("a sub-threshold anomaly is a reading, not a deposit") in a way that read as a logic bug.
+	Any constant that multiplies a raw simulation field before a comparison is part of every
+	fixture's meaning. When touching one, `grep -R` the test tree for raw literals of that field
+	and recompute each one against the new scale.
+
+## a python str.replace patch over a long markdown file can no-op silently (0.6.1, 2026-10-02)
+
+	Scripted edits to plan documents fail open: if the target text wraps differently than
+	assumed, `s.replace(old, new)` returns the original string and the script still exits 0.
+	A header patch was lost this way and only noticed when the next run printed the old column
+	names. Always `assert old in s` before replacing, and print a confirmation.
+
+## per-class "hosted in the basement or in the pile" is not a detail (0.6.1, 2026-10-02)
+
+	Burying every deposit under `min(hSed, 4 km)` is right for a porphyry and wrong for a coal
+	seam, a roll front, a placer and a Superior-type BIF: those classes *are* the sediment pile.
+	Applying one burial rule to all of them pushed five classes past their own mining-depth
+	screen and produced a world with no viable coal, uranium or potash. Model the host as a flag
+	on the class row (`basement` adds the cover, `sediment` does not) rather than as a global
+	rule with exceptions.
+
+## an "otherwise" variant split must be exclusive or no test can pin it (0.6.1, 2026-10-02)
+
+	`epithermal needs hFel < hOro (45 km)` is true of essentially every arc column, so both arc
+	rows qualified everywhere and the variant became a hash coin flip: the test "a thin-crust arc
+	yields epithermal" passed or failed by seed. Splitting on `hFel < hOceanic` — the physical
+	island-arc / continental-arc line — makes the contexts mutually exclusive and the test
+	deterministic. Where contexts genuinely overlap (the three basin evaporite/coal/uranium
+	rows), pick by hash deliberately and say so.
+
+## put long-history distribution checks in experiments/, not in the test suite (0.6.1, 2026-10-02)
+
+	A "median tonnage inside ×0.5…×2 of the published median" assertion needs a 1500 Myr run
+	(minutes) and a tolerance chosen after seeing the answer — which makes it a target that gets
+	moved rather than met. Keeping it as `experiments/deposit-calibration.js` with a committed
+	log under `experiments/logs/` gives the same information, keeps the short profile at one
+	second per file, and lets the honest result ("the median anomaly is a marginal prospect; the
+	p90 anomaly is the published deposit") be reported instead of tuned away. The test suite
+	asserts only what is structurally true: bounds, determinism, identity, and that every class
+	row is reachable.

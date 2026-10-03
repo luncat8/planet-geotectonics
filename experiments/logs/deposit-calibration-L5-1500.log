@@ -1,0 +1,23 @@
+level 5 seed 7 t 1500.0 Myr · cells 10242 · columns 9461
+build 34 ms (cached rebuild 25 ms) · records 977 · viable 584
+
+class                    n  viable   medSize  bodies  med/body  p90/body  anchorMed  ladderT50  medGrade          band  medTop
+vms/sulfide            454     364         5    3.23     1.548     6.194          2         10       1.1         0.2-6    1050
+mafic/sulfide           25       8        10    3.24     3.086    30.864          —         20      0.87       0.2-3.5    1650
+mafic/diamond            3       3        20       3     6.667     6.667          —         80      0.94        0.05-2     500
+arc/porphyry           111      29       500     3.4   147.215   588.859        220        220      0.38      0.15-1.2    3450
+arc/epithermal         112      34        20    2.79     7.157    17.891         15         25      2.55         0.8-8     700
+orogenic/vein           32      18       1.5    2.31     0.649     2.162          1          8      4.05        1.5-15    2175
+orogenic/sedhost        17       3         2    1.82     1.097     5.484        7.1         20       1.6         0.5-6     600
+basin/uranium           38      32       500    2.55   195.876  1958.763       9500       9500     0.135     0.05-0.45     380
+basin/coal              38      31       200    2.95    67.857   169.643          —        800         —          bulk     520
+basin/potash            12      12       200     2.5        80       200        392        700        19         15-30    1225
+placer/gold             96      40         2    2.86     0.698     3.491          —         10      0.11      0.02-0.5      20
+iron/bif                38      10       200    2.11        95       475          —       2500      38.5         25-62     230
+iron/algoma              1       0       100       1       100       100          —        300        29         25-55    4450
+
+field maxima (after FIELD_SCALE): vms 0.945 · mafic 0.906 · arc 0.965 · orogenic 0.706 · basin 0.675 · placer 1 · iron 0.545
+contained totals: {"Au":21900,"Cu":371000000,"Zn":142000000,"Pb":13800000,"Ag":416000,"Mo":10400000,"Ni":9270000,"PGE":1280,"U3O8":56200,"K2O":785000000,"Coal":10400000000,"Fe":5700000000,"Diamond":69200000}
+arc viable median Cu       0.45 % (target 0.25-0.6)
+orogenic viable median Au  3.55 g/t (target 1-6)
+placer viable median Au    0.16 g/t (target 0.05-0.2)

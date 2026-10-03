@@ -117,6 +117,19 @@ assert.ok(/overflow-x: auto/.test(spanCss) && /scrollbar-width: none/.test(spanC
 assert.ok(/cursor: copy/.test(rowsCss), 'the whole strip reads as a copy control');
 rule('.perf .rows.copied');
 rule('.perf .rows.copy-failed');
+const prospectCss = rule('#prospect');
+assert.ok(/max-height: 24em/.test(prospectCss) && /overflow: auto/.test(prospectCss)
+	&& /max-width: 100%/.test(prospectCss),
+	'the persistent single-cell report scrolls inside its column instead of expanding the page');
+assert.ok(/id="prospect-tools"/.test(indexHtml) && /Prospecting · one cell per click/.test(indexHtml),
+	'the primary instrument surface is an explicit single-cell survey');
+assert.match(indexHtml, /id="campaign">Survey all cells · build viable map/,
+	'the broad campaign is an explicit, clearly labelled action');
+assert.match(indexHtml, /id="markers" hidden/, 'the regional map overlay ships hidden');
+assert.deepEqual(options(indexHtml, 'core-depth'), ['500', '2000', '5000', 'basement']);
+const markerCss = rule('#markers');
+assert.ok(/position: absolute/.test(markerCss) && /pointer-events: none/.test(markerCss),
+	'the marker overlay tracks the map without stealing local clicks');
 // The settings live in two named groups (index.html), and the slow-on-CPU warning has its
 // amber rule: the test realm's DOM stub reads classes but not styles, so the stylesheet is
 // pinned the way the strip rules are.
@@ -147,7 +160,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'data/deposit-models', 'deposits', 'data/deposit-economics', 'prospector', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'extract', 'deposits', 'core', 'instruments', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
 	'data/plate-crosswalk', 'earth', 'render'];
 
@@ -279,13 +292,22 @@ FakeRender3D.prototype.pick = function (out, px, py, w, h) {
 	return true;
 };
 
-function loadPage(search) {
+function loadPage(search, afterRaster) {
 	const api = makeDom(indexHtml);
 	api.location.search = search || '';
 	const gpu = fakeGpu();
 	installGlobals(api, { GpuSim: gpu, GpuRenderer: FakeRenderer, Render3D: FakeRender3D, FileReader: FakeReader });
 	for (const file of MODULES) {
 		vm.runInThisContext(read('js/' + file + '.js'), { filename: 'js/' + file + '.js' });
+	}
+	if (afterRaster) {
+		const raster = globalThis.Sim.raster;
+		let applied = false;
+		globalThis.Sim.raster = function (world) {
+			const result = raster.apply(this, arguments);
+			if (!applied) { applied = true; afterRaster(world); }
+			return result;
+		};
 	}
 	vm.runInThisContext(read('js/ui.js'), { filename: 'js/ui.js' });
 	const el = (id) => {
@@ -322,6 +344,11 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.equal(el('badge').textContent, 'CPU · L5');
 	assert.equal(el('grid-info').textContent, 'EQUIRECTANGULAR / 10,242 CELLS / 223 KM');
 	assert.equal(el('level').value, '5');
+	assert.equal(el('prospect').textContent, 'Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.');
+	for (const id of ['obs', 'geo', 'mag', 'gpr', 'd500', 'd5k', 'lab']) {
+		assert.ok(el('inst-' + id), 'the Prospecting fieldset offers ' + id);
+		assert.equal(el('inst-' + id).checked, false, 'no instrument is selected by default');
+	}
 	assert.equal(strip.children.length, page.Perf.SLOTS, 'one span per slot, mounted at boot');
 	assert.equal(strip.children[0].textContent, 'performance counter idle', 'the page\'s own placeholder');
 	assert.equal(gpu.inits.length, 0, 'the CPU default never touches the device');
@@ -355,6 +382,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		'copy header: ' + worldLine(text));
 	assert.ok(!/\n\n/.test(text) && !/\n$/.test(text), 'no blank line for a reserved-but-empty slot');
 	assert.ok(/\nt 0\.1 Myr · CPU · L5$/.test(text), 'the world line closes the report: ' + text.split('\n').pop());
+	assert.ok(!/^prospect /m.test(text), 'the default capture has no prospecting line');
 	assert.ok(strip.classList.contains('copied'), 'the strip acknowledges that the write landed');
 	assert.equal(strip.children.length, page.Perf.SLOTS, 'acknowledgement does not replace the report rows');
 	assert.equal(page.api.document.getElementById('copy-perf'), null, 'there is no separate Copy button');
@@ -532,6 +560,149 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.ok(!/^adj /m.test(stray.copy()),
 		'a capture at the defaults says nothing about adjustments:\n' + stray.copy());
 
+	const prospectPrefill = loadPage('?inst=obs,d5k');
+	assert.equal(prospectPrefill.el('inst-obs').checked, true, '?inst= pre-fills Field observation');
+	assert.equal(prospectPrefill.el('inst-d5k').checked, true, '?inst= pre-fills the deep drill');
+	assert.equal(prospectPrefill.el('inst-geo').checked, false, 'unlisted instruments stay off');
+	const prospectCapture = prospectPrefill.copy();
+	assert.match(prospectCapture, /^prospect inst obs,d5k$/m, 'the capture names the selected instruments');
+	const choicePrefill = loadPage('?inst=d5k&depkind=arc&core=5k');
+	assert.equal(choicePrefill.el('deposit-kind').value, 'arc', '?depkind= restores the map filter');
+	assert.equal(choicePrefill.el('core-depth').value, '5000', '?core=5k restores the local hole depth');
+	assert.equal(choicePrefill.el('markers').hidden, true, 'query choices never reveal or start a campaign');
+	assert.equal(choicePrefill.el('export-discovered').disabled, true, 'campaign export waits for an explicit result');
+	assert.match(choicePrefill.el('campaign-progress').textContent, /No regional campaign/);
+	assert.equal(choicePrefill.el('campaign').textContent, 'Survey all cells · build viable map');
+	assert.ok(!/campaign \d+\.\d+ Myr/.test(choicePrefill.copy()), 'the capture has no campaign counts on load');
+
+	// The regional map is an explicit, bounded job. Empty selection refuses without a catalogue
+	// build; a real run pauses Play/Step, advances only from the frame loop, keeps local clicks
+	// available, and preserves the partial ledger on cancellation.
+	let regionalWorld;
+	const regionalPage = loadPage('?inst=d5k', function (world) {
+		regionalWorld = world;
+		for (const field of globalThis.Deposits.FIELDS) world[field].fill(0);
+		world.oPla[0] = 0.95;
+		assert.ok(globalThis.Deposits.at(world, 'placer', 0), 'the campaign fixture has a real viable discovery');
+	});
+	const rEl = regionalPage.el, regionalBuild = globalThis.Deposits.build;
+	let regionalBuilds = 0;
+	globalThis.Deposits.build = function () { regionalBuilds++; return regionalBuild.apply(this, arguments); };
+	rEl('inst-d5k').checked = false;
+	rEl('campaign').click();
+	assert.equal(regionalBuilds, 0, 'an empty campaign selection refuses before the catalogue build');
+	assert.match(rEl('campaign-progress').textContent, /No instruments selected/);
+	rEl('inst-d5k').checked = true;
+	rEl('play').click();
+	const campaignStartTime = regionalWorld.t;
+	assert.equal(rEl('play').textContent, 'Pause', 'the UI starts in playback before the pause check');
+	rEl('campaign').click();
+	assert.equal(regionalBuilds, 1, 'the explicit campaign builds the snapshot once');
+	globalThis.Deposits.build = regionalBuild;
+	assert.equal(rEl('play').disabled, true, 'Play is locked while the campaign runs');
+	assert.equal(rEl('step').disabled, true, 'Step is locked while the campaign runs');
+	assert.equal(rEl('campaign').textContent, 'Cancel campaign');
+	const progressBefore = rEl('campaign-progress').textContent;
+	regionalPage.pump(2, 3000, 16.7);
+	assert.equal(regionalWorld.t, campaignStartTime, 'playback stays paused for the entire campaign chunk');
+	const progressAfter = rEl('campaign-progress').textContent;
+	const cellsBefore = +(progressBefore.match(/· ([\d,]+) cells/) || [0, 0])[1].replace(/,/g, '');
+	const cellsAfter = +(progressAfter.match(/· ([\d,]+) cells/) || [0, 0])[1].replace(/,/g, '');
+	assert.ok(cellsAfter >= cellsBefore, 'campaign progress is monotone across frame chunks');
+	rEl('map').dispatch('click', { clientX: 460, clientY: 250, currentTarget: rEl('map') });
+	assert.match(rEl('prospect').textContent, /session \d+ cells surveyed/,
+		'ordinary local click-to-survey stays available during the regional sweep');
+	rEl('campaign').click();
+	assert.match(rEl('campaign-progress').textContent, /partial campaign/);
+	assert.equal(rEl('play').disabled, false, 'Play unlocks after cancellation');
+	assert.equal(rEl('export-discovered').disabled, false, 'a partial campaign can be exported');
+	assert.equal(rEl('markers').hidden, false, 'the partial campaign is the first action that reveals the map overlay');
+	assert.match(rEl('prospect').textContent, /viable deposits 1/,
+		'the campaign summary only counts the ledger-filtered discovery');
+	assert.match(rEl('prospect').textContent, /markers filled viable 1\/1 · hollow sub-economic 0\/0/,
+		'the map counts the ledger-filtered marker set and distinguishes viable from sub-economic');
+	assert.ok(rEl('markers').fills > 0, 'a ledger discovery is drawn as a filled viable marker');
+	const fillsBeforeFilter = rEl('markers').fills, clearsBeforeFilter = rEl('markers').clears;
+	const filterBuild = globalThis.Deposits.build;
+	globalThis.Deposits.build = function () { throw new Error('filtering must reuse the campaign catalogue'); };
+	try {
+		rEl('deposit-kind').value = 'arc';
+		rEl('deposit-kind').dispatch('change');
+		assert.match(rEl('prospect').textContent, / · kind arc/);
+		assert.match(rEl('prospect').textContent, /viable deposits 0/);
+		assert.match(rEl('prospect').textContent, /markers filled viable 0\/0 · hollow sub-economic 0\/0/,
+			'the Kinds filter updates the visible marker sets as well as the summary');
+		assert.ok(rEl('markers').clears > clearsBeforeFilter, 'filter changes repaint the marker layer');
+		assert.equal(rEl('markers').fills, fillsBeforeFilter, 'an excluded kind is not drawn after filtering');
+		let discoveredBlob = null;
+		const makeBlob = URL.createObjectURL;
+		URL.createObjectURL = (blob) => { discoveredBlob = blob; return 'blob:deposits-test'; };
+		try {
+			rEl('export-discovered').click();
+			const dump = JSON.parse(await discoveredBlob.text());
+			assert.equal(dump.format, 'pgt-deposits');
+			assert.equal(dump.version, 2);
+			assert.ok(dump.deposits.every((record) => record.kind === 'arc'), 'campaign export honors the Kinds filter');
+		} finally { URL.createObjectURL = makeBlob; }
+	} finally { globalThis.Deposits.build = filterBuild; }
+	for (let i = 0; i < 51; i++) rEl('step').click();
+	regionalPage.pump(20, 10000, 16.7);
+	assert.match(rEl('campaign-progress').textContent, /stale/,
+		'a completed campaign is marked stale after the live world moves more than five Myr');
+	let staleBuilds = 0;
+	const staleBuild = globalThis.Deposits.build;
+	globalThis.Deposits.build = function () { staleBuilds++; return staleBuild.apply(this, arguments); };
+	try {
+		rEl('campaign').click();
+		assert.equal(staleBuilds, 0, 'the first stale refresh press only explains the confirmation');
+		assert.match(rEl('campaign-progress').textContent, /press again/);
+		rEl('campaign').click();
+		assert.equal(staleBuilds, 1, 'the second press starts a fresh paused campaign');
+		rEl('campaign').click();
+	} finally { globalThis.Deposits.build = staleBuild; }
+	assert.match(rEl('campaign-progress').textContent, /partial campaign/);
+	assert.match(regionalPage.copy(), /campaign 5\.1 Myr/,
+		'the capture records regional counts only after a campaign has run');
+
+	// On the GPU path, a campaign waits for an already-submitted play batch, then reads the
+	// mirror once before it builds the catalogue. It starts paused from that same snapshot.
+	let gpuCampaignWorld;
+	const gpuCampaignPage = loadPage('?engine=gpu&inst=d5k', function (world) {
+		gpuCampaignWorld = world;
+		globalThis.navigator.gpu = { getPreferredCanvasFormat: () => 'bgra8unorm' };
+		for (const field of globalThis.Deposits.FIELDS) world[field].fill(0);
+		world.oPla[0] = 0.95;
+	});
+	const gEl = gpuCampaignPage.el;
+	await gpuCampaignPage.tick();
+	assert.equal(gEl('badge').textContent, 'GPU · L5', 'the GPU campaign fixture boots its engine');
+	gEl('play').click();
+	gpuCampaignPage.pump(8, 6000, 16.7);
+	assert.ok(gpuCampaignPage.gpu.plays.length > 0, 'an in-flight GPU play batch is present');
+	const gpuCampaignTime = gpuCampaignWorld.t;
+	let gpuCatalogueBuilds = 0;
+	const gpuBuild = globalThis.Deposits.build;
+	globalThis.Deposits.build = function () { gpuCatalogueBuilds++; return gpuBuild.apply(this, arguments); };
+	try {
+		gEl('campaign').click();
+		assert.equal(gEl('campaign').textContent, 'Cancel setup', 'GPU campaign setup waits for the play batch');
+		assert.equal(gpuCampaignPage.gpu.downloads, 0, 'the mirror is not read before the pending batch drains');
+		gpuCampaignPage.gpu.plays[0].settle(1);
+		await gpuCampaignPage.tick();
+		await gpuCampaignPage.tick();
+		assert.equal(gpuCampaignPage.gpu.downloads, 1, 'one mirror download supplies the campaign snapshot');
+		assert.equal(gpuCatalogueBuilds, 1, 'the catalogue builds once after that download');
+		assert.equal(gEl('campaign').textContent, 'Cancel campaign');
+		assert.equal(gpuCampaignWorld.t, gpuCampaignTime, 'the GPU campaign leaves playback paused');
+		gEl('mapgpu').dispatch('click', { clientX: 460, clientY: 250, currentTarget: gEl('mapgpu') });
+		await gpuCampaignPage.tick();
+		assert.match(gEl('prospect').textContent, /session \d+ cells surveyed/,
+			'a local GPU-map click still surveys during the regional job');
+		assert.equal(gpuCampaignPage.gpu.downloads, 1,
+			'the local survey reuses the campaign snapshot instead of issuing another GPU readback');
+		gEl('campaign').click();
+	} finally { globalThis.Deposits.build = gpuBuild; }
+
 	// The five 0.3.3 controls ride the same pre-fill, and the copied adj line is the query
 	// that reproduces the capture - the line the sliders themselves write when moved.
 	const tuned = loadPage('?tm=1.4&cool=0&fric=1.5&ero=0.5&relief=9');
@@ -597,11 +768,38 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.ok(countChanged(identity, dragged) > 20000,
 		'the drag re-mapped the paint: ' + countChanged(identity, dragged) + ' of ' + TOTAL + ' pixels');
 	// The drag's own release-click is suppressed; a fresh press-release inspects the column.
+	const emptyProspect = pEl('prospect').textContent;
+	const coreBuild = globalThis.Deposits.build;
+	let coreBuilds = 0;
+	globalThis.Deposits.build = function () { coreBuilds++; return coreBuild.apply(this, arguments); };
 	map.dispatch('pointerdown', { button: 0, pointerId: 1, clientX: 460, clientY: 250, currentTarget: map });
 	map.dispatch('pointerup', { pointerId: 1, currentTarget: map });
 	map.dispatch('click', { clientX: 460, clientY: 250, currentTarget: map });
+	globalThis.Deposits.build = coreBuild;
+	assert.equal(coreBuilds, 0, 'a core click with no instruments does not build a regional catalogue');
 	const probed = /^Cell (\d+)/.exec(pEl('probe').textContent);
 	assert.ok(probed, 'a click after the drag inspected a column: ' + pEl('probe').textContent);
+	assert.notEqual(pEl('prospect').textContent, emptyProspect,
+		'a local click logs the core even when no instruments are selected');
+	assert.match(pEl('prospect').textContent, /No instruments selected; this click logs a core/);
+	assert.match(pEl('prospect').textContent, /hole [\d,]+ · L5/);
+	assert.equal(pEl('export-core').disabled, false, 'a local hole is exportable even without instrument selection');
+	assert.equal(pEl('markers').hidden, true, 'local clicks alone never reveal the regional marker overlay');
+	pEl('core-depth').value = '500';
+	pEl('core-depth').dispatch('change');
+	assert.match(pEl('prospect').textContent, /depth 500 m/, 'changing depth regenerates only the last clicked hole');
+	let coreBlob = null;
+	const makeBlob = URL.createObjectURL;
+	URL.createObjectURL = (blob) => { coreBlob = blob; return 'blob:core-test'; };
+	try {
+		pEl('export-core').click();
+		assert.ok(coreBlob, 'Export core creates a download');
+		const savedCore = JSON.parse(await coreBlob.text());
+		assert.equal(savedCore.format, 'pgt-core');
+		assert.equal(savedCore.version, 1);
+		assert.equal(savedCore.depth, 500);
+	} finally { URL.createObjectURL = makeBlob; }
+	pEl('core-depth').value = '5000'; pEl('core-depth').dispatch('change');
 	const cell = +probed[1], p4 = (250 * 1024 + 460) * 4;
 	assert.deepEqual([map.lastImage.data[p4], map.lastImage.data[p4 + 1], map.lastImage.data[p4 + 2]],
 		[mirror.colors[cell * 3], mirror.colors[cell * 3 + 1], mirror.colors[cell * 3 + 2]],
@@ -622,6 +820,24 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	map.dispatch('pointermove', { pointerId: 9, clientX: 300, clientY: 300, currentTarget: map });
 	assert.equal(pEl('probe').textContent, 'untouched', 'unchecked, a hover leaves the inspector alone');
 	pEl('follow').checked = true;
+
+	// Instruments answer one explicit cell click. Hover remains the cheap column preview and
+	// cannot add coverage or overwrite the persistent single-cell report. Neither the core nor
+	// this local instrument click builds the regional catalogue.
+	pEl('inst-d5k').checked = true;
+	const localBuild = globalThis.Deposits.build;
+	let localBuilds = 0;
+	globalThis.Deposits.build = function () { localBuilds++; return localBuild.apply(this, arguments); };
+	map.dispatch('click', { clientX: 460, clientY: 250, currentTarget: map });
+	globalThis.Deposits.build = localBuild;
+	assert.equal(localBuilds, 0, 'local survey and core logging do not build a whole-world catalogue');
+	const firstSurvey = pEl('prospect').textContent;
+	assert.match(firstSurvey, /d5k  hole 5000 m/);
+	assert.match(firstSurvey, /session 1 cells surveyed/);
+	map.dispatch('pointermove', { pointerId: 9, clientX: 700, clientY: 100, currentTarget: map });
+	assert.equal(pEl('prospect').textContent, firstSurvey, 'hover changes only the column inspector');
+	map.dispatch('click', { clientX: 700, clientY: 100, currentTarget: map });
+	assert.match(pEl('prospect').textContent, /session 2 cells surveyed/, 'a second click surveys one more cell');
 
 	// A press that never travels 4 px is the probe click, and the view does not move.
 	map.dispatch('pointerdown', { button: 0, pointerId: 2, clientX: 100, clientY: 100, currentTarget: map });
@@ -693,6 +909,16 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	await panPage.tick();
 	assert.equal(pEl('badge').textContent, 'GPU · L6');
 	const gpuMap = pEl('mapgpu');
+	gpuMap.dispatch('click', { clientX: 400, clientY: 200, currentTarget: gpuMap }); // release-click from the last drag
+	const gpuClick = { clientX: 400, clientY: 200, currentTarget: gpuMap };
+	gpuMap.dispatch('click', gpuClick);
+	gpuClick.currentTarget = null;   // browsers clear it as soon as the handler returns
+	pEl('inst-d5k').checked = false; // an in-flight readback must keep the click's instrument set too
+	await panPage.tick();
+	assert.match(pEl('probe').textContent, /^Cell \d+/, 'GPU click uses the captured target after readback');
+	assert.match(pEl('prospect').textContent, /d5k  hole 5000 m/,
+		'the click snapshots its instrument set and the fresh GPU mirror');
+	pEl('inst-d5k').checked = true;
 	pEl('play').click();
 	panPage.pump(3);
 	const inFlight = panPage.gpu.plays[panPage.gpu.plays.length - 1];
@@ -771,6 +997,9 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	};
 	for (const id of ['level', 'start', 'seed', 'reset', 'load'])
 		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'startup', '#' + id + ' lives in the Startup group');
+	for (const id of ['inst-obs', 'inst-geo', 'inst-mag', 'inst-gpr', 'inst-d500', 'inst-d5k', 'inst-lab',
+		'core-depth', 'export-core', 'campaign', 'deposit-kind', 'export-discovered'])
+		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'prospect-tools', '#' + id + ' lives in the Prospecting group');
 	for (const id of ['dt', 'speed', 'cadence', 'run-to', 'engine', 'save', 'deposits'])
 		assert.equal(groupOf(lEl(id)) && groupOf(lEl(id)).id, 'adjust', '#' + id + ' lives in the Adjust group');
 	// The five live controls of 0.3.3 are Adjust controls too: nothing in this group rebuilds
@@ -1274,24 +1503,6 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(r3.releases, 1, 'the session released its allocations');
 	}
 
-	// The frozen deposit catalogue (0.6.0): Freeze pauses the world and generates the catalogue in
-	// timed chunks; the JSON button wakes only when the scan completes; a reset cancels a scan.
-	const cat = loadPage('');
-	cat.el('play').click();
-	assert.equal(cat.el('play').textContent, 'Pause', 'the page is playing before the freeze');
-	assert.equal(cat.el('catalogue-json').disabled, true, 'nothing to export before a freeze');
-	cat.el('catalogue').click();
-	assert.equal(cat.el('play').textContent, 'Play', 'the freeze pauses the world');
-	for (let waited = 0; !/^Frozen catalogue/.test(cat.el('catalogue-readout').textContent) && waited < 600; waited++) await cat.tick();
-	assert.ok(/^Frozen catalogue at 0\.0 Myr[^]*synthetic bodies/.test(cat.el('catalogue-readout').textContent), cat.el('catalogue-readout').textContent);
-	assert.equal(cat.el('catalogue-json').disabled, false, 'the export is available once the catalogue is complete');
-	cat.el('catalogue').click();
-	assert.equal(cat.el('catalogue-json').disabled, true, 'a new freeze withdraws the old export until it completes');
-	cat.el('reset').click();
-	for (let waited = 0; waited < 30; waited++) await cat.tick();
-	assert.ok(/^Freeze the paused world/.test(cat.el('catalogue-readout').textContent), 'a reset cancels the running scan and clears the readout');
-	assert.equal(cat.el('catalogue-json').disabled, true);
-
 	console.log('PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
 		+ page.Perf.SLOTS + ' slots in place and is the copy control, the bench can measure every setting the page offers,'
@@ -1311,6 +1522,5 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' the strip\'s V3D slot name the session, a mesh or normals change swaps buffers or pipelines'
 		+ ' on the live session without a world rebuild, and off restores the map;'
 		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
-		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly;'
-		+ ' the deposit catalogue freeze pauses, scans in chunks, exports only when complete and is cancelled by a reset');
+		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
 })().catch((error) => { console.error(error); process.exit(1); });
