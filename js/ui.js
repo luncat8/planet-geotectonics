@@ -58,7 +58,15 @@
 	var lastCoreState = null, lastCoreCell = -1, lastCoreSection = null, lastInstrumentText = '';
 	var markerCanvas = document.getElementById('markers'), markerContext = markerCanvas.getContext('2d');
 	var campaignPreparing = false, campaignRequest = 0, campaignJob = null, campaignView = null, campaignReadback = null;
-	var campaignRefreshArmed = false, campaignMarkersDirty = false;
+	var campaignRefreshArmed = false, markersDirty = false;
+	// The discovery overlay paints from the campaign view when one exists and from the
+	// session ledger otherwise: a local find is on the map before any regional sweep. The hit
+	// cache mirrors what was actually painted (projected x, y and the record per marker), so a
+	// map click lands on a marker in the same space the painter used. Paint is capped at the
+	// campaign's own sampling budget; a local session rarely comes close.
+	var MARKER_PAINT_CAP = 2048, LEDGER_ROWS = 200, MARKER_HIT_PX = 7;
+	var markerHits = new Float64Array(MARKER_PAINT_CAP * 2), markerHitRecords = new Array(MARKER_PAINT_CAP);
+	var markerHitsN = 0, ledgerMarkers = null, selectedDeposit = null, ledgerSortDesc = false;
 	var instrumentInputs = [];
 	for (var inst = 0; inst < Instruments.LIST.length; inst++)
 		instrumentInputs.push(document.getElementById('inst-' + Instruments.LIST[inst].id));
@@ -285,7 +293,7 @@
 		// The engine's own canvas takes the map slot back (bootEngine keeps it that way).
 		(gpu.on && gpu.ready ? gpuCanvas : canvas).hidden = false;
 		layerGroup.classList.remove('off');
-		paintCampaignMarkers();
+		paintDepositMarkers();
 	}
 	// The session's init options, read when the device is finally in hand - a mesh or
 	// detail change made while the adapter promise was in flight lands on the session
@@ -509,18 +517,24 @@
 				+ ' · viable but does not pay ' + campaignCount(summary.money.geoOnly)
 				+ ' · pays but fails the class screen ' + campaignCount(summary.money.moneyOnly);
 		}
-		text += '\nlargest viable by contained metal';
+		text += '\nlargest viable by contained metal · ' + (summary.kind === 'all' ? 'all kinds' : summary.kind);
 		var listed = 0;
-		for (var k = 0; k < summary.byKind.length; k++) {
-			var group = summary.byKind[k];
-			if (!group.top.length) continue;
-			for (var r = 0; r < group.top.length; r++) {
-				var record = group.top[r], entry = prospectLedger.byId[record.id];
-				text += '\n  #' + record.id + '  ' + record.kind + ' · '
-					+ (entry ? Instruments.confidence[entry.confidence] + ' · ' : '')
-					+ campaignContained(record) + '   ' + Number(record.size.toPrecision(3)).toLocaleString('en-US')
-					+ ' ' + record.unit + ' · ' + record.variant + ' · ' + record.host + ', '
-					+ record.ageMyr + ' Ma';
+		function topLine(record, indent) {
+			var entry = prospectLedger.byId[record.id];
+			return '\n' + indent + '#' + record.id + '  ' + record.kind + ' · '
+				+ (entry ? Instruments.confidence[entry.confidence] + ' · ' : '')
+				+ campaignContained(record) + '   ' + Number(record.size.toPrecision(3)).toLocaleString('en-US')
+				+ ' ' + record.unit + ' · ' + record.variant + ' · ' + record.host + ', ' + record.ageMyr + ' Ma';
+		}
+		// `summary.top` is the global ladder under the active filter: the all-kinds view gains a
+		// cross-kind ranking, and a filtered one reads the same rows the per-kind block repeats.
+		for (var t = 0; t < summary.top.length && t < 5; t++) text += topLine(summary.top[t], '  '), listed++;
+		if (summary.kind === 'all') {
+			for (var k = 0; k < summary.byKind.length; k++) {
+				var group = summary.byKind[k];
+				if (!group.top.length) continue;
+				text += '\n  ' + group.kind;
+				for (var r = 0; r < group.top.length && r < 3; r++) text += topLine(group.top[r], '    ');
 				listed++;
 			}
 		}
@@ -551,12 +565,22 @@
 		else if (campaignRefreshArmed) line = 'press again to refresh · ' + line;
 		return line;
 	}
+	// One composition for the report panel: the pinned deposit, the last survey report and
+	// the last core log, in that order, each optional.
+	function paintProspectPanel() {
+		var text = '';
+		var pinned = selectedDeposit === null ? null : prospectLedger.byId[selectedDeposit];
+		if (pinned) text += Instruments.depositText(pinned) + '\n\n';
+		if (lastInstrumentText) text += lastInstrumentText + '\n\n';
+		if (lastCoreState === state && lastCoreSection) text += Core.text(lastCoreSection);
+		prospectPanel.textContent = text || prospectIntro;
+	}
 	function refreshLastCore() {
 		if (lastCoreState !== state || lastCoreCell < 0) return;
 		try {
 			lastCoreSection = Core.section(state, lastCoreCell, coreDepth.value);
 			coreExport.disabled = !lastCoreSection;
-			prospectPanel.textContent = (lastInstrumentText ? lastInstrumentText + '\n\n' : '') + Core.text(lastCoreSection);
+			paintProspectPanel();
 		} catch (error) {
 			lastCoreSection = null; coreExport.disabled = true;
 			prospectPanel.textContent = 'Core failed: ' + error.message;
@@ -571,7 +595,7 @@
 		campaignExport.disabled = !campaignView;
 	}
 	function refreshCampaignView(preserveReport) {
-		if (!campaignView) { markerCanvas.hidden = true; campaignExport.disabled = true; return; }
+		if (!campaignView) { paintDepositMarkers(); campaignExport.disabled = true; return; }
 		var kind = campaignKind.value || 'all';
 		campaignView.summary = Deposits.summary(state, {
 			catalogue: campaignView.catalogue, ledger: prospectLedger, kind: kind
@@ -582,8 +606,8 @@
 		campaignExport.disabled = false;
 		if (!preserveReport) prospectPanel.textContent = campaignSummaryText(campaignView);
 		paintCampaignControls();
-		campaignMarkersDirty = true;
-		paintCampaignMarkers();
+		markersDirty = true;
+		paintDepositMarkers();
 	}
 	var kindPrefill = query.get('depkind');
 	if (kindPrefill !== null) {
@@ -823,6 +847,8 @@
 		Deposits.release();      // catalogue scratch and cache were sized to the old grid.V
 		prospectLedger = new Instruments.Ledger(grid.V);
 		prospectPanel.textContent = prospectIntro;
+		refreshLedgerMarkers();  // the overlay and the list follow the ledger of the new world
+		refreshLedgerRows();
 		waterDirty = true;       // a new bathymetry: the volume tick re-solves against it
 		levelInput.value = String(level);
 		seedInput.value = String(seed);
@@ -843,46 +869,161 @@
 		setPlaying(false); runTarget = Infinity;
 		whenGpuIdle(function () { rebuildWorld(level, seed, start, after); });
 	}
-	function paintCampaignMarkers() {
-		if (!campaignView || campaignPreparing || (campaignJob && campaignJob.running) || v3d.on) {
-			markerCanvas.hidden = true;
-			return;
-		}
+	function paintDepositMarkers() {
+		// Campaign-sampled sets while a campaign view stands, the ledger otherwise; a running
+		// or preparing campaign owns neither, and 3D has no overlay at all. Both sources carry
+		// { viable: { records }, nonviable: { records } } so one painter draws either.
+		var sets = null;
+		if (!v3d.on && !campaignPreparing && !(campaignJob && campaignJob.running))
+			sets = campaignView
+				? { viable: campaignView.viableMarkers, nonviable: campaignView.nonviableMarkers }
+				: ledgerMarkers;
+		if (!sets) { markerCanvas.hidden = true; markerHitsN = 0; markersDirty = false; return; }
 		var base = gpu.on && gpu.ready ? gpuCanvas : canvas;
 		var width = base.width || grid.lookupW, height = base.height || grid.lookupH;
 		if (markerCanvas.width !== width) markerCanvas.width = width;
 		if (markerCanvas.height !== height) markerCanvas.height = height;
 		markerCanvas.hidden = false;
 		markerContext.clearRect(0, 0, width, height);
-		var pos = grid.pos, projected = campaignProject || (campaignProject = new Float64Array(2));
+		markerHitsN = 0;
+		var pos = grid.pos, projected = markerProject || (markerProject = new Float64Array(2));
+		function diamondPath(x, y, radius) {
+			markerContext.beginPath();
+			markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+			markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+		}
 		function diamond(record, viable) {
 			var dir = record.direction, b = record.cell * 3;
 			var dx = dir ? dir[0] : pos[b], dy = dir ? dir[1] : pos[b + 1], dz = dir ? dir[2] : pos[b + 2];
 			MapView.project(projected, dx, dy, dz, viewQ, width, height);
 			var x = projected[0], y = projected[1], radius = 3.5;
-			markerContext.beginPath();
-			markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
-			markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+			diamondPath(x, y, radius);
 			if (viable) { markerContext.fillStyle = '#8ce1b2'; markerContext.fill(); }
 			else { markerContext.strokeStyle = '#f2c46d'; markerContext.lineWidth = 1.5; markerContext.stroke(); }
+			if (record.id === selectedDeposit) {
+				markerContext.save();
+				markerContext.strokeStyle = '#8ce1b2'; markerContext.lineWidth = 1.5;
+				diamondPath(x, y, radius * 2); markerContext.stroke();
+				markerContext.restore();
+			}
+			if (markerHitsN < MARKER_PAINT_CAP) {
+				markerHits[markerHitsN * 2] = x; markerHits[markerHitsN * 2 + 1] = y;
+				markerHitRecords[markerHitsN] = record; markerHitsN++;
+			}
 			if (x < radius) {
 				markerContext.save(); markerContext.translate(width, 0);
-				markerContext.beginPath(); markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
-				markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+				diamondPath(x, y, radius);
 				if (viable) markerContext.fill(); else markerContext.stroke(); markerContext.restore();
 			} else if (x > width - radius) {
 				markerContext.save(); markerContext.translate(-width, 0);
-				markerContext.beginPath(); markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
-				markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+				diamondPath(x, y, radius);
 				if (viable) markerContext.fill(); else markerContext.stroke(); markerContext.restore();
 			}
 		}
-		var nonviable = campaignView.nonviableMarkers.records, viable = campaignView.viableMarkers.records;
+		var nonviable = sets.nonviable.records, viable = sets.viable.records;
 		for (var i = 0; i < nonviable.length; i++) diamond(nonviable[i], false);
 		for (var j = 0; j < viable.length; j++) diamond(viable[j], true);
-		campaignMarkersDirty = false;
+		markersDirty = false;
 	}
-	var campaignProject = null;
+	var markerProject = null;
+	// The ledger-backed marker set for local discoveries, in the campaign's shape so the
+	// painter and the kinds filter treat both sources the same. Empty means hidden.
+	function refreshLedgerMarkers() {
+		var kind = campaignKind.value || 'all', viable = [], sub = [], i;
+		for (i = 0; i < prospectLedger.found.length; i++) {
+			var record = prospectLedger.found[i].record;
+			if (!record || (kind !== 'all' && record.kind !== kind)) continue;
+			if (record.viable) viable.push(record); else sub.push(record);
+		}
+		ledgerMarkers = viable.length || sub.length
+			? { viable: { records: viable, total: viable.length }, nonviable: { records: sub, total: sub.length } }
+			: null;
+		markersDirty = true;
+		paintDepositMarkers();
+	}
+	// The discovery list: one row per ledger record, always the ledger - a campaign only
+	// widens it. A row click pins the deposit exactly like a marker click, so both views of
+	// a discovery select the same entry and the same marker ring.
+	var ledgerList = document.getElementById('ledger-list'), ledgerCount = document.getElementById('ledger-count');
+	var ledgerSortSelect = document.getElementById('ledger-sort'), ledgerSortDir = document.getElementById('ledger-sort-dir');
+	function ledgerSortValue(key, entry, record) {
+		if (key === 'size') return record.size;
+		if (key === 'contained') return Deposits.principalOf(record);
+		if (key === 'depth') return record.top;
+		if (key === 'confidence') return entry.confidence;
+		if (key === 'kind') return record.kindIndex;
+		return entry.ledgerIndex;
+	}
+	function ledgerRowText(entry, record) {
+		return '#' + record.id + ' · ' + record.kind + ' ' + record.variant
+			+ ' · ' + Number(record.size.toPrecision(3)).toLocaleString('en-US') + ' ' + record.unit
+			+ ' · top ' + record.top + ' m · ' + Instruments.confidence[entry.confidence]
+			+ (record.viable ? ' · viable' : ' · sub-economic');
+	}
+	function refreshLedgerRows() {
+		var kind = campaignKind.value || 'all', items = [], i;
+		for (i = 0; i < prospectLedger.found.length; i++) {
+			var entry = prospectLedger.found[i], record = entry.record;
+			if (!record || (kind !== 'all' && record.kind !== kind)) continue;
+			items.push({ entry: entry, record: record });
+		}
+		while (ledgerList.children.length) ledgerList.removeChild(ledgerList.children[0]);
+		ledgerCount.textContent = items.length + ' found';
+		if (!items.length) { ledgerList.hidden = true; return; }
+		ledgerList.hidden = false;
+		var desc = ledgerSortDesc, key = ledgerSortSelect.value;
+		items.sort(function (a, b) {
+			var av = ledgerSortValue(key, a.entry, a.record), bv = ledgerSortValue(key, b.entry, b.record);
+			var d = av !== bv ? av - bv : a.entry.ledgerIndex - b.entry.ledgerIndex;
+			return desc ? -d : d;
+		});
+		var shown = items.length < LEDGER_ROWS ? items.length : LEDGER_ROWS;
+		for (i = 0; i < shown; i++) {
+			var item = items[i], row = document.createElement('button');
+			row.classList.add('ledger-row');
+			if (selectedDeposit === item.record.id) row.classList.add('sel');
+			row.textContent = ledgerRowText(item.entry, item.record);
+			row.addEventListener('click', function (picked) {
+				return function () { selectDeposit(picked.record.id); };
+			}(item));
+			ledgerList.appendChild(row);
+		}
+		if (items.length > shown) {
+			var more = document.createElement('small');
+			more.classList.add('ledger-more');
+			more.textContent = (items.length - shown) + ' more behind this sort and filter';
+			ledgerList.appendChild(more);
+		}
+	}
+	// A pin is a view, not a mode: the survey below it still runs on the same click.
+	function selectDeposit(id) {
+		selectedDeposit = selectedDeposit === id ? null : id;
+		markersDirty = true;
+		paintDepositMarkers();
+		refreshLedgerRows();
+		paintProspectPanel();
+	}
+	// Marker clicks resolve in the projected canvas space the painter just used, with the
+	// seam wrapped - the hit cache holds only what is actually visible on the overlay.
+	function hitDeposit(event) {
+		var base = gpu.on && gpu.ready ? gpuCanvas : canvas;
+		var rect = mapRect(base), width = base.width || grid.lookupW;
+		if (!rect.width || !rect.height) return null;
+		var x = (event.clientX - rect.left) / rect.width * width;
+		var y = (event.clientY - rect.top) / rect.height * (base.height || grid.lookupH);
+		for (var i = 0; i < markerHitsN; i++) {
+			var dx = Math.abs(markerHits[i * 2] - x); dx = Math.min(dx, width - dx);
+			var dy = Math.abs(markerHits[i * 2 + 1] - y);
+			if (dx * dx + dy * dy <= MARKER_HIT_PX * MARKER_HIT_PX) return markerHitRecords[i].id;
+		}
+		return null;
+	}
+	ledgerSortSelect.addEventListener('change', refreshLedgerRows);
+	ledgerSortDir.addEventListener('click', function () {
+		ledgerSortDesc = !ledgerSortDesc;
+		ledgerSortDir.textContent = ledgerSortDesc ? '↑ high first' : '↓ low first';
+		refreshLedgerRows();
+	});
 	function noteCampaignSurvey(result) {
 		if (!campaignJob || !campaignJob.running || !result || !result.found) return;
 		var catalogue = campaignJob.catalogue;
@@ -914,11 +1055,15 @@
 		campaignRequest++;
 		if (campaignJob && campaignJob.running) Instruments.cancelCampaign(campaignJob);
 		campaignJob = null; campaignPreparing = false; campaignView = null;
-		campaignRefreshArmed = false; campaignMarkersDirty = false;
+		campaignRefreshArmed = false; markersDirty = false;
 		lastCoreState = null; lastCoreCell = -1; lastCoreSection = null; lastInstrumentText = '';
 		coreExport.disabled = true;
+		// The ledger itself belongs to the world the rebuild replaces; drop every view built
+		// on it, so no frame can paint stale discoveries while the boot is still in flight.
+		selectedDeposit = null; ledgerMarkers = null; markerHitsN = 0;
 		markerCanvas.hidden = true; markerContext.clearRect(0, 0, markerCanvas.width, markerCanvas.height);
 		prospectPanel.textContent = prospectIntro;
+		refreshLedgerRows();
 		paintCampaignControls();
 	}
 	function failCampaignSetup(error, token) {
@@ -926,7 +1071,7 @@
 		campaignPreparing = false;
 		paintCampaignControls();
 		campaignProgress.textContent = 'Campaign could not start: ' + error.message;
-		if (campaignView) paintCampaignMarkers();
+		paintDepositMarkers();
 		setPlaying(false);
 	}
 	function beginCampaign(world, selected, token) {
@@ -944,7 +1089,7 @@
 		if (campaignPreparing) {
 			campaignRequest++; campaignPreparing = false; campaignRefreshArmed = false;
 			paintCampaignControls(); setPlaying(false);
-			if (campaignView) { campaignMarkersDirty = true; paintCampaignMarkers(); }
+			markersDirty = true; paintDepositMarkers();
 			return;
 		}
 		if (campaignJob && campaignJob.running) {
@@ -986,7 +1131,10 @@
 		} else beginCampaign(world, selected, token);
 	}
 	campaignButton.addEventListener('click', startRegionalCampaign);
-	campaignKind.addEventListener('change', function () { if (campaignView) refreshCampaignView(); });
+	campaignKind.addEventListener('change', function () {
+		if (campaignView) refreshCampaignView(); else refreshLedgerMarkers();
+		refreshLedgerRows();
+	});
 	coreDepth.addEventListener('change', refreshLastCore);
 	coreExport.addEventListener('click', function () {
 		if (!lastCoreSection) return;
@@ -1305,7 +1453,8 @@
 			} else lastInstrumentText = 'No instruments selected; this click logs a core without adding survey coverage.';
 			lastCoreCell = cell; lastCoreState = state;
 			refreshLastCore();
-			if (campaignView) refreshCampaignView(true);
+			if (campaignView) refreshCampaignView(true); else refreshLedgerMarkers();
+			refreshLedgerRows();
 		} catch (error) {
 			prospectPanel.textContent = (selected.length ? 'Survey' : 'Core') + ' failed: ' + error.message;
 			console.error('Prospecting/core report failed', error);
@@ -1317,6 +1466,13 @@
 	function probeClick(event) {
 		var cell = cellAt(event.clientX, event.clientY, event.currentTarget);
 		if (!Number.isInteger(cell) || cell < 0) return;
+		// A click that lands on a painted marker pins that deposit; a click anywhere else with
+		// a pin in place releases it. Both keep the survey's own meaning of a click.
+		if (!markerCanvas.hidden) {
+			var pin = markerHitsN ? hitDeposit(event) : null;
+			if (pin !== null) selectDeposit(pin);
+			else if (selectedDeposit !== null) selectDeposit(selectedDeposit);
+		}
 		var selected = selectedInstrumentIds(), world = state, serial = ++prospectClickSerial;
 		if (gpu.on && gpu.ready) {
 			var transfer = campaignJob && campaignJob.running && campaignJob.state === world
@@ -1675,7 +1831,7 @@
 			shownVersion = viewVersion;
 		}
 	}
-		if (campaignMarkersDirty || viewMoved) paintCampaignMarkers();
+		if (markersDirty || viewMoved) paintDepositMarkers();
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.v3dText = v3d.on && v3d.r3d ? v3d.r3d.tsLine() : '';

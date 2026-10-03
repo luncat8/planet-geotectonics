@@ -695,16 +695,27 @@ var Instruments = (function () {
 	function sizeText(record) {
 		return (record.size >= 1 ? countText(record.size) : String(record.size)) + ' ' + record.unit;
 	}
-	function gradeText(record) {
+	// A drilled record carries its field band until the lab certifies the core; printing the
+	// band is what makes `measured` read as "the intersection is measured" rather than
+	// "the grade is certified" - the two run on separate axes and the report shows both.
+	function fieldBand(entry) {
+		return entry && entry.drilled && !entry.assayed ? entry.gradeBand : null;
+	}
+	function gradeText(record, band) {
 		var out = [];
-		for (var metal in record.grade) out.push(metal + ' ' + record.grade[metal] + record.gradeUnit[metal]);
+		for (var metal in record.grade) {
+			var range = band && band[metal];
+			out.push(metal + ' ' + (range ? range[0] + '-' + range[1] : record.grade[metal])
+				+ record.gradeUnit[metal]);
+		}
 		return out.join(', ');
 	}
-	function economicsText(record) {
+	function economicsText(record, entry) {
+		var band = fieldBand(entry);
 		var line = '\n      ' + record.variant + ' · ' + record.commodity + ' · ' + sizeText(record)
 			+ ' (' + record.sizeClass + ')';
-		var grades = gradeText(record);
-		if (grades) line += ' @ ' + grades;
+		var grades = gradeText(record, band);
+		if (grades) line += ' @ ' + grades + (band ? ' (field band, assay pending)' : '');
 		line += ' · ' + record.bodies.length + (record.bodies.length === 1 ? ' body' : ' bodies');
 		line += ' · ' + (record.viable ? 'viable' : 'sub-economic: ' + record.reason);
 		// The geological screen and the monetary one are separate questions, so both are
@@ -731,11 +742,23 @@ var Instruments = (function () {
 			if (item.refinedFrom) text += '  · lab ' + CONFIDENCE[item.refinedFrom] + ' → ' + CONFIDENCE[item.entry.confidence];
 			if (item.certifiedByLab || (item.entry.drilled && item.entry.assayed)) text += '  · lab assayed';
 			if (item.instruments.length) text += '  · ' + item.instruments.join('+');
-			text += economicsText(rec);
+			text += economicsText(rec, item.entry);
 		}
 		text += '\nsession ' + countText(result.ledger.cellsN) + ' cells surveyed · '
 			+ countText(result.ledger.found.length) + ' records found';
 		return text;
+	}
+	// The pinned single-record view, opened from a map marker or a ledger row: the ledger
+	// state first, then the same economics line the survey report prints, so one deposit
+	// reads identically wherever it is opened.
+	function depositText(entry) {
+		var rec = entry.record;
+		var text = 'selected deposit #' + rec.id + '  ' + rec.kind + '  ' + CONFIDENCE[entry.confidence]
+			+ '  ' + rec.top + '-' + rec.bottom + ' m  ' + rec.host
+			+ (entry.assayed ? '  · lab assayed' : entry.drilled ? '  · field band, assay pending' : '');
+		text += '\n      cell ' + rec.cell + ' · plate ' + (rec.plate + 1) + ' · ' + rec.ageMyr + ' Ma'
+			+ ' · first seen ' + entry.firstSeen + ' Myr · last surveyed ' + entry.lastSeen + ' Myr';
+		return text + economicsText(rec, entry);
 	}
 
 	return {
@@ -749,6 +772,7 @@ var Instruments = (function () {
 		campaignStep: campaignStep,
 		cancelCampaign: cancelCampaign,
 		report: report,
+		depositText: depositText,
 		confidence: CONFIDENCE
 	};
 }());

@@ -144,6 +144,13 @@ assert.equal(deepHole.found[0].entry.assayed, false, 'the drill core starts unas
 const unassayedBand = deepHole.found[0].entry.gradeBand.Cu;
 assert.ok(unassayedBand && unassayedBand[0] < unassayedBand[1], 'unassayed drill core has a field uncertainty band');
 assert.match(Instruments.report(deepHole), /assay pending/);
+const holeReport = Instruments.report(deepHole);
+assert.ok(/Cu [\d.]+-[\d.]+%/.test(holeReport), 'the report prints the drilled Cu grade as a range');
+assert.match(holeReport, /field band, assay pending/, 'and names it a pending field band');
+const pinned = Instruments.depositText(deepHole.found[0].entry);
+assert.ok(pinned.startsWith('selected deposit #'), 'the pinned single-record view names the record');
+assert.match(pinned, /first seen [\d.]+ Myr · last surveyed [\d.]+ Myr/,
+	'the pin carries the ledger history, not just the record');
 const labMeasured = Instruments.survey(covered, 0, ['lab'], coveredLedger);
 assert.equal(labMeasured.found[0].entry.confidence, 3, 'lab cannot promote or demote a measured record');
 assert.equal(labMeasured.found[0].entry.assayed, true, 'lab certifies the drilled core');
@@ -152,6 +159,8 @@ assert.equal(labMeasured.found[0].entry.gradeBand.Cu[0], labMeasured.found[0].en
 	'certified core grade band narrows to the exact grade');
 assert.match(Instruments.report(labMeasured), /core grade certified/);
 assert.match(Instruments.report(labMeasured), /lab assayed/);
+assert.ok(!Instruments.report(labMeasured).includes('field band'),
+	'a certified core prints exact grades: the pending band is gone');
 
 const remote = site('oVms', 1);
 const remoteLedger = selectLedger(remote);

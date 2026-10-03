@@ -749,6 +749,7 @@ var Deposits = (function () {
 		hash32: hash32,
 		idFor: idFor,
 		isPeak: isPeak,
+		principalOf: principalOf,
 		axisUnits: axisUnits,
 		verticalHalfExtent: verticalHalfExtent,
 		verticalIntersection: verticalIntersection,

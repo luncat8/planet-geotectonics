@@ -88,6 +88,17 @@ Open `index.html` directly in a browser.
   discoveries. A snapshot becomes stale more than 5 Myr from its exact campaign time; the first refresh press
   explains this and the second starts a fresh paused campaign. `Deposits JSON` remains the separate
   explicit all-catalogue export.
+- The discovery ledger (0.6.4): the map overlay and a sortable row list follow the session
+  ledger itself, so the first local find is already on the map with no campaign — the campaign
+  takes the same overlay over when a view exists. Markers project the record's anchored
+  direction, and a click that lands on a painted marker pins that deposit's record to the top
+  of the report panel with a ring on the map; the ledger row does the same, and a second click
+  on either releases the pin. The list sorts over found order, size, contained metal, top
+  depth, confidence and kind, shares the Kinds filter with the campaign, and lists up to 200
+  rows. A drilled grade now prints its field band (`Cu 0.5-0.6%, assay pending`) until the lab
+  certifies it, so the `measured` rung reads as a measured intersection rather than a
+  certified resource, and the regional summary gains a cross-kind largest list above the
+  per-kind ones. No sim state, no checkpoint change: this is all a view of the ledger.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus the optional viable-deposit overlay, a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
   the surface; the trackball view has no latitude/longitude clamp and slows horizontal motion

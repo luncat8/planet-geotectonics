@@ -70,6 +70,17 @@ canvas:active { cursor: grabbing; }
 .inspectors > div { min-width: 0; }
 #prospect { width: 100%; max-width: 100%; margin: 10px 0 0; padding: 10px; max-height: 24em; overflow: auto; border: 1px solid #2b3540; border-radius: 6px;
 	background: #1a2632; color: #c9d8d9; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: pre; }
+.ledger-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; font-size: 11px; color: #aab9bd; }
+.ledger-tools label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; text-transform: none; letter-spacing: 0; }
+.ledger-tools select { min-width: 130px; padding: 4px 8px; min-height: 0; }
+.ledger-tools button { padding: 4px 8px; min-height: 0; font-size: 11px; }
+#ledger-count { color: #788c99; }
+.ledger-list { margin: 6px 0 0; border: 1px solid #2b3540; border-radius: 6px; background: #1a2632; max-height: 16em; overflow: auto; }
+.ledger-list button { display: block; width: 100%; text-align: left; min-height: 0; padding: 3px 8px; border: 0; border-radius: 0; background: transparent;
+	color: #c9d8d9; font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: pre; }
+.ledger-list button:hover { background: #22333f; }
+.ledger-list button.sel { color: #8ce1b2; background: #22333f; box-shadow: inset 2px 0 0 #8ce1b2; }
+.ledger-list .ledger-more { display: block; padding: 3px 8px; color: #788c99; font-size: 11px; }
 
 button, select, input { font: inherit; border: 1px solid #3c4b57; border-radius: 5px; background: #1a2632; color: #e1e8eb; padding: 10px 12px; min-height: 39px; }
 button { cursor: pointer; font-size: 13px; }

@@ -1734,3 +1734,31 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	p90 anomaly is the published deposit") be reported instead of tuned away. The test suite
 	asserts only what is structurally true: bounds, determinism, identity, and that every class
 	row is reachable.
+
+## the deposit fixtures are per-column means: write the whole field (0.6.4, 2026-10-03)
+
+	`Deposits.blurAt` averages one cell's field over its owner column *and the neighbouring
+	columns' owners*, and `recordAt` gates on `depositMin` after that mean. In a just-booted
+	world every cell is its own column, so a test that sets one slot (`world.oVms[cell] = 1`)
+	sees the value diluted to 1/6 and gets no record - while the placer that worked did so only
+	because its `FIELD_SCALE` is 7. To give a fixture cell a second kind, fill the field
+	(`oVms.fill(1)`): `isPeak`'s tie-break then keeps exactly one plateau record, on the lowest
+	cell index - the cell the click test is already pointed at.
+
+## tests/gui.js is one async scope: grep before declaring any new identifier (0.6.4, 2026-10-03)
+
+	Every page scenario shares a single top-level async function, so a new block's `const rows`
+	or `lEl` collides with a *later* block's and the whole file dies at parse time, pointing the
+	error at whoever declared second. Prefix block locals (`ledgerRows`, `lgEl`) and search the
+	file before naming anything; the stub-DOM helper names (`el`, `clickAt`, `projectCell`) are
+	battlegrounds.
+
+## an overlay you can click is a cache, not a second projection (0.6.4, 2026-10-03)
+
+	The markers canvas stays `pointer-events: none` (it must not eat survey clicks); selection is
+	therefore resolved in the map click handler. What makes it exact is that the painter records
+	the projected (x, y) of every marker it actually drew - including the wrap mirrors being a
+	visual-only fold - and the hit test re-derives the click into the same bitmap space, so the
+	tolerance lives in one coordinate system and a resized or panned canvas cannot desynchronise
+	two independently projected positions. The stub counts `fill()`/`stroke()` calls, so "the pin
+	drew its ring" is a counter assertion, not a pixel read.

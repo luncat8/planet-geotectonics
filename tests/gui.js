@@ -130,6 +130,12 @@ assert.deepEqual(options(indexHtml, 'core-depth'), ['500', '2000', '5000', 'base
 const markerCss = rule('#markers');
 assert.ok(/position: absolute/.test(markerCss) && /pointer-events: none/.test(markerCss),
 	'the marker overlay tracks the map without stealing local clicks');
+assert.deepEqual(options(indexHtml, 'ledger-sort'), ['found', 'size', 'contained', 'depth', 'confidence', 'kind'],
+	'the discovery list sorts over the six readable keys of the ledger');
+assert.match(indexHtml, /id="ledger-list" class="ledger-list" hidden/, 'the discovery list ships empty and hidden');
+const ledgerCss = rule('.ledger-list');
+assert.ok(/max-height: 16em/.test(ledgerCss) && /overflow: auto/.test(ledgerCss),
+	'the ledger list scrolls inside its column instead of expanding the page');
 // The settings live in two named groups (index.html), and the slow-on-CPU warning has its
 // amber rule: the test realm's DOM stub reads classes but not styles, so the stylesheet is
 // pinned the way the strip rules are.
@@ -616,7 +622,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.match(rEl('campaign-progress').textContent, /partial campaign/);
 	assert.equal(rEl('play').disabled, false, 'Play unlocks after cancellation');
 	assert.equal(rEl('export-discovered').disabled, false, 'a partial campaign can be exported');
-	assert.equal(rEl('markers').hidden, false, 'the partial campaign is the first action that reveals the map overlay');
+	assert.equal(rEl('markers').hidden, false, 'the campaign view takes the overlay over from the ledger layer');
 	assert.match(rEl('prospect').textContent, /viable deposits 1/,
 		'the campaign summary only counts the ledger-filtered discovery');
 	assert.match(rEl('prospect').textContent, /markers filled viable 1\/1 · hollow sub-economic 0\/0/,
@@ -663,6 +669,84 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.match(rEl('campaign-progress').textContent, /partial campaign/);
 	assert.match(regionalPage.copy(), /campaign 5\.1 Myr/,
 		'the capture records regional counts only after a campaign has run');
+
+	// The session ledger is a first-class map view: a local find gets a marker and a list row
+	// with no campaign at all; marker, row and ring are one selection; the list sorts.
+	let ledgerWorldX;
+	const ledgerPageX = loadPage('?inst=d5k', function (world) {
+		ledgerWorldX = world;
+		for (const field of globalThis.Deposits.FIELDS) world[field].fill(0);
+		world.oPla[0] = 0.95;
+		assert.ok(globalThis.Deposits.at(world, 'placer', 0), 'the ledger fixture hosts a real placer at cell 0');
+	});
+	const lgEl = ledgerPageX.el;
+	// One coordinate system for click and marker: the projected pixel of the cell's own
+	// unit direction, floored to its centre - exactly where the painter will put the diamond.
+	const projectCell = (cell) => {
+		const xy = new Float64Array(2), pos = ledgerWorldX.grid.pos;
+		globalThis.MapView.project(xy, pos[cell * 3], pos[cell * 3 + 1], pos[cell * 3 + 2],
+			[0, 0, 0, 1], 1024, 512);
+		return [Math.floor(xy[0]) + 0.5, Math.floor(xy[1]) + 0.5];
+	};
+	const clickAt = (x, y) => lgEl('map').dispatch('click', { clientX: x, clientY: y, currentTarget: lgEl('map') });
+	const at0 = projectCell(0);
+	clickAt(at0[0], at0[1]);
+	assert.match(lgEl('prospect').textContent, /found deposits \(1\)/, 'the fixture cell surveys one discovery');
+	assert.match(lgEl('prospect').textContent, /Cu? ?[\d.]+-[\d.]+g\/t \(field band, assay pending\)|[\d.]+-[\d.]+% \(field band, assay pending\)|[A-Za-z]+ [\d.]+-[\d.]+[^ ]* \(field band, assay pending\)/,
+		'the drilled grade on the map-less ledger is printed as its field band');
+	assert.equal(lgEl('markers').hidden, false, 'a local discovery shows on the map with no campaign');
+	assert.ok(lgEl('markers').fills > 0, 'the viable placer is drawn filled');
+	assert.equal(lgEl('ledger-count').textContent, '1 found', 'the ledger count names the session discovery');
+	const ledgerRows = lgEl('ledger-list');
+	assert.equal(ledgerRows.hidden, false, 'the discovery list opens with the first find');
+	assert.equal(ledgerRows.children.length, 1, 'one row per ledger discovery');
+	assert.match(ledgerRows.children[0].textContent, /^#[0-9a-f]{8} · placer .* · measured · viable/, 'the row reads like a record line');
+	clickAt(at0[0], at0[1]);
+	assert.match(lgEl('prospect').textContent, /selected deposit #[0-9a-f]{8}/, 'the second click lands on the marker and pins the record');
+	clickAt(at0[0], at0[1]);
+	assert.ok(!/selected deposit/.test(lgEl('prospect').textContent), 'a third click on the same marker releases the pin');
+	ledgerRows.children[0].click();
+	assert.match(lgEl('prospect').textContent, /selected deposit #/, 'a ledger row pins the same record as its marker');
+	assert.ok(ledgerRows.children[0].classList.contains('sel'), 'the row marks the pinned deposit');
+	assert.ok(lgEl('markers').strokes > 0, 'the pinned deposit gets a ring on the map');
+	lgEl('deposit-kind').value = 'vms';
+	lgEl('deposit-kind').dispatch('change');
+	assert.equal(lgEl('markers').hidden, true, 'a kind with no finds hides the ledger overlay');
+	assert.equal(ledgerRows.hidden, true, 'and empties the list behind the same filter');
+	assert.equal(lgEl('ledger-count').textContent, '0 found');
+	lgEl('deposit-kind').value = 'all';
+	lgEl('deposit-kind').dispatch('change');
+	assert.equal(lgEl('markers').hidden, false, 'clearing the filter restores both views');
+	ledgerRows.children[0].click();
+	assert.ok(!/selected deposit/.test(lgEl('prospect').textContent), 'a second row click releases the pin');
+	// A second find far away grows the same views; the sort reorders rows deterministically.
+	// A second kind on the same cell joins the same views: the blur is a per-column mean, so
+	// the whole-column fill is what lifts vms potential over the deposit threshold at all.
+	ledgerWorldX.oVms.fill(1);
+	const recV = globalThis.Deposits.at(ledgerWorldX, 'vms', 0);
+	assert.ok(recV, 'the fixture cell hosts a second kind once the field is real');
+	const countsBefore = { f: lgEl('markers').fills, s: lgEl('markers').strokes };
+	clickAt(at0[0], at0[1]);
+	assert.match(lgEl('prospect').textContent, /found deposits \(2\)/, 'the survey reports both kinds on one cell');
+	assert.equal(lgEl('ledger-count').textContent, '2 found', 'the ledger counts both session discoveries');
+	assert.equal(ledgerRows.children.length, 2, 'the list grew with the ledger');
+	assert.ok(lgEl('markers').fills + lgEl('markers').strokes > countsBefore.f + countsBefore.s,
+		'the second record reaches the map layer too');
+	const recP = globalThis.Deposits.at(ledgerWorldX, 'placer', 0);
+	lgEl('ledger-sort').value = 'kind';
+	lgEl('ledger-sort').dispatch('change');
+	assert.match(ledgerRows.children[0].textContent, /· vms /, 'the kind sort puts the lower-indexed kind first');
+	assert.match(ledgerRows.children[1].textContent, /· placer /);
+	lgEl('ledger-sort').value = 'size';
+	lgEl('ledger-sort').dispatch('change');
+	const smallId = recP.size === recV.size ? recP : recP.size < recV.size ? recP : recV;
+	assert.ok(ledgerRows.children[0].textContent.startsWith('#' + smallId.id),
+		'ascending size leads with the smaller record, a tie keeps found order');
+	const sizeFirst = ledgerRows.children[0].textContent;
+	lgEl('ledger-sort-dir').click();
+	assert.notEqual(ledgerRows.children[0].textContent, sizeFirst, 'the direction toggle flips the row order');
+	assert.equal(lgEl('ledger-sort-dir').textContent, '↑ high first');
+
 
 	// On the GPU path, a campaign waits for an already-submitted play batch, then reads the
 	// mirror once before it builds the catalogue. It starts paused from that same snapshot.
