@@ -265,7 +265,7 @@ const world = (level, seed) => {
 // module the same way js/ui.js will, through the global.
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'deposits', 'instruments', 'sim', 'render'];
+	'extract', 'deposits', 'core', 'instruments', 'sim', 'render'];
 const indexHtml = read('index.html');
 function loadPage(search) {
 	const api = makeDom(indexHtml);

@@ -184,6 +184,79 @@ assert.notEqual(rebased.found[0].entry.id, oldId, 'the rewritten anchor gets its
 assert.equal(movedLedger.found.length, 1, 'reassociation does not duplicate the session record');
 assert.equal(rebased.found[0].entry.confidence, confidence, 'confidence carries across a nearby rebase');
 
+// Regional discovery is explicit, snapshot-bound, ordered, and work-capped. The same chosen
+// instrument and stable state produce the same ledger as surveying each cell locally.
+const campaignWorld = site('oVms', 1);
+const campaignCatalogue = Deposits.build(campaignWorld);
+const campaignLedger = selectLedger(campaignWorld);
+assert.equal(Instruments.startCampaign(campaignWorld, campaignCatalogue, [], campaignLedger).ok, false,
+	'an empty instrument set cannot start a regional campaign');
+campaignWorld.t += 0.01;
+assert.equal(Instruments.startCampaign(campaignWorld, campaignCatalogue, ['d5k'], campaignLedger).ok, false,
+	'a campaign cannot accept a catalogue from a different exact time inside the same rounded epoch');
+campaignWorld.t -= 0.01;
+const campaign = Instruments.startCampaign(campaignWorld, campaignCatalogue, ['d5k'], campaignLedger);
+assert.equal(campaign.ok, true);
+assert.equal(campaign.total, grid.V);
+const catalogueBuild = Deposits.build;
+Deposits.build = function () { throw new Error('campaign chunks must reuse the start snapshot'); };
+try {
+	Instruments.campaignStep(campaign, 1000, Infinity);
+	assert.equal(campaign.cursor, 256, 'each chunk is hard-capped at 256 cells');
+	assert.equal(campaign.running, true);
+	Instruments.campaignStep(campaign, 256, Infinity);
+	assert.equal(campaign.cursor, 512);
+	Instruments.campaignStep(campaign, 256, Infinity);
+} finally {
+	Deposits.build = catalogueBuild;
+}
+assert.equal(campaign.done, true);
+assert.equal(campaign.cursor, grid.V);
+assert.equal(campaign.ledger.cellsN, grid.V);
+assert.deepEqual(Array.from(campaign.ledger.cells), Array.from({ length: grid.V }, (_, i) => i),
+	'the campaign walks cells in ascending order');
+const localCampaignLedger = selectLedger(campaignWorld);
+for (let c = 0; c < grid.V; c++) Instruments.survey(campaignWorld, c, ['d5k'], localCampaignLedger);
+assert.deepEqual(campaign.ledger.found.map((entry) => [entry.id, entry.confidence]),
+	localCampaignLedger.found.map((entry) => [entry.id, entry.confidence]),
+	'regional and local surveys use identical discovery and confidence rules');
+assert.equal(campaign.found, campaignLedger.found.length);
+assert.equal(campaign.viable, campaignLedger.found.filter((entry) => entry.record.viable).length);
+
+const budgetJob = Instruments.startCampaign(campaignWorld, campaignCatalogue, ['obs'], selectLedger(campaignWorld));
+Instruments.campaignStep(budgetJob, 256, 0);
+assert.equal(budgetJob.cursor, 8, 'the time budget is checked after each group of eight cells');
+const partialJob = Instruments.startCampaign(campaignWorld, campaignCatalogue, ['d5k'], selectLedger(campaignWorld));
+Instruments.campaignStep(partialJob, 8, Infinity);
+const partialCount = partialJob.ledger.found.length;
+Instruments.cancelCampaign(partialJob);
+assert.equal(partialJob.cancelled, true);
+assert.equal(partialJob.ledger.found.length, partialCount, 'cancellation preserves the valid partial ledger');
+const changedJob = Instruments.startCampaign(campaignWorld, campaignCatalogue, ['d5k'], selectLedger(campaignWorld));
+campaignWorld.frame++;
+Instruments.campaignStep(changedJob, 8, Infinity);
+assert.equal(changedJob.invalidated, true, 'a changed frame cannot be mixed into the campaign snapshot');
+campaignWorld.frame--;
+
+// Production frame-budget calibration at L5 with the plan's 1.25 ms slice. Warm the JIT,
+// then report the median wall time for real bounded chunks (time is polled every eight cells).
+const budgetWorld = new State(new Grid(5, 7).build(), 7);
+Sim.raster(budgetWorld);
+const budgetCatalogue = Deposits.build(budgetWorld);
+const measuredJob = Instruments.startCampaign(budgetWorld, budgetCatalogue, ['d500', 'geo', 'mag'],
+	new Instruments.Ledger(budgetWorld.grid.V));
+for (let i = 0; i < 4; i++) Instruments.campaignStep(measuredJob, 256, 1.25);
+const chunkMs = [];
+for (let i = 0; i < 12; i++) {
+	const started = performance.now();
+	Instruments.campaignStep(measuredJob, 256, 1.25);
+	chunkMs.push(performance.now() - started);
+}
+chunkMs.sort((a, b) => a - b);
+const medianChunkMs = (chunkMs[5] + chunkMs[6]) * 0.5;
+assert.ok(medianChunkMs < 1.5, 'measured L5 campaign chunk median stays under 1.5 ms: ' + medianChunkMs.toFixed(3));
+console.log('campaign L5 d500+geo+mag chunk median ' + medianChunkMs.toFixed(2) + ' ms (1.25 ms target, 12 samples)');
+
 // Coverage is an OR of tools on one unique cell, and hover has no path into this module.
 assert.equal(remoteLedger.cellsN, 1);
 assert.equal(remoteLedger.coverage[0], (1 << 1) | (1 << 2));

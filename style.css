@@ -21,6 +21,10 @@ p { font-size: 14px; line-height: 1.7; color: #aab9bd; margin: 10px 0 0; }
 canvas { display: block; cursor: grab; max-height: 60vh; touch-action: none; user-select: none; }
 canvas[hidden] { display: none; }
 canvas:active { cursor: grabbing; }
+.map-stage { position: relative; width: 100%; max-height: 60vh; }
+.map-stage > canvas:not(#markers) { width: 100%; height: auto; }
+#markers { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; max-height: none;
+	pointer-events: none; cursor: default; }
 .perf { position: relative; color: #80d7b9;
 	font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 
@@ -55,6 +59,13 @@ canvas:active { cursor: grabbing; }
 #follow { accent-color: #9bdfba; width: auto; min-height: 0; }
 #prospect-tools { flex: 1 1 100%; }
 .prospect-hint { flex: 1 1 100%; color: #788c99; font-size: 11px; }
+.core-controls, .campaign-controls { display: flex; flex: 1 1 100%; flex-wrap: wrap; align-items: end; gap: 8px; }
+.core-controls label { align-items: flex-start; }
+.core-controls select { min-width: 130px; }
+.campaign-controls label { align-items: flex-start; }
+.campaign-controls select { min-width: 130px; }
+.campaign-progress { flex: 1 1 100%; color: #aab9bd; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-variant-numeric: tabular-nums; }
 .inspectors { display: grid; gap: 12px; min-width: 0; }
 .inspectors > div { min-width: 0; }
 #prospect { width: 100%; max-width: 100%; margin: 10px 0 0; padding: 10px; max-height: 24em; overflow: auto; border: 1px solid #2b3540; border-radius: 6px;

@@ -52,6 +52,13 @@
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var prospectPanel = document.getElementById('prospect'), prospectLedger = null, prospectClickSerial = 0;
+	var campaignButton = document.getElementById('campaign'), campaignProgress = document.getElementById('campaign-progress');
+	var campaignKind = document.getElementById('deposit-kind'), campaignExport = document.getElementById('export-discovered');
+	var coreDepth = document.getElementById('core-depth'), coreExport = document.getElementById('export-core');
+	var lastCoreState = null, lastCoreCell = -1, lastCoreSection = null, lastInstrumentText = '';
+	var markerCanvas = document.getElementById('markers'), markerContext = markerCanvas.getContext('2d');
+	var campaignPreparing = false, campaignRequest = 0, campaignJob = null, campaignView = null, campaignReadback = null;
+	var campaignRefreshArmed = false, campaignMarkersDirty = false;
 	var instrumentInputs = [];
 	for (var inst = 0; inst < Instruments.LIST.length; inst++)
 		instrumentInputs.push(document.getElementById('inst-' + Instruments.LIST[inst].id));
@@ -278,6 +285,7 @@
 		// The engine's own canvas takes the map slot back (bootEngine keeps it that way).
 		(gpu.on && gpu.ready ? gpuCanvas : canvas).hidden = false;
 		layerGroup.classList.remove('off');
+		paintCampaignMarkers();
 	}
 	// The session's init options, read when the device is finally in hand - a mesh or
 	// detail change made while the adapter promise was in flight lands on the session
@@ -307,6 +315,7 @@
 				r3d.exag = v3dDisp;
 				v3d.r3d = r3d; v3d.on = true;
 				map3d.hidden = false; canvas.hidden = true; gpuCanvas.hidden = true;
+				markerCanvas.hidden = true;
 				layerGroup.classList.add('off');
 				probe.textContent = '3D on · ' + (v3dMesh === 'grid' ? 'heightmap ' : 'icosphere ') + v3dDetail
 					+ ' · ' + r3d.vCount.toLocaleString() + ' vertices · drag orbits, wheel zooms.';
@@ -425,8 +434,161 @@
 		return ids;
 	}
 	function prospectCapture() {
-		var ids = selectedInstrumentIds();
-		return ids.length ? 'prospect inst ' + ids.join(',') : '';
+		var ids = selectedInstrumentIds(), line = ids.length ? 'prospect inst ' + ids.join(',') : '';
+		if (coreDepth.value !== '5000') {
+			if (line) line += ' · ';
+			line += 'core ' + (coreDepth.value === 'basement' ? 'basement' : campaignCount(+coreDepth.value) + 'm');
+		}
+		if (campaignView && campaignView.summary) {
+			if (line) line += ' · ';
+			line += 'campaign ' + campaignView.epochMyr.toFixed(1) + ' Myr · '
+				+ campaignView.summary.records + ' found · ' + campaignView.summary.viable + ' viable'
+				+ (campaignView.partial ? ' · partial' : '');
+		}
+		return line;
+	}
+	function campaignCount(value) { return Math.floor(value).toLocaleString('en-US'); }
+	function massText(value) {
+		var amount = value, unit = 't';
+		if (amount >= 1e9) { amount /= 1e9; unit = 'Gt'; }
+		else if (amount >= 1e6) { amount /= 1e6; unit = 'Mt'; }
+		else if (amount >= 1e3) { amount /= 1e3; unit = 'kt'; }
+		return Number(amount.toPrecision(3)).toLocaleString('en-US') + ' ' + unit;
+	}
+	function campaignContained(record) {
+		var parts = [];
+		for (var metal in record.contained) parts.push(metal + ' ' + massText(record.contained[metal]));
+		return parts.join(' ');
+	}
+	function sampleMarkerClass(catalogue, ledger, kind, viable, cap) {
+		var groups = [], quotas = [], fractions = [], total = 0, k, i;
+		for (k = 0; k < Deposits.KINDS.length; k++) groups.push([]);
+		for (i = 0; i < catalogue.records.length; i++) {
+			var record = catalogue.records[i];
+			if (!ledger.byId[record.id] || record.viable !== viable || (kind !== 'all' && record.kind !== kind)) continue;
+			groups[record.kindIndex].push(record); total++;
+		}
+		var out = [];
+		if (total <= cap) {
+			for (k = 0; k < groups.length; k++) out = out.concat(groups[k]);
+		} else {
+			var allocated = 0;
+			for (k = 0; k < groups.length; k++) {
+				var ideal = cap * groups[k].length / total;
+				quotas[k] = Math.floor(ideal); fractions[k] = ideal - quotas[k]; allocated += quotas[k];
+			}
+			while (allocated < cap) {
+				var best = -1, fraction = -1;
+				for (k = 0; k < groups.length; k++) {
+					if (quotas[k] < groups[k].length && fractions[k] > fraction) { best = k; fraction = fractions[k]; }
+				}
+				if (best < 0) break;
+				quotas[best]++; fractions[best] = -1; allocated++;
+			}
+			for (k = 0; k < groups.length; k++) {
+				var n = groups[k].length, take = quotas[k];
+				for (i = 0; i < take; i++) out.push(groups[k][Math.min(n - 1, Math.floor((i + 0.5) * n / take))]);
+			}
+		}
+		out.sort(function (a, b) { return a.cell !== b.cell ? a.cell - b.cell : a.kindIndex - b.kindIndex; });
+		return { records: out, total: total };
+	}
+	function campaignSummaryText(view) {
+		var summary = view.summary, totals = [], key;
+		for (key in summary.contained) totals.push(key + ' ' + massText(summary.contained[key]));
+		var text = 'viable deposits ' + campaignCount(summary.viable) + ' · contained in the ground\n  '
+			+ (totals.length ? totals.join('   ') : 'no viable contained metal in the ledger');
+		text += '\ndiscovered deposits ' + campaignCount(summary.records) + ' · sub-economic '
+			+ campaignCount(summary.records - summary.viable) + ' · kind ' + summary.kind;
+		text += '\nlargest viable by contained metal';
+		var listed = 0;
+		for (var k = 0; k < summary.byKind.length; k++) {
+			var group = summary.byKind[k];
+			if (!group.top.length) continue;
+			for (var r = 0; r < group.top.length; r++) {
+				var record = group.top[r], entry = prospectLedger.byId[record.id];
+				text += '\n  #' + record.id + '  ' + record.kind + ' · '
+					+ (entry ? Instruments.confidence[entry.confidence] + ' · ' : '')
+					+ campaignContained(record) + '   ' + Number(record.size.toPrecision(3)).toLocaleString('en-US')
+					+ ' ' + record.unit + ' · ' + record.variant + ' · ' + record.host + ', '
+					+ record.ageMyr + ' Ma';
+				listed++;
+			}
+		}
+		if (!listed) text += '\n  no viable discoveries for this filter';
+		text += '\nepoch ' + view.epochMyr.toFixed(1) + ' Myr · surveyed '
+			+ campaignCount(prospectLedger.cellsN) + ' cells · instruments ' + view.instruments.join(',');
+		text += '\nmarkers filled viable ' + campaignCount(view.viableMarkers.records.length) + '/'
+			+ campaignCount(view.viableMarkers.total) + ' · hollow sub-economic '
+			+ campaignCount(view.nonviableMarkers.records.length) + '/'
+			+ campaignCount(view.nonviableMarkers.total);
+		if (view.stale) text += '\nSTALE snapshot · refresh to survey the current world';
+		if (view.partial) text += '\npartial campaign · the valid surveyed ledger is retained';
+		return text;
+	}
+	function campaignProgressText() {
+		if (campaignPreparing) return 'Preparing a coherent snapshot · playback is paused. Click Cancel setup to stop.';
+		if (campaignJob && campaignJob.running) {
+			return 'campaign ' + Math.floor(100 * campaignJob.cursor / campaignJob.total) + '% · '
+				+ campaignCount(campaignJob.cursor) + ' cells · ' + campaignCount(campaignJob.found)
+				+ ' found · ' + campaignCount(campaignJob.viable) + ' viable';
+		}
+		if (!campaignView) return 'No regional campaign. Local clicks survey only the selected cell footprint.';
+		var line = (campaignView.partial ? 'partial campaign' : 'campaign complete') + ' · '
+			+ campaignCount(campaignView.summary.records) + ' found · '
+			+ campaignCount(campaignView.summary.viable) + ' viable · snapshot '
+			+ campaignView.epochMyr.toFixed(1) + ' Myr';
+		if (campaignView.stale) line = 'stale — press again to refresh · ' + line;
+		else if (campaignRefreshArmed) line = 'press again to refresh · ' + line;
+		return line;
+	}
+	function refreshLastCore() {
+		if (lastCoreState !== state || lastCoreCell < 0) return;
+		try {
+			lastCoreSection = Core.section(state, lastCoreCell, coreDepth.value);
+			coreExport.disabled = !lastCoreSection;
+			prospectPanel.textContent = (lastInstrumentText ? lastInstrumentText + '\n\n' : '') + Core.text(lastCoreSection);
+		} catch (error) {
+			lastCoreSection = null; coreExport.disabled = true;
+			prospectPanel.textContent = 'Core failed: ' + error.message;
+		}
+	}
+	function paintCampaignControls() {
+		campaignButton.textContent = campaignPreparing ? 'Cancel setup'
+			: campaignJob && campaignJob.running ? 'Cancel campaign'
+			: campaignView && campaignView.stale ? 'Refresh stale campaign'
+			: 'Survey all cells · build viable map';
+		campaignProgress.textContent = campaignProgressText();
+		campaignExport.disabled = !campaignView;
+	}
+	function refreshCampaignView(preserveReport) {
+		if (!campaignView) { markerCanvas.hidden = true; campaignExport.disabled = true; return; }
+		var kind = campaignKind.value || 'all';
+		campaignView.summary = Deposits.summary(state, {
+			catalogue: campaignView.catalogue, ledger: prospectLedger, kind: kind
+		});
+		campaignView.viableMarkers = sampleMarkerClass(campaignView.catalogue, prospectLedger, kind, true, 1536);
+		campaignView.nonviableMarkers = sampleMarkerClass(campaignView.catalogue, prospectLedger, kind, false, 512);
+		campaignView.stale = !!campaignView.invalidated || Deposits.stale(state, campaignView.catalogue);
+		campaignExport.disabled = false;
+		if (!preserveReport) prospectPanel.textContent = campaignSummaryText(campaignView);
+		paintCampaignControls();
+		campaignMarkersDirty = true;
+		paintCampaignMarkers();
+	}
+	var kindPrefill = query.get('depkind');
+	if (kindPrefill !== null) {
+		var kindName = kindPrefill.toLowerCase();
+		for (var ki = 0; ki < campaignKind.options.length; ki++)
+			if (campaignKind.options[ki].value === kindName) campaignKind.value = kindName;
+	}
+	var corePrefill = query.get('core');
+	if (corePrefill !== null) {
+		var coreValue = corePrefill.toLowerCase(), coreAliases = {
+			'500m': '500', '500': '500', '2k': '2000', '2km': '2000', '2000': '2000',
+			'5k': '5000', '5km': '5000', '5000': '5000', 'basement': 'basement', 'to basement': 'basement'
+		};
+		if (coreAliases[coreValue]) coreDepth.value = coreAliases[coreValue];
 	}
 	var instPrefill = query.get('inst');
 	if (instPrefill !== null) {
@@ -595,10 +757,14 @@
 	// the frame loop is already paused and `busy` refuses a new Step click, so nothing else can
 	// start in between.
 	function whenGpuIdle(done) {
-		var inflight = gpu.pending;
+		var inflight = gpu.pending, readback = campaignReadback, waits = [];
 		gpu.pending = null;
-		if (!inflight) { done(); return; }
-		inflight.then(done, done);
+		if (inflight) waits.push(inflight);
+		if (readback && readback !== inflight) waits.push(readback);
+		if (!waits.length) { done(); return; }
+		Promise.all(waits.map(function (promise) {
+			return Promise.resolve(promise).then(function () {}, function () {});
+		})).then(done);
 	}
 	// The canvas blit rides a drained queue, never a heavy encoder: the spec vends a
 	// fresh transparent-black drawing buffer on each getCurrentTexture after the
@@ -664,9 +830,172 @@
 		});
 	}
 	function rebuildWhenIdle(level, seed, start, after) {
+		discardCampaignForRebuild();
 		setPlaying(false); runTarget = Infinity;
 		whenGpuIdle(function () { rebuildWorld(level, seed, start, after); });
 	}
+	function paintCampaignMarkers() {
+		if (!campaignView || campaignPreparing || (campaignJob && campaignJob.running) || v3d.on) {
+			markerCanvas.hidden = true;
+			return;
+		}
+		var base = gpu.on && gpu.ready ? gpuCanvas : canvas;
+		var width = base.width || grid.lookupW, height = base.height || grid.lookupH;
+		if (markerCanvas.width !== width) markerCanvas.width = width;
+		if (markerCanvas.height !== height) markerCanvas.height = height;
+		markerCanvas.hidden = false;
+		markerContext.clearRect(0, 0, width, height);
+		var pos = grid.pos, projected = campaignProject || (campaignProject = new Float64Array(2));
+		function diamond(record, viable) {
+			var b = record.cell * 3;
+			MapView.project(projected, pos[b], pos[b + 1], pos[b + 2], viewQ, width, height);
+			var x = projected[0], y = projected[1], radius = 3.5;
+			markerContext.beginPath();
+			markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+			markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+			if (viable) { markerContext.fillStyle = '#8ce1b2'; markerContext.fill(); }
+			else { markerContext.strokeStyle = '#f2c46d'; markerContext.lineWidth = 1.5; markerContext.stroke(); }
+			if (x < radius) {
+				markerContext.save(); markerContext.translate(width, 0);
+				markerContext.beginPath(); markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+				markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+				if (viable) markerContext.fill(); else markerContext.stroke(); markerContext.restore();
+			} else if (x > width - radius) {
+				markerContext.save(); markerContext.translate(-width, 0);
+				markerContext.beginPath(); markerContext.moveTo(x, y - radius); markerContext.lineTo(x + radius, y);
+				markerContext.lineTo(x, y + radius); markerContext.lineTo(x - radius, y); markerContext.closePath();
+				if (viable) markerContext.fill(); else markerContext.stroke(); markerContext.restore();
+			}
+		}
+		var nonviable = campaignView.nonviableMarkers.records, viable = campaignView.viableMarkers.records;
+		for (var i = 0; i < nonviable.length; i++) diamond(nonviable[i], false);
+		for (var j = 0; j < viable.length; j++) diamond(viable[j], true);
+		campaignMarkersDirty = false;
+	}
+	var campaignProject = null;
+	function noteCampaignSurvey(result) {
+		if (!campaignJob || !campaignJob.running || !result || !result.found) return;
+		var catalogue = campaignJob.catalogue;
+		for (var i = 0; i < result.found.length; i++) {
+			var record = result.found[i].record;
+			if (campaignJob.seen[record.id]) continue;
+			for (var at = catalogue.cellStart[record.cell]; at < catalogue.cellStart[record.cell + 1]; at++) {
+				var snapshotRecord = catalogue.records[at];
+				if (snapshotRecord.id !== record.id) continue;
+				campaignJob.seen[record.id] = 1; campaignJob.found++;
+				if (snapshotRecord.viable) campaignJob.viable++;
+				break;
+			}
+		}
+		paintCampaignControls();
+	}
+	function finalizeCampaign(job) {
+		if (!job || state !== job.state) return;
+		campaignView = {
+			catalogue: job.catalogue, instruments: job.instruments.slice(0), epochMyr: job.epochMyr,
+			frame: job.frame, time: job.time, partial: !!(job.cancelled || job.invalidated || !job.done),
+			invalidated: !!job.invalidated
+		};
+		campaignJob = null; campaignPreparing = false; campaignRefreshArmed = false;
+		setPlaying(false);
+		refreshCampaignView();
+	}
+	function discardCampaignForRebuild() {
+		campaignRequest++;
+		if (campaignJob && campaignJob.running) Instruments.cancelCampaign(campaignJob);
+		campaignJob = null; campaignPreparing = false; campaignView = null;
+		campaignRefreshArmed = false; campaignMarkersDirty = false;
+		lastCoreState = null; lastCoreCell = -1; lastCoreSection = null; lastInstrumentText = '';
+		coreExport.disabled = true;
+		markerCanvas.hidden = true; markerContext.clearRect(0, 0, markerCanvas.width, markerCanvas.height);
+		prospectPanel.textContent = prospectIntro;
+		paintCampaignControls();
+	}
+	function failCampaignSetup(error, token) {
+		if (token !== campaignRequest) return;
+		campaignPreparing = false;
+		paintCampaignControls();
+		campaignProgress.textContent = 'Campaign could not start: ' + error.message;
+		if (campaignView) paintCampaignMarkers();
+		setPlaying(false);
+	}
+	function beginCampaign(world, selected, token) {
+		if (token !== campaignRequest || state !== world) return;
+		try {
+			var catalogue = Deposits.build(world);
+			var job = Instruments.startCampaign(world, catalogue, selected, prospectLedger);
+			if (!job.ok) { failCampaignSetup(new Error(job.reason), token); return; }
+			campaignView = null; campaignJob = job; campaignPreparing = false;
+			campaignRefreshArmed = false; markerCanvas.hidden = true; campaignExport.disabled = true;
+			setPlaying(false); paintCampaignControls();
+		} catch (error) { failCampaignSetup(error, token); }
+	}
+	function startRegionalCampaign() {
+		if (campaignPreparing) {
+			campaignRequest++; campaignPreparing = false; campaignRefreshArmed = false;
+			paintCampaignControls(); setPlaying(false);
+			if (campaignView) { campaignMarkersDirty = true; paintCampaignMarkers(); }
+			return;
+		}
+		if (campaignJob && campaignJob.running) {
+			var cancelled = campaignJob;
+			Instruments.cancelCampaign(cancelled);
+			finalizeCampaign(cancelled);
+			return;
+		}
+		var selected = selectedInstrumentIds();
+		if (!selected.length) {
+			campaignProgress.textContent = 'No instruments selected. Choose at least one, then start the regional campaign.';
+			return;
+		}
+		if (campaignView && Deposits.stale(state, campaignView.catalogue) && !campaignRefreshArmed) {
+			campaignRefreshArmed = true;
+			campaignProgress.textContent = 'stale — press again to refresh; the new campaign pauses playback.';
+			campaignButton.textContent = 'Refresh stale campaign';
+			return;
+		}
+		campaignRefreshArmed = false;
+		var world = state, token = ++campaignRequest;
+		campaignPreparing = true; markerCanvas.hidden = true;
+		setPlaying(false); runTarget = Infinity; paintCampaignControls();
+		if (gpu.on && gpu.ready) {
+			whenGpuIdle(function () {
+				if (token !== campaignRequest || state !== world) return;
+				var readback;
+				try { readback = Promise.resolve(GpuSim.download(world)); }
+				catch (error) { failCampaignSetup(error, token); return; }
+				campaignReadback = readback;
+				readback.then(function () {
+					if (campaignReadback === readback) campaignReadback = null;
+					beginCampaign(world, selected, token);
+				}, function (error) {
+					if (campaignReadback === readback) campaignReadback = null;
+					failCampaignSetup(error, token);
+				});
+			});
+		} else beginCampaign(world, selected, token);
+	}
+	campaignButton.addEventListener('click', startRegionalCampaign);
+	campaignKind.addEventListener('change', function () { if (campaignView) refreshCampaignView(); });
+	coreDepth.addEventListener('change', refreshLastCore);
+	coreExport.addEventListener('click', function () {
+		if (!lastCoreSection) return;
+		var blob = new Blob([Core.json(lastCoreSection)], { type: 'application/json' });
+		var link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+		link.download = 'core-cell-' + lastCoreCell + '-' + (coreDepth.value === 'basement' ? 'basement' : coreDepth.value + 'm') + '.json';
+		link.click(); URL.revokeObjectURL(link.href);
+	});
+	campaignExport.addEventListener('click', function () {
+		if (!campaignView) return;
+		var json = Deposits.json(state, {
+			catalogue: campaignView.catalogue, ledger: prospectLedger, kind: campaignKind.value || 'all'
+		});
+		var blob = new Blob([json], { type: 'application/json' }), link = document.createElement('a');
+		link.href = URL.createObjectURL(blob);
+		link.download = 'discovered-deposits-' + Math.round(campaignView.epochMyr) + 'myr.json';
+		link.click(); URL.revokeObjectURL(link.href);
+	});
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
@@ -730,6 +1059,7 @@
 	var switching = false;
 	engineInput.addEventListener('change', function () {
 		if (switching) { engineInput.value = gpu.on && gpu.ready ? 'gpu' : 'cpu'; return; }
+		if (campaignLocked()) startRegionalCampaign();
 		var wasGpu = gpu.on && gpu.ready;
 		switching = true; gpu.ready = false;
 		Perf.reset();
@@ -747,12 +1077,18 @@
 		Params.eventCadence = +cadenceInput.value;
 	});
 	speedInput.addEventListener('change', paintSlow);
+	function campaignLocked() { return campaignPreparing || !!(campaignJob && campaignJob.running); }
 	function setPlaying(value) {
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
-		play.setAttribute('aria-pressed', String(playing)); step.disabled = playing;
+		play.setAttribute('aria-pressed', String(playing));
+		play.disabled = campaignLocked(); step.disabled = playing || campaignLocked();
 	}
-	play.addEventListener('click', function () { runTarget = Infinity; setPlaying(!playing); });
+	play.addEventListener('click', function () {
+		if (campaignLocked()) return;
+		runTarget = Infinity; setPlaying(!playing);
+	});
 	step.addEventListener('click', function () {
+		if (campaignLocked()) return;
 		runTarget = Infinity;
 		if (gpu.on && gpu.ready) {
 			if (gpu.busy) return;
@@ -778,6 +1114,7 @@
 		}
 	});
 	runToStart.addEventListener('click', function () {
+		if (campaignLocked()) return;
 		if (!runToInput.checkValidity()) { runToInput.reportValidity(); return; }
 		runTarget = +runToInput.value;
 		if (runTarget <= state.t) { probe.textContent = 'Run-to target must be later than the current time.'; return; }
@@ -950,13 +1287,18 @@
 	}
 	function inspectCell(cell, selected) {
 		probeReport(cell);
-		if (!selected.length) return;
 		try {
-			var result = Instruments.survey(state, cell, selected, prospectLedger);
-			prospectPanel.textContent = Instruments.report(result);
+			if (selected.length) {
+				var result = Instruments.survey(state, cell, selected, prospectLedger);
+				noteCampaignSurvey(result);
+				lastInstrumentText = Instruments.report(result);
+			} else lastInstrumentText = 'No instruments selected; this click logs a core without adding survey coverage.';
+			lastCoreCell = cell; lastCoreState = state;
+			refreshLastCore();
+			if (campaignView) refreshCampaignView(true);
 		} catch (error) {
-			prospectPanel.textContent = 'Survey failed: ' + error.message;
-			console.error('Prospecting survey failed', error);
+			prospectPanel.textContent = (selected.length ? 'Survey' : 'Core') + ' failed: ' + error.message;
+			console.error('Prospecting/core report failed', error);
 		}
 	}
 	// Resolve the cell while the event and current view are still live; then snapshot the
@@ -967,7 +1309,9 @@
 		if (!Number.isInteger(cell) || cell < 0) return;
 		var selected = selectedInstrumentIds(), world = state, serial = ++prospectClickSerial;
 		if (gpu.on && gpu.ready) {
-			GpuSim.download(world).then(function () {
+			var transfer = campaignJob && campaignJob.running && campaignJob.state === world
+				? Promise.resolve() : campaignReadback || GpuSim.download(world);
+			Promise.resolve(transfer).then(function () {
 				if (state === world && serial === prospectClickSerial) inspectCell(cell, selected);
 			}).catch(function (error) {
 				if (state !== world || serial !== prospectClickSerial) return;
@@ -1178,6 +1522,20 @@
 		// Set by the render tail the moment this rAF's play encoder is built with the
 		// draw inside it; the bottom repaint gate then skips the standalone draw submit.
 		var mergedThisFrame = false;
+		if (campaignJob && campaignJob.running) {
+			var activeCampaign = campaignJob;
+			try {
+				Instruments.campaignStep(activeCampaign, 256, 1.25);
+				paintCampaignControls();
+				if (activeCampaign.done || activeCampaign.cancelled || activeCampaign.invalidated)
+					finalizeCampaign(activeCampaign);
+			} catch (error) {
+				Instruments.cancelCampaign(activeCampaign);
+				activeCampaign.reason = error.message;
+				finalizeCampaign(activeCampaign);
+				campaignProgress.textContent = 'Campaign stopped: ' + error.message + ' · partial ledger retained.';
+			}
+		}
 		// The step gate is the view, never the pointer: it closes on the frame a move lands and
 		// stays closed for VIEW_HOLD_FRAMES more, so a held-still button pauses nothing and a
 		// resting pointer resumes the sim whether or not it is still down. Both engines need it,
@@ -1307,10 +1665,16 @@
 			shownVersion = viewVersion;
 		}
 	}
+		if (campaignMarkersDirty || viewMoved) paintCampaignMarkers();
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.v3dText = v3d.on && v3d.r3d ? v3d.r3d.tsLine() : '';
 			Perf.update(now);
+			if (campaignView && Deposits.stale(state, campaignView.catalogue) !== campaignView.stale) {
+				if (!Deposits.stale(state, campaignView.catalogue)) campaignView.invalidated = false;
+				campaignRefreshArmed = false;
+				refreshCampaignView();
+			}
 			showStrip(stripRows());
 			if (waterActive === 'volume' && waterDirty) solveWater();
 			// The Mantle Tm slider follows the sim on the strip's own 2 Hz tick while cooling

@@ -26,6 +26,7 @@ var Instruments = (function () {
 		[0, 0, 0, 0, 0, 0, 0]
 	];
 	var CONFIDENCE = ['unknown', 'inferred', 'indicated', 'measured'];
+	var reanchorBest = { entry: null, dot: -1 };
 	function zeroReadings() {
 		var out = [];
 		for (var i = 0; i < KINDS.length; i++) out.push(0);
@@ -40,6 +41,8 @@ var Instruments = (function () {
 		this.cellsN = 0;
 		this.found = [];
 		this.byId = Object.create(null);
+		this.byRecordCell = Object.create(null);
+		this.bySurveyCell = Object.create(null);
 		this.calls = 0;
 		this.sampleCells = new Int32Array(260);
 		this.sampleDepth = new Uint8Array(260);
@@ -57,6 +60,38 @@ var Instruments = (function () {
 		for (var j = 0; j < selection.length; j++) want[String(selection[j]).trim()] = 1;
 		for (var i = 0; i < LIST.length; i++) if (want[LIST[i].id]) out.push(i);
 		return out;
+	}
+	function addCellEntry(index, cell, entry) {
+		var key = String(cell), list = index[key];
+		if (!list) index[key] = list = [];
+		list.push(entry);
+	}
+	function removeCellEntry(index, cell, entry) {
+		if (cell < 0) return;
+		var key = String(cell), list = index[key];
+		if (!list) return;
+		var at = list.indexOf(entry);
+		if (at >= 0) list.splice(at, 1);
+		if (!list.length) delete index[key];
+	}
+	function moveRecordCell(ledger, entry, cell) {
+		if (entry.cell === cell) return;
+		removeCellEntry(ledger.byRecordCell, entry.cell, entry);
+		entry.cell = cell;
+		addCellEntry(ledger.byRecordCell, cell, entry);
+	}
+	function moveSurveyCell(ledger, entry, cell) {
+		if (entry.surveyCell === cell) return;
+		removeCellEntry(ledger.bySurveyCell, entry.surveyCell, entry);
+		entry.surveyCell = cell;
+		addCellEntry(ledger.bySurveyCell, cell, entry);
+	}
+	function setAnchor(entry, record) {
+		for (var i = 0; i < 3; i++) entry.anchorKey[i] = record.anchorKey[i];
+		for (var j = 0; j < 3; j++) entry.direction[j] = record.direction[j];
+	}
+	function clearObject(object) {
+		for (var key in object) delete object[key];
 	}
 	function popcount(value) {
 		value -= (value >>> 1) & 0x55555555;
@@ -137,44 +172,87 @@ var Instruments = (function () {
 		var distance = state.grid.nbrDist[cell] * 1.5 / EARTH_RADIUS;
 		return Math.cos(Math.min(Math.PI, distance));
 	}
-	function findEntry(ledger, state, record) {
-		var exact = ledger.byId[record.id];
-		if (exact) return exact;
-		var cosLimit = reanchorTolerance(state, record.cell);
-		for (var i = 0; i < ledger.found.length; i++) {
-			var entry = ledger.found[i];
+	function considerReanchor(ledger, record, cell, cosLimit) {
+		var list = ledger.byRecordCell[String(cell)];
+		if (!list) return;
+		for (var i = 0; i < list.length; i++) {
+			var entry = list[i];
 			if (entry.kind !== record.kind || entry.id === record.id) continue;
 			var direction = entry.direction, next = record.direction;
 			var dot = direction[0] * next[0] + direction[1] * next[1] + direction[2] * next[2];
-			if (dot < cosLimit) continue;
-			delete ledger.byId[entry.id];
-			entry.id = record.id;
-			entry.cell = record.cell;
-			entry.anchorKey = record.anchorKey.slice(0);
-			entry.direction = record.direction.slice(0);
-			entry.record = record;
-			ledger.byId[entry.id] = entry;
-			return entry;
+			if (dot >= cosLimit && dot > reanchorBest.dot) {
+				reanchorBest.entry = entry; reanchorBest.dot = dot;
+			}
+		}
+	}
+	function findEntry(ledger, state, record) {
+		var exact = ledger.byId[record.id];
+		if (exact) {
+			moveRecordCell(ledger, exact, record.cell);
+			setAnchor(exact, record);
+			exact.record = record;
+			return exact;
+		}
+		var cosLimit = reanchorTolerance(state, record.cell);
+		reanchorBest.entry = null; reanchorBest.dot = cosLimit;
+		if (ledger.found.length) {
+			var g = state.grid, ring = g.ring, ringN = g.ringN, first = record.cell;
+			considerReanchor(ledger, record, first, cosLimit);
+			for (var n = 0; n < ringN[first]; n++) {
+				var near = ring[first * 6 + n];
+				considerReanchor(ledger, record, near, cosLimit);
+				for (var m = 0; m < ringN[near]; m++)
+					considerReanchor(ledger, record, ring[near * 6 + m], cosLimit);
+			}
+		}
+		var best = reanchorBest.entry;
+		if (best) {
+			delete ledger.byId[best.id];
+			moveRecordCell(ledger, best, record.cell);
+			best.id = record.id;
+			best.kindIndex = record.kindIndex;
+			setAnchor(best, record);
+			best.record = record;
+			ledger.byId[best.id] = best;
+			return best;
 		}
 		var created = {
 			id: record.id, kind: record.kind, kindIndex: record.kindIndex, cell: record.cell,
 			anchorKey: record.anchorKey.slice(0), direction: record.direction.slice(0),
 			confidence: 0, evidence: 0, epochMyr: record.epochMyr, firstSeen: record.epochMyr,
-			lastSeen: record.epochMyr, surveyCell: -1, record: record
+			lastSeen: record.epochMyr, surveyCell: -1, record: record,
+			ledgerIndex: ledger.found.length
 		};
 		ledger.found.push(created);
 		ledger.byId[created.id] = created;
+		addCellEntry(ledger.byRecordCell, created.cell, created);
 		return created;
 	}
 	function removeEntry(ledger, at) {
-		var entry = ledger.found[at];
+		var entry = ledger.found[at], last = ledger.found.pop();
 		delete ledger.byId[entry.id];
-		ledger.found.splice(at, 1);
+		removeCellEntry(ledger.byRecordCell, entry.cell, entry);
+		removeCellEntry(ledger.bySurveyCell, entry.surveyCell, entry);
+		if (at < ledger.found.length) {
+			ledger.found[at] = last;
+			last.ledgerIndex = at;
+		}
 	}
-	function collectCandidates(s, cell, instIndex, ledger, result, foundNow) {
-		var inst = LIST[instIndex], nCells = collectSamples(s, cell, inst, ledger),
-			cells = ledger.sampleCells, values = zeroReadings(), candidates = [], loadTotal = 0,
-			sums = zeroReadings(), contributing = 0;
+	function catalogueAt(s, catalogue, cell, kind) {
+		if (!catalogue) return InstrumentDeposits.at(s, kind, cell);
+		for (var at = catalogue.cellStart[cell]; at < catalogue.cellStart[cell + 1]; at++) {
+			var record = catalogue.records[at];
+			if (record.kindIndex === kind) return record;
+		}
+		return null;
+	}
+	var campaignValues = new Float64Array(KINDS.length), campaignSums = new Float64Array(KINDS.length);
+	function collectCandidates(s, cell, instIndex, ledger, result, foundNow, catalogue) {
+		var detailed = !!result, inst = LIST[instIndex], nCells = collectSamples(s, cell, inst, ledger),
+			cells = ledger.sampleCells, values = detailed ? zeroReadings() : campaignValues,
+			candidates = detailed ? [] : null, loadTotal = 0,
+			sums = detailed ? zeroReadings() : campaignSums, contributing = 0;
+		if (!detailed) { values.fill(0); sums.fill(0); }
 		var isGeo = inst.id === 'geo';
 		for (var ci = 0; ci < nCells; ci++) {
 			var c = cells[ci], owner = s.owner[c];
@@ -191,7 +269,7 @@ var Instruments = (function () {
 				if (!(inst.kinds & (1 << k))) continue;
 				var value = InstrumentDeposits.blurAt(s, k, c);
 				if (inst.id === 'd500' || inst.id === 'd5k') {
-					var intersected = InstrumentDeposits.at(s, k, c);
+					var intersected = catalogueAt(s, catalogue, c, k);
 					if (!intersected || !canMeasure(instIndex, s, intersected)) continue;
 					value = intersected.potential;
 				}
@@ -207,20 +285,20 @@ var Instruments = (function () {
 			if (sourceOwner < 0 || sourceOwner >= s.n || !s.alive[sourceOwner]) continue;
 			for (var kind = 0; kind < KINDS.length; kind++) {
 				if (!(inst.kinds & (1 << kind)) || gain(instIndex, kind) === 0) continue;
-				var record = InstrumentDeposits.at(s, kind, sourceCell);
+				var record = catalogueAt(s, catalogue, sourceCell, kind);
 				if (!record || !canMeasure(instIndex, s, record)) continue;
-				candidates.push(record);
+				if (candidates) candidates.push(record);
 				var signal = isGeo ? values[kind] : record.potential;
 				var limit = inst.detect * (0.7 + 0.6 * noise(s.seed, record, instIndex));
 				if (signal < limit * gain(instIndex, kind)) continue;
-				var reading = result.readings[result.readings.length - 1];
-				if (inst.id === 'mag') {
+				var reading = detailed ? result.readings[result.readings.length - 1] : null;
+				if (reading && inst.id === 'mag') {
 					var sourceDepth = Math.round(record.top / 250) * 250;
 					if (reading.depthToSource < 0 || sourceDepth < reading.depthToSource)
 						reading.depthToSource = sourceDepth;
 				}
 				var wasKnown = !!ledger.byId[record.id], entry = findEntry(ledger, s, record);
-				entry.surveyCell = cell;
+				moveSurveyCell(ledger, entry, cell);
 				entry.lastSeen = record.epochMyr;
 				entry.record = record;
 				if (instIndex <= 3) {
@@ -229,22 +307,26 @@ var Instruments = (function () {
 				} else if (instIndex === 4 || instIndex === 5) {
 					entry.confidence = 3;
 				}
-				var item = resultItem(result, entry, record, wasKnown, false);
-				if (item.instruments.indexOf(inst.id) < 0) item.instruments.push(inst.id);
+				if (detailed) {
+					var item = resultItem(result, entry, record, wasKnown, false);
+					if (item.instruments.indexOf(inst.id) < 0) item.instruments.push(inst.id);
+				}
 				foundNow[entry.id] = 1;
-				var hitId = '#' + record.id;
-				if (result.readings[result.readings.length - 1].hits.indexOf(hitId) < 0)
-					result.readings[result.readings.length - 1].hits.push(hitId);
+				if (reading) {
+					var hitId = '#' + record.id;
+					if (reading.hits.indexOf(hitId) < 0) reading.hits.push(hitId);
+				}
 			}
 		}
-		var reading = result.readings[result.readings.length - 1];
-		reading.values = values;
-		if (inst.id === 'mag') reading.magneticIndex = Math.max(values[0], values[1], values[2]);
-		reading.contributors = contributing;
-		reading.sampleCount = nCells;
-		reading.holeHits = reading.hits.slice(0);
-		reading.metrics = cellMetrics(s, cell);
-		reading.candidates = candidates;
+		if (!detailed) return;
+		var lastReading = result.readings[result.readings.length - 1];
+		lastReading.values = values;
+		if (inst.id === 'mag') lastReading.magneticIndex = Math.max(values[0], values[1], values[2]);
+		lastReading.contributors = contributing;
+		lastReading.sampleCount = nCells;
+		lastReading.holeHits = lastReading.hits.slice(0);
+		lastReading.metrics = cellMetrics(s, cell);
+		lastReading.candidates = candidates;
 	}
 	function cellMetrics(s, cell) {
 		var owner = s.owner[cell], wet = s.z[cell] < InstrumentParams.sea;
@@ -262,64 +344,146 @@ var Instruments = (function () {
 		};
 	}
 	function reconcile(s, cell, ledger, result, foundNow) {
-		for (var i = ledger.found.length - 1; i >= 0; i--) {
-			var entry = ledger.found[i];
-			if (entry.surveyCell !== cell || foundNow[entry.id]) continue;
+		var list = ledger.bySurveyCell[String(cell)];
+		if (!list) return;
+		for (var i = list.length - 1; i >= 0; i--) {
+			var entry = list[i];
+			if (foundNow[entry.id]) continue;
 			var value = InstrumentDeposits.blurAt(s, entry.kindIndex, entry.cell);
 			if (value < InstrumentParams.depositMin * InstrumentParams.depositHysteresis) {
-				removeEntry(ledger, i);
+				removeEntry(ledger, entry.ledgerIndex);
 				continue;
 			}
-			resultItem(result, entry, entry.record, true, true);
+			if (result) resultItem(result, entry, entry.record, true, true);
 		}
 	}
 	function applyLab(s, cell, ledger, result, foundNow) {
-		var reading = result.readings[result.readings.length - 1], changed = 0;
-		for (var i = 0; i < ledger.found.length; i++) {
-			var entry = ledger.found[i];
-			if (entry.cell !== cell || entry.confidence < 1) continue;
+		var reading = result ? result.readings[result.readings.length - 1] : null;
+		var list = ledger.byRecordCell[String(cell)], changed = 0;
+		if (!list) return;
+		for (var i = 0; i < list.length; i++) {
+			var entry = list[i];
+			if (entry.confidence < 1) continue;
 			var before = entry.confidence;
 			if (before < 2) { entry.confidence++; changed++; }
 			entry.lastSeen = Math.round(s.t * 10) / 10;
-			var item = resultItem(result, entry, entry.record, true, false);
-			if (entry.confidence !== before) item.refinedFrom = before;
-			if (item.instruments.indexOf('lab') < 0) item.instruments.push('lab');
-			reading.hits.push('#' + entry.id);
+			if (reading) {
+				var item = resultItem(result, entry, entry.record, true, false);
+				if (entry.confidence !== before) item.refinedFrom = before;
+				if (item.instruments.indexOf('lab') < 0) item.instruments.push('lab');
+				reading.hits.push('#' + entry.id);
+			}
 			foundNow[entry.id] = 1;
 		}
-		reading.refined = changed;
-		reading.metrics = cellMetrics(s, cell);
+		if (reading) {
+			reading.refined = changed;
+			reading.metrics = cellMetrics(s, cell);
+		}
 	}
-	function survey(s, cell, selection, ledger) {
+	function surveyInternal(s, cell, indices, ledger, catalogue, detailed, foundNow) {
 		if (!Number.isInteger(cell) || cell < 0 || cell >= s.grid.V) throw new RangeError('survey cell is outside the grid');
-		var indices = selectedIndices(selection);
-		if (!indices.length) return { ok: false, reason: 'no instruments selected', cell: cell };
+		if (!indices.length) return detailed ? { ok: false, reason: 'no instruments selected', cell: cell } : null;
 		if (!ledger) ledger = new Ledger(s.grid.V);
 		if (ledger.coverage.length !== s.grid.V) throw new RangeError('survey ledger belongs to a different grid');
 		markCoverage(ledger, cell, indices);
-		var latLon = s.grid.pos, b = cell * 3, lat = Math.asin(Math.max(-1, Math.min(1, latLon[b + 1]))),
-			lon = Math.atan2(latLon[b + 2], latLon[b]);
-		var result = {
-			ok: true, cell: cell, epochMyr: Math.round(s.t * 10) / 10,
-			lat: Math.round(lat * 10000) / 10000, lon: Math.round(lon * 10000) / 10000,
-			host: requireHost(s, cell), readings: [], found: [],
-			ledger: ledger, surveyMask: ledger.coverage[cell]
-		};
-		var foundNow = Object.create(null);
+		var result = null;
+		if (detailed) {
+			var latLon = s.grid.pos, b = cell * 3, lat = Math.asin(Math.max(-1, Math.min(1, latLon[b + 1]))),
+				lon = Math.atan2(latLon[b + 2], latLon[b]);
+			result = {
+				ok: true, cell: cell, epochMyr: Math.round(s.t * 10) / 10,
+				lat: Math.round(lat * 10000) / 10000, lon: Math.round(lon * 10000) / 10000,
+				host: requireHost(s, cell), readings: [], found: [],
+				ledger: ledger, surveyMask: ledger.coverage[cell]
+			};
+		}
+		if (!foundNow) foundNow = Object.create(null);
+		else clearObject(foundNow);
 		for (var n = 0; n < indices.length; n++) {
 			var index = indices[n], inst = LIST[index];
-			result.readings.push({ id: inst.id, name: inst.name, values: zeroReadings(),
-				hits: [], contributors: 0, sampleCount: 0, metrics: cellMetrics(s, cell), refined: 0 });
-			result.readings[result.readings.length - 1].depthToSource = -1;
+			if (detailed) {
+				result.readings.push({ id: inst.id, name: inst.name, values: zeroReadings(),
+					hits: [], contributors: 0, sampleCount: 0, metrics: cellMetrics(s, cell), refined: 0 });
+				result.readings[result.readings.length - 1].depthToSource = -1;
+			}
 			if (inst.id === 'lab') applyLab(s, cell, ledger, result, foundNow);
-			else collectCandidates(s, cell, index, ledger, result, foundNow);
+			else collectCandidates(s, cell, index, ledger, result, foundNow, catalogue);
 		}
 		reconcile(s, cell, ledger, result, foundNow);
+		if (!detailed) return null;
 		result.found.sort(function (a, b) {
 			var ak = a.record.kindIndex, bk = b.record.kindIndex;
 			return ak !== bk ? ak - bk : a.record.id < b.record.id ? -1 : a.record.id > b.record.id ? 1 : 0;
 		});
 		return result;
+	}
+	function survey(s, cell, selection, ledger) {
+		return surveyInternal(s, cell, selectedIndices(selection), ledger, null, true, null);
+	}
+	function campaignStart(state, catalogue, selection, ledger) {
+		var indices = selectedIndices(selection);
+		if (!indices.length) return { ok: false, reason: 'no instruments selected' };
+		if (!state || !state.grid || !catalogue || !catalogue.records || !catalogue.cellStart)
+			return { ok: false, reason: 'campaign requires a state and built deposit catalogue' };
+		if (catalogue.level !== state.grid.level || catalogue.cellStart.length !== state.grid.V + 1
+			|| catalogue.signature !== state.frame || catalogue.time !== state.t
+			|| catalogue.epochMyr !== Math.round(state.t * 10) / 10)
+			return { ok: false, reason: 'catalogue does not match the campaign snapshot' };
+		if (!ledger) ledger = new Ledger(state.grid.V);
+		if (ledger.coverage.length !== state.grid.V)
+			return { ok: false, reason: 'survey ledger belongs to a different grid' };
+		var selected = [];
+		for (var i = 0; i < indices.length; i++) selected.push(LIST[indices[i]].id);
+		var job = {
+			ok: true, state: state, catalogue: catalogue, ledger: ledger,
+			frame: state.frame, time: state.t, epochMyr: catalogue.epochMyr,
+			indices: indices, instruments: selected, cursor: 0, total: state.grid.V,
+			found: 0, viable: 0, seen: Object.create(null), foundNow: Object.create(null),
+			running: true, done: false, cancelled: false, invalidated: false, reason: ''
+		};
+		for (var r = 0; r < catalogue.records.length; r++) {
+			var record = catalogue.records[r];
+			if (!ledger.byId[record.id]) continue;
+			job.seen[record.id] = 1;
+			job.found++;
+			if (record.viable) job.viable++;
+		}
+		return job;
+	}
+	function campaignStep(job, maxCells, maxMs) {
+		if (!job || !job.ok) return job || { ok: false, reason: 'missing campaign job' };
+		if (!job.running) return job;
+		if (job.state.frame !== job.frame || job.state.t !== job.time) {
+			job.running = false; job.invalidated = true; job.reason = 'world changed';
+			return job;
+		}
+		var limit = Number.isFinite(maxCells) ? Math.floor(maxCells) : 256;
+		limit = Math.max(1, Math.min(256, limit));
+		var budget = Number.isFinite(maxMs) ? Math.max(0, maxMs) : Infinity;
+		var started = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+		var processed = 0;
+		while (job.cursor < job.total && processed < limit) {
+			surveyInternal(job.state, job.cursor, job.indices, job.ledger, job.catalogue, false, job.foundNow);
+			job.cursor++; processed++;
+			for (var id in job.foundNow) {
+				if (job.seen[id]) continue;
+				var entry = job.ledger.byId[id];
+				if (!entry) continue;
+				job.seen[id] = 1; job.found++;
+				if (entry.record && entry.record.viable) job.viable++;
+			}
+			if (processed % 8 === 0 && budget !== Infinity) {
+				var now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+				if (now - started >= budget) break;
+			}
+		}
+		if (job.cursor >= job.total) { job.running = false; job.done = true; }
+		return job;
+	}
+	function cancelCampaign(job) {
+		if (!job || !job.ok || !job.running) return job;
+		job.running = false; job.cancelled = true; job.reason = 'cancelled';
+		return job;
 	}
 	function requireHost(s, cell) {
 		var owner = s.owner[cell];
@@ -431,6 +595,9 @@ var Instruments = (function () {
 		selectedIndices: selectedIndices,
 		noise: noise,
 		survey: survey,
+		startCampaign: campaignStart,
+		campaignStep: campaignStep,
+		cancelCampaign: cancelCampaign,
 		report: report,
 		confidence: CONFIDENCE
 	};

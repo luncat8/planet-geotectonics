@@ -4,6 +4,18 @@
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Renderer = require('../js/render.js');
 
+const projected = new Float64Array(2), identity = [0, 0, 0, 1];
+Renderer.MapView.project(projected, 1, 0, 0, identity, 400, 200);
+assert.deepEqual(Array.from(projected), [200, 100], 'the prime-meridian equator projects to the center');
+Renderer.MapView.project(projected, 0, 1, 0, identity, 400, 200);
+assert.deepEqual(Array.from(projected), [200, 0], 'north projects to the top edge');
+Renderer.MapView.project(projected, -1, 0, 0, identity, 400, 200);
+assert.equal(projected[0], 0, 'the antimeridian wraps to the left seam');
+const quarterTurn = [0, Math.sin(Math.PI / 4), 0, Math.cos(Math.PI / 4)];
+Renderer.MapView.project(projected, 1, 0, 0, quarterTurn, 400, 200);
+assert.ok(Math.abs(projected[0] - 100) < 1e-8, 'world markers rotate with the view quaternion');
+assert.equal(projected[1], 100);
+
 // Cardinal anchors: east green, north blue, west red, south yellow.
 assert.equal(Renderer.dirHue(1, 0), 120);
 assert.equal(Renderer.dirHue(0, 1), 240);

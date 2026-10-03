@@ -160,7 +160,6 @@ for (const record of catalogue.records) {
 	const oreTonnes = volume * row.rho;
 	assert.ok(Math.abs(oreTonnes / (record.sizeMt * 1e6) - 1) < 0.05,
 		tag + ' the bodies carry the record tonnage: ' + oreTonnes + ' vs ' + record.sizeMt * 1e6);
-	const crust = world.hSed[record.cellOwner] ;
 	assert.ok(record.size <= row.ladder[4] && record.size >= row.ladder[0], tag + ' size inside the ladder');
 	assert.equal(record.sizeClass, record.size < row.ladder[1] ? 'small'
 		: record.size < row.ladder[2] ? 'medium' : record.size < row.ladder[3] ? 'large' : 'giant',
@@ -207,6 +206,61 @@ const summary = Deposits.summary(world);
 assert.equal(summary.records, catalogue.records.length);
 assert.equal(summary.byKind.length, Deposits.KINDS.length);
 for (const entry of summary.byKind) assert.ok(entry.top.length <= 10, 'the summary keeps the ten largest per kind');
+function sumContained(records) {
+	const totals = {};
+	for (const record of records) for (const metal in record.contained)
+		totals[metal] = (totals[metal] || 0) + record.contained[metal];
+	return totals;
+}
+assert.deepEqual(summary.contained, sumContained(Deposits.viable(world)),
+	'the summary total is the exact sum of viable records');
+assert.deepEqual(summary.containedAll, sumContained(catalogue.records),
+	'the all-record total is exact rather than rounded to three significant figures');
+assert.deepEqual(parsed.totals.viableContained, summary.contained, 'the JSON viable total matches the summary');
+assert.deepEqual(parsed.totals.contained, summary.containedAll, 'the JSON all-record total matches the summary');
+const savedTime = world.t;
+world.t = catalogue.time + 5;
+assert.equal(Deposits.stale(world, catalogue), false, 'the snapshot is not stale at exactly five Myr');
+world.t = catalogue.time + 5.001;
+assert.equal(Deposits.stale(world, catalogue), true, 'staleness uses the exact snapshot time and a strict five-Myr boundary');
+world.t = savedTime;
+const exactTimeCatalogue = Deposits.build(world);
+world.t += 0.01;
+const nextTimeCatalogue = Deposits.build(world);
+assert.notEqual(nextTimeCatalogue, exactTimeCatalogue, 'catalogue caching distinguishes times within one rounded epoch');
+assert.equal(nextTimeCatalogue.time, world.t);
+world.t = savedTime;
+const filteredLedger = new Instruments.Ledger(world.grid.V);
+const filteredRecord = catalogue.records[0];
+filteredLedger.byId[filteredRecord.id] = { id: filteredRecord.id };
+filteredLedger.cellsN = 1;
+const filteredSummary = Deposits.summary(world, { catalogue: catalogue, ledger: filteredLedger, kind: filteredRecord.kind });
+assert.equal(filteredSummary.records, 1, 'summary can be filtered to the records the session ledger found');
+assert.equal(filteredSummary.viable, filteredRecord.viable ? 1 : 0);
+assert.deepEqual(filteredSummary.contained, filteredRecord.viable ? filteredRecord.contained : {});
+const filteredJson = JSON.parse(Deposits.json(world, {
+	catalogue: catalogue, ledger: filteredLedger, kind: filteredRecord.kind
+}));
+assert.equal(filteredJson.deposits.length, 1, 'the v2 export can carry the same session filter');
+assert.deepEqual(filteredJson.totals.viableContained, filteredSummary.contained);
+const cacheHit = Deposits.build(world);
+assert.strictEqual(Deposits.build(world), cacheHit, 'an unchanged state reuses its explicit catalogue');
+const cachedViable = Deposits.build(world, { min: 'viable' });
+assert.ok(Array.isArray(cachedViable) && cachedViable.every((record) => record.viable),
+	'the cached minimum option still returns only viable records');
+world.t += 0.1;
+assert.notStrictEqual(Deposits.build(world), cacheHit, 'a changed epoch refreshes the catalogue stamp');
+world.t -= 0.1;
+const liveEpoch = Deposits.build(world);
+world.reconEpoch = 250;
+assert.notStrictEqual(Deposits.build(world), liveEpoch, 'a reconstruction scrub invalidates the same-frame catalogue');
+world.reconEpoch = 0;
+const liveMap = Deposits.build(world);
+const oldSea = Params.sea;
+Params.sea = 1200;
+assert.notStrictEqual(Deposits.build(world), liveMap, 'a display sea-level change rebuilds water-depth fields');
+Params.sea = oldSea;
+Deposits.build(world);
 
 // --- 6. variants: the context decides the commodity ------------------------------------
 function column(options) {

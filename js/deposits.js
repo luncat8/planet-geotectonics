@@ -463,8 +463,8 @@ var Deposits = (function () {
 		return a.weight !== b.weight ? b.weight - a.weight : a.index - b.index;
 	}
 	function principalOf(record) {
-		var keys = Object.keys(record.contained);
-		return keys.length ? record.contained[keys[0]] : 0;
+		for (var metal in record.contained) return record.contained[metal];
+		return 0;
 	}
 	function buildCatalogue(s) {
 		var g = s.grid, store = fieldScratch(g.V), records = [], k, c;
@@ -496,9 +496,8 @@ var Deposits = (function () {
 			byKind[k].sort(rankCompare);
 			byKind[k] = byKind[k].slice(0, 64).map(function (entry) { return entry.index; });
 		}
-		for (var name in containedTotals) containedTotals[name] = sig3(containedTotals[name]);
 		return {
-			epochMyr: Math.round(s.t * 10) / 10, threshold: DepositParams.depositMin, classes: CLASSES,
+			epochMyr: Math.round(s.t * 10) / 10, time: s.t, threshold: DepositParams.depositMin, classes: CLASSES,
 			records: records, cellStart: cellStart, byKind: byKind,
 			viableCount: viableCount, containedTotals: containedTotals, signature: s.frame, level: s.grid.level
 		};
@@ -506,9 +505,16 @@ var Deposits = (function () {
 	// The explicit path. Never called by a click: only a regional view, a campaign or an export
 	// may pay O(V), and the result is cached until the frame moves.
 	function build(s, opts) {
-		if (cache && cache.state === s && cache.signature === s.frame && cache.V === s.grid.V) return cache.catalogue;
+		var reconEpoch = s.reconEpoch || 0;
+		if (cache && cache.state === s && cache.frame === s.frame && cache.t === s.t
+			&& cache.V === s.grid.V && cache.sea === DepositParams.sea
+			&& cache.reconEpoch === reconEpoch && cache.threshold === DepositParams.depositMin)
+			return opts && opts.min === 'viable' ? filterViable(cache.catalogue) : cache.catalogue;
 		var catalogue = buildCatalogue(s);
-		cache = { state: s, signature: s.frame, V: s.grid.V, catalogue: catalogue };
+		cache = {
+			state: s, frame: s.frame, t: s.t, V: s.grid.V, sea: DepositParams.sea,
+			reconEpoch: reconEpoch, threshold: DepositParams.depositMin, catalogue: catalogue
+		};
 		if (opts && opts.min === 'viable') return filterViable(catalogue);
 		return catalogue;
 	}
@@ -521,31 +527,60 @@ var Deposits = (function () {
 		return filterViable(build(s));
 	}
 	function stale(s, catalogue) {
-		return Math.abs(s.t - catalogue.epochMyr) > 5;
+		var snapshotTime = catalogue.time === undefined ? catalogue.epochMyr : catalogue.time;
+		return Math.abs(s.t - snapshotTime) > 5;
 	}
 	function atCell(s, cell) {
 		var catalogue = build(s), out = [];
 		for (var i = catalogue.cellStart[cell]; i < catalogue.cellStart[cell + 1]; i++) out.push(catalogue.records[i]);
 		return out;
 	}
-	function summary(s) {
-		var catalogue = build(s), perKind = [], k;
+	function allowed(record, opts) {
+		if (!opts) return true;
+		if (opts.kind && opts.kind !== 'all' && opts.kind !== record.kind) return false;
+		return !opts.ledger || !!opts.ledger.byId[record.id];
+	}
+	function addTotals(target, source) {
+		for (var metal in source) target[metal] = (target[metal] || 0) + source[metal];
+	}
+	function topInsert(top, record) {
+		var weight = principalOf(record), at = 0;
+		while (at < top.length) {
+			var current = top[at], currentWeight = principalOf(current);
+			if (weight > currentWeight || (weight === currentWeight && record.id < current.id)) break;
+			at++;
+		}
+		top.splice(at, 0, record);
+		if (top.length > 10) top.pop();
+	}
+	function summary(s, opts) {
+		opts = opts || {};
+		var catalogue = opts.catalogue || build(s), perKind = [], all = {}, viable = {},
+			recordCount = 0, viableCount = 0, k;
 		for (k = 0; k < KINDS.length; k++) perKind.push({ kind: KINDS[k], records: 0, viable: 0, top: [] });
 		for (var i = 0; i < catalogue.records.length; i++) {
 			var r = catalogue.records[i];
+			if (!allowed(r, opts)) continue;
+			recordCount++;
 			perKind[r.kindIndex].records++;
-			if (r.viable) perKind[r.kindIndex].viable++;
+			addTotals(all, r.contained);
+			if (!r.viable) continue;
+			viableCount++;
+			perKind[r.kindIndex].viable++;
+			addTotals(viable, r.contained);
+			topInsert(perKind[r.kindIndex].top, r);
 		}
-		for (k = 0; k < KINDS.length; k++) {
-			var ranked = catalogue.byKind[k];
-			for (var at = 0; at < ranked.length && perKind[k].top.length < 10; at++) {
-				var record = catalogue.records[ranked[at]];
-				if (!record.viable) continue;
-				perKind[k].top.push(record);
-			}
-		}
-		return { epochMyr: catalogue.epochMyr, records: catalogue.records.length, viable: catalogue.viableCount,
-			byKind: perKind, contained: catalogue.containedTotals, stale: stale(s, catalogue) };
+		return {
+			epochMyr: catalogue.epochMyr,
+			records: recordCount,
+			viable: viableCount,
+			byKind: perKind,
+			contained: viable,
+			containedAll: all,
+			surveyedCells: opts.ledger ? opts.ledger.cellsN : 0,
+			kind: opts.kind || 'all',
+			stale: stale(s, catalogue)
+		};
 	}
 	function publicRecord(r) {
 		return {
@@ -558,22 +593,32 @@ var Deposits = (function () {
 			viable: r.viable, reason: r.reason
 		};
 	}
-	function json(s) {
-		var catalogue = build(s), classes = [], i;
+	function json(s, opts) {
+		opts = opts || {};
+		var catalogue = opts.catalogue || build(s), classes = [], i;
 		for (i = 0; i < CLASSES.length; i++) {
 			classes.push({ kind: CLASSES[i].kind, variant: CLASSES[i].variant, unit: CLASSES[i].unit,
 				cutOff: CLASSES[i].screen.label, minSize: CLASSES[i].minSize, maxTop: CLASSES[i].maxTop,
 				source: CLASSES[i].source });
 		}
-		var deposits = [];
-		for (i = 0; i < catalogue.records.length; i++) deposits.push(publicRecord(catalogue.records[i]));
+		var deposits = [], contained = {}, viableContained = {}, viableCount = 0;
+		for (i = 0; i < catalogue.records.length; i++) {
+			var record = catalogue.records[i];
+			if (!allowed(record, opts) || (opts.viableOnly && !record.viable)) continue;
+			deposits.push(publicRecord(record));
+			addTotals(contained, record.contained);
+			if (record.viable) {
+				viableCount++;
+				addTotals(viableContained, record.contained);
+			}
+		}
 		return JSON.stringify({
 			format: 'pgt-deposits', version: 2, level: s.grid.level, seed: s.seed,
 			t: +s.t.toFixed(3), epoch: catalogue.epochMyr,
 			thresholds: { traceMin: DepositParams.traceMin, depositMin: DepositParams.depositMin },
 			classes: classes,
-			totals: { records: catalogue.records.length, viable: catalogue.viableCount,
-				contained: catalogue.containedTotals },
+			totals: { records: deposits.length, viable: viableCount,
+				contained: contained, viableContained: viableContained },
 			deposits: deposits
 		}, null, 1);
 	}

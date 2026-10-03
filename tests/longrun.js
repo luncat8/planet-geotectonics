@@ -5,6 +5,8 @@
 // development test run take that long.
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Params = require('../js/params.js');
+const Deposits = require('../js/deposits.js');
+const Core = require('../js/core.js');
 const EPOCH = 100;
 const RELEASE = process.argv.includes('--release');
 const COARSE_MYR = RELEASE ? 4500 : 1500;
@@ -39,9 +41,52 @@ function history(dt, myr) {
 	}
 	return { s, epochs, seconds: (performance.now() - start) / 1000 };
 }
+function assertCoreCatalogue(s) {
+	const catalogue = Deposits.build(s), byCell = new Map();
+	for (const record of catalogue.records) {
+		if (!byCell.has(record.cell)) byCell.set(record.cell, []);
+		byCell.get(record.cell).push(record);
+	}
+	assert.ok(catalogue.records.length > 0, 'the evolved snapshot has catalogue deposits');
+	let checkedBodies = 0;
+	for (const [cell, records] of byCell) {
+		const wet = s.z[cell] < Params.sea;
+		const water = wet ? Math.max(0, Math.round((Params.sea - s.z[cell]) / 10) * 10) : 0;
+		const maxBottom = records.reduce((bottom, record) => Math.max(bottom, record.bottom), 0);
+		const section = Core.section(s, cell, water + maxBottom);
+		assert.ok(section, 'every catalogue cell has a drillable core at cell ' + cell);
+		const expectedBodies = records.reduce((count, record) => count + record.bodies.length, 0);
+		assert.equal(section.intersections.length, expectedBodies,
+			'core and catalogue agree on every body intersection at cell ' + cell);
+		for (const record of records) {
+			for (let bodyIndex = 0; bodyIndex < record.bodies.length; bodyIndex++) {
+				const body = record.bodies[bodyIndex];
+				const hit = section.intersections.find((item) => item.id === record.id && item.bodyIndex === bodyIndex);
+				assert.ok(hit, 'catalogue body appears in the core: #' + record.id + '/' + bodyIndex);
+				assert.equal(hit.bodyTop, water + body.top, 'wet body depth uses the sea-surface datum');
+				assert.equal(hit.bodyBottom, water + body.bottom);
+				const pieces = section.layers.filter((layer) => layer.oreRecords
+					&& layer.oreRecords.some((ore) => ore.id === record.id && ore.bodyIndex === bodyIndex));
+				let at = hit.from;
+				for (const piece of pieces) {
+					assert.equal(piece.top, at, 'ore overlay pieces are contiguous for #' + record.id);
+					assert.ok(piece.bottom <= hit.to);
+					at = piece.bottom;
+				}
+				assert.equal(at, hit.to, 'every ore body is completely represented in the host log');
+				checkedBodies++;
+			}
+		}
+	}
+	Deposits.release();
+	return checkedBodies;
+}
 
 const long = history(0.1, COARSE_MYR);
 console.log('dt 0.1, hot start, ' + COARSE_MYR + ' Myr in ' + long.seconds.toFixed(0) + ' s');
+const coreBodies = assertCoreCatalogue(long.s);
+console.log('PASS core/catalogue: ' + coreBodies + ' body intersections agree at the '
+	+ COARSE_MYR + ' Myr evolved L5 snapshot');
 for (const e of long.epochs) {
 	console.log('  t ' + e.t.toFixed(0).padStart(4) + ' plates ' + String(e.plates).padStart(3)
 		+ ' cols ' + String(e.columns).padStart(5) + ' cont ' + (e.continental * 100).toFixed(1).padStart(5) + '%'
