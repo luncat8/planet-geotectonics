@@ -99,6 +99,22 @@ Open `index.html` directly in a browser.
   certifies it, so the `measured` rung reads as a measured intersection rather than a
   certified resource, and the regional summary gains a cross-kind largest list above the
   per-kind ones. No sim state, no checkpoint change: this is all a view of the ledger.
+  `0.6.4-review.md` reviews that commit: four defects (found order that reordered itself on a
+  retirement, a pin outliving its record, a campaign that retires records without refreshing
+  the list, a lab certifying a core that was never drilled), their reproductions and the tests
+  that hold them.
+- Continuous display relief, slice 1 of 0.5.6 (CPU only, not yet in the page):
+  `js/heightfield.js` builds the setup-time lookup that turns nearest-cell height samples into
+  continuous terrain - one 16-byte record per height texel (three u32 cell indices, two u16
+  weights, the third weight their remainder) holding the barycentric weights of the texel's
+  direction in the triangle of cell centres that contains it, plus a CPU reference sampler in
+  the arithmetic the gather shader will use (gaps drop out and renormalize; three gaps are the
+  gap marker, never `-1e9` relief). Measured at L5-L7: 0 fallbacks and 0 clamped weights,
+  constants and sample centres exact, shared edges agreeing to 1.4e-11 m at L5 and 7.7e-11 m at
+  L7, quantization 0.026/65535 of field range against a 2/65535 budget, 32 MiB and 1.2 s to build
+  at 2048x1024, and the plateau share that motivates the mode falling from 75-94 % of texel pairs
+  to 0 %.
+  `node experiments/heightfield-calibration.js`, log in `experiments/logs/`.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus the optional viable-deposit overlay, a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
   the surface; the trackball view has no latitude/longitude clamp and slows horizontal motion
@@ -172,14 +188,14 @@ stages in `0.6.x-plan-deposit-prospector.md`; the reviews are in `0.6.0-review.m
 `0.6.1-review.md`, the 0.6.2 core and regional campaign are in
 `0.6.2-plan-core-and-viability-map.md`, and the merge of the two independently written
 prospector implementations - with the monetary screen's measured calibration - is
-`0.6.3-merge-comparison.md`. Calibrations: `node experiments/deposit-calibration.js` for the
+`0.6.3-merge-comparison.md`, and `0.6.4-review.md` reviews the discovery-ledger commit. Calibrations: `node experiments/deposit-calibration.js` for the
 class table (§10 of `0.6.1-plan-deposit-catalogue.md`) and
 `node experiments/economics-calibration.js` for the price screen.
 
 ## Test
 
 ```
-node tests/run-all.js            short profile: 36 tests except the four histories (~2 min)
+node tests/run-all.js            short profile: 37 tests except the four histories (~2 min)
 node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
 node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```

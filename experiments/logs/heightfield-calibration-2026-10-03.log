@@ -1,0 +1,11 @@
+continuous-height lookup calibration · seed 7 · node v22.22.3
+L5 · 10242 cells · grid build 163 ms · field range 13129 m · 30720 edges agree to 1.41e-11 m
+  1024x512 · 8.0 MiB · build 344 ms (0.66 µs/texel) · max weight error 1.52e-5 · quantization 5.26e-3 m (0.026/65535 of range) · fallbacks 0 · clamps 0 · CPU gather 6 ms · plateau share 87.2% nearest vs 0.00% continuous
+  2048x1024 · 32.0 MiB · build 1268 ms (0.60 µs/texel) · max weight error 1.52e-5 · quantization 5.17e-3 m (0.026/65535 of range) · fallbacks 0 · clamps 0 · CPU gather 35 ms · plateau share 93.6% nearest vs 0.00% continuous
+L6 · 40962 cells · grid build 635 ms · field range 13133 m · 122880 edges agree to 3.82e-11 m
+  1024x512 · 8.0 MiB · build 381 ms (0.73 µs/texel) · max weight error 1.53e-5 · quantization 2.48e-3 m (0.012/65535 of range) · fallbacks 0 · clamps 0 · CPU gather 9 ms · plateau share 74.7% nearest vs 0.00% continuous
+  2048x1024 · 32.0 MiB · build 1356 ms (0.65 µs/texel) · max weight error 1.52e-5 · quantization 2.59e-3 m (0.013/65535 of range) · fallbacks 0 · clamps 0 · CPU gather 28 ms · plateau share 87.4% nearest vs 0.00% continuous
+L7 · 163842 cells · grid build 1502 ms · field range 13133 m · 491520 edges agree to 7.73e-11 m
+  1024x512 · 8.0 MiB · build 478 ms (0.91 µs/texel) · max weight error 1.52e-5 · quantization 1.29e-3 m (0.006/65535 of range) · fallbacks 0 · clamps 0 · CPU gather 8 ms · plateau share 51.7% nearest vs 0.00% continuous
+  2048x1024 · 32.0 MiB · build 1514 ms (0.72 µs/texel) · max weight error 1.52e-5 · quantization 1.27e-3 m (0.006/65535 of range) · fallbacks 0 · clamps 0 · CPU gather 43 ms · plateau share 75.9% nearest vs 0.00% continuous
+record: 3 x u32 cell indices + two u16 weights in the fourth word = 16 bytes/texel; L7 cell indices exceed 16 bits, so the u32s are not padding

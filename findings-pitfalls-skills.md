@@ -1762,3 +1762,44 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	tolerance lives in one coordinate system and a resized or panned canvas cannot desynchronise
 	two independently projected positions. The stub counts `fill()`/`stroke()` calls, so "the pin
 	drew its ring" is a counter assertion, not a pixel read.
+
+## a swap-pop list has no order: give the record a serial (0.6.4, 2026-10-03)
+
+	`Ledger.found` removes with swap-pop, so `removeEntry` moves the last entry into the freed
+	slot and rewrites its `ledgerIndex`. Sorting a "found order" column by that index silently
+	reorders history: retire the first of four discoveries and the *last* one leads the list
+	(`60d754ea 7ae3582b 5cf24864` instead of `7ae3582b 5cf24864 60d754ea`). An array index is
+	where the entry lives; if a view needs when it arrived, hand out a monotonic serial at
+	creation and never reuse it. The same trap covers any id a view holds - a pin on a record
+	that retired must be dropped with it, or the same anchor found again comes back already
+	selected and eats the user's first click.
+
+## put the defect back: a regression test that passes either way is not a test (0.6.4, 2026-10-03)
+
+	Each fix here was checked by restoring the old line and re-running the suite. Two drafts
+	failed that check: a sort assertion that computed both orders inside the test (so it never
+	went through the code under test) and a fixture whose removal order happened to leave the
+	slot order equal to the discovery order. Both passed with the bug in place. If a new test
+	cannot be made to fail by reverting the fix, it documents intent, not behaviour - and the
+	cheap way to find out is one `sed` and one run per fix.
+
+## triple products beat the Gram solve for barycentric weights on a fine sphere (0.5.6, 2026-10-03)
+
+	For a direction inside a face (a, b, c) of unit-sphere vertices, `dot(d, cross(b,c))` and its
+	two cyclic partners, divided by their sum, *are* the planar barycentric weights of the
+	ray/plane intersection - the intersection point is a positive combination of the vertices and
+	each triple product isolates one coefficient. The 2x2 Gram solve is the same ratio with a
+	determinant of ~1e-19 at L7 face sizes, where it produced 4 missed faces and weights of ±50
+	per 2M texels; the determinant form gives 0 and 0. It is also the containment test (inside
+	when all three share a sign), so the builder computes one set of numbers for both, and it
+	needs no winding fix-up: an unknown orientation cancels in the ratio.
+
+## the nearest-cell raster is a chained hill climb and its first row starts cold (0.5.6, 2026-10-03)
+
+	`Grid.build` walks its 1024x512 `lookup` left to right, seeding each row from the previous
+	row's first answer, so a bad early answer is inherited along the row. At L7 the pole corner
+	`lookup[0]` is cell 116690 where the true nearest is 36 - 32 climb hops away - and a bounded
+	climb from it lands nowhere near. Anything downstream that seeds from this raster should read
+	the best of the *four* lookup texels around the direction (one extra read, and the neighbour
+	is usually right) rather than trust one texel, and keep a generous climb cap with an early
+	exit: the cap is never the cost, the wrong seed is.

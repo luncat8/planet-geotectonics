@@ -183,6 +183,27 @@ assert.match(Instruments.report(labOnly), /no previously found sample/);
 const refined = Instruments.survey(exposed, 0, ['lab'], exposedLedger);
 assert.equal(refined.found[0].entry.confidence, 2, 'lab refines an inferred record by one step');
 assert.equal(refined.found[0].entry.confidence, 2, 'lab never promotes a record to measured');
+assert.equal(refined.found[0].entry.assayed, false,
+	'lab certifies a core: a record found from the surface has nothing to assay');
+assert.ok(!Instruments.depositText(refined.found[0].entry).includes('lab assayed'),
+	'so the pinned view and the survey report say the same thing about it');
+
+// Found order belongs to the discovery, not to the array slot: `found` is a swap-pop list, so
+// retiring a record moves the last one into the freed slot. The ledger hands out serials that
+// never move, and the discovery list sorts by those.
+const ordered = site('oVms', 1);
+for (const field of Deposits.FIELDS) ordered[field][0] = 1;
+const orderedLedger = selectLedger(ordered);
+const allKinds = Instruments.survey(ordered, 0, ['d5k'], orderedLedger);
+assert.equal(allKinds.found.length, 6, 'a deep hole over every potential finds all six kinds');
+const discoveryOrder = allKinds.found.map((item) => item.record.kind);
+ordered.oVms[0] = 0.1;
+Instruments.survey(ordered, 0, ['d5k'], orderedLedger);
+assert.equal(orderedLedger.found.length, 5, 'the first-found record retires below the floor');
+const bySerial = orderedLedger.found.slice().sort((a, b) => a.serial - b.serial).map((e) => e.kind);
+assert.deepEqual(bySerial, discoveryOrder.slice(1), 'found order survives the retirement');
+const bySlot = orderedLedger.found.slice().sort((a, b) => a.ledgerIndex - b.ledgerIndex).map((e) => e.kind);
+assert.notDeepEqual(bySlot, bySerial, 'the array slot stops being found order once a slot is reused');
 
 // Stable session history: evidence survives an undetectable-but-above-floor interval, and is
 // retired only below the hysteresis floor. A merge-like anchor rewrite re-associates nearby.

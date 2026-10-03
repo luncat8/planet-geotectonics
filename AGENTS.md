@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 36 kernel, rig and GUI tests, ~2.5 min here
+node tests/run-all.js		short profile (default): 37 kernel, rig and GUI tests, ~2.5 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 
@@ -78,12 +78,17 @@ contract, thresholds, module map and staging. the increments:
 0.6.3-merge-comparison.md - two sessions implemented the prospector independently; this is the
 	comparison, what was taken from which, what was deleted, and the measured calibration of the
 	monetary screen (experiments/economics-calibration.js).
+0.6.4-review.md - review of the discovery-ledger commit: four defects, their reproductions and
+	the tests that hold them.
 0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
-Render3D.gridMesh, the Mesh/Normals selects, the mode-aware detail list; s14 investigates 3D
-height modes (hex plateaus vs continuous vertex-interpolated heightmap).
+Render3D.gridMesh, the Mesh/Normals selects, the mode-aware detail list; §14 is the 0.5.6
+height-mode plan (hex plateaus vs continuous vertex-interpolated heightmap). 0.5.6 slice 1 is in:
+js/heightfield.js (the setup-time barycentric lookup and its CPU reference sampler, not yet loaded
+by the page), tests/heightfield.js, experiments/heightfield-calibration.js. Slices 2-4 - the
+gather shader variant, the hmod3d toggle and the device gates - are still open.
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.

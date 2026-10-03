@@ -4,7 +4,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
 for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
-'render3d', 'gpu/d1diff']) {
+'render3d', 'heightfield', 'gpu/d1diff']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
 vm.runInContext(`

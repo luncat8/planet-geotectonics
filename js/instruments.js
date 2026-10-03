@@ -64,6 +64,10 @@ var Instruments = (function () {
 		this.cells = new Uint32Array(size);
 		this.cellsN = 0;
 		this.found = [];
+		// Found order is a property of the discovery, not of the array slot: `found` is a
+		// swap-pop list, so a retirement moves the last entry into the freed slot and its
+		// index stops meaning "found first". Serials are handed out once and never reused.
+		this.serial = 0;
 		this.byId = Object.create(null);
 		this.byRecordCell = Object.create(null);
 		this.bySurveyCell = Object.create(null);
@@ -279,7 +283,7 @@ var Instruments = (function () {
 			confidence: 0, evidence: 0, drilled: false, assayed: false, gradeBand: null,
 			epochMyr: record.epochMyr, firstSeen: record.epochMyr,
 			lastSeen: record.epochMyr, surveyCell: -1, record: record,
-			ledgerIndex: ledger.found.length
+			ledgerIndex: ledger.found.length, serial: ledger.serial++
 		};
 		ledger.found.push(created);
 		ledger.byId[created.id] = created;
@@ -482,12 +486,14 @@ var Instruments = (function () {
 			if (entry.confidence < 1) continue;
 			var before = entry.confidence, wasAssayed = !!entry.assayed;
 			if (before < 2) { entry.confidence++; changed++; }
+			// Only a drilled intersection has something to assay: `assayed` is what turns a
+			// field band into a certified grade, and a record found from the surface has no
+			// core. Certifying it anyway made the pinned panel and the survey report disagree
+			// about the same deposit.
 			if (entry.drilled && !wasAssayed) {
 				entry.assayed = true;
 				entry.gradeBand = computeGradeBand(s.seed, entry.record, true);
 				certified++;
-			} else if (!wasAssayed && before < 2) {
-				entry.assayed = true;
 			}
 			entry.lastSeen = Math.round(s.t * 10) / 10;
 			if (reading) {

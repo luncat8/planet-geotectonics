@@ -747,6 +747,71 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.notEqual(ledgerRows.children[0].textContent, sizeFirst, 'the direction toggle flips the row order');
 	assert.equal(lgEl('ledger-sort-dir').textContent, '↑ high first');
 
+	// A regional sweep surveys every cell, so it retires records too, and the list follows the
+	// ledger when the job ends rather than waiting for the next local click. Found order has to
+	// survive that as well: `found` is a swap-pop list, so retiring the first discovery moves the
+	// last one into its slot and the slot order stops being the discovery order.
+	ledgerWorldX.oPla[ledgerWorldX.owner[1000]] = 0.95;
+	const atFar = projectCell(1000);
+	clickAt(atFar[0], atFar[1]);
+	assert.match(lgEl('prospect').textContent, /found deposits \(2\)/, 'a second cell adds two discoveries');
+	const pinnedRow = Array.from(ledgerRows.children).find((row) => row.classList.contains('sel'));
+	if (pinnedRow) pinnedRow.click();
+	lgEl('ledger-sort').value = 'found';
+	if (lgEl('ledger-sort-dir').textContent !== '\u2193 low first') lgEl('ledger-sort-dir').click();
+	lgEl('ledger-sort').dispatch('change');
+	const rowIds = () => Array.from(ledgerRows.children).map((row) => row.textContent.split(' ')[0]);
+	const rowKind = (row) => (/\u00b7 (\w+) /.exec(row.textContent) || [, '?'])[1];
+	const rowsBefore = Array.from(ledgerRows.children);
+	assert.equal(rowsBefore.length, 4, 'the ledger lists all four discoveries');
+	assert.equal(rowKind(rowsBefore[0]), 'placer', 'the first discovery leads the found-order list');
+	const retiredId = rowsBefore[0].textContent.split(' ')[0];
+	const survivors = rowsBefore.slice(1).map((row) => row.textContent.split(' ')[0]);
+	ledgerWorldX.oPla[0] = 0;
+	lgEl('campaign').click();
+	ledgerPageX.pump(200, 120000, 16.7);
+	assert.match(lgEl('campaign-progress').textContent, /campaign complete/, 'the sweep runs to its end');
+	assert.ok(!rowIds().includes(retiredId), 'the record the sweep retired leaves the list');
+	assert.deepEqual(rowIds().slice(0, survivors.length), survivors,
+		'and the discoveries that predate the sweep keep their found order across the reused slot');
+
+	// A retired discovery must take its pin with it. The overlay is hidden while a sweep runs, so
+	// a click then cannot release the pin on the way past: whatever the ledger drops, the list
+	// drops too, and the same anchor found again is an ordinary unselected record rather than one
+	// that needs two clicks to pin.
+	let pinWorld;
+	const pinPage = loadPage('?inst=d5k', function (world) {
+		pinWorld = world;
+		for (const field of globalThis.Deposits.FIELDS) world[field].fill(0);
+		world.oPla[0] = 0.95;
+	});
+	const pinEl = pinPage.el;
+	const pinPos = pinWorld.grid.pos, pinXY = new Float64Array(2);
+	globalThis.MapView.project(pinXY, pinPos[0], pinPos[1], pinPos[2], [0, 0, 0, 1], 1024, 512);
+	const pinClick = () => pinEl('map').dispatch('click', {
+		clientX: Math.floor(pinXY[0]) + 0.5, clientY: Math.floor(pinXY[1]) + 0.5, currentTarget: pinEl('map')
+	});
+	const pinRows = pinEl('ledger-list');
+	pinClick();
+	assert.equal(pinEl('ledger-count').textContent, '1 found', 'one deposit, one row');
+	pinRows.children[0].click();
+	assert.match(pinEl('prospect').textContent, /selected deposit #/, 'the row pins its record');
+	pinWorld.oPla[0] = 0;
+	pinEl('campaign').click();
+	pinPage.pump(2, 5000, 16.7);
+	assert.match(pinEl('campaign-progress').textContent, /campaign \d+%/, 'the sweep is still running');
+	assert.equal(pinEl('markers').hidden, true, 'and a running sweep owns no overlay');
+	pinClick();
+	assert.equal(pinEl('ledger-count').textContent, '0 found', 'the record is retired under the floor');
+	pinWorld.oPla[0] = 0.95;
+	pinClick();
+	assert.equal(pinEl('ledger-count').textContent, '1 found', 'and found again once its field is back');
+	assert.ok(!pinRows.children[0].classList.contains('sel'), 'without coming back already selected');
+	assert.ok(!/selected deposit/.test(pinEl('prospect').textContent),
+		'a retired record released the pin instead of leaving a dead id behind');
+	pinEl('campaign').click();
+	assert.match(pinEl('campaign-progress').textContent, /partial campaign/, 'the sweep is cancelled cleanly');
+
 
 	// On the GPU path, a campaign waits for an already-submitted play batch, then reads the
 	// mirror once before it builds the catalogue. It starts paused from that same snapshot.

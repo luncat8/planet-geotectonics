@@ -952,7 +952,7 @@
 		if (key === 'depth') return record.top;
 		if (key === 'confidence') return entry.confidence;
 		if (key === 'kind') return record.kindIndex;
-		return entry.ledgerIndex;
+		return entry.serial;
 	}
 	function ledgerRowText(entry, record) {
 		return '#' + record.id + ' · ' + record.kind + ' ' + record.variant
@@ -962,19 +962,22 @@
 	}
 	function refreshLedgerRows() {
 		var kind = campaignKind.value || 'all', items = [], i;
+		// A record the last survey retired is no longer a discovery: drop the pin with it,
+		// or a later find of the same anchor would come back already selected.
+		if (selectedDeposit !== null && !prospectLedger.byId[selectedDeposit]) selectedDeposit = null;
 		for (i = 0; i < prospectLedger.found.length; i++) {
 			var entry = prospectLedger.found[i], record = entry.record;
 			if (!record || (kind !== 'all' && record.kind !== kind)) continue;
 			items.push({ entry: entry, record: record });
 		}
 		while (ledgerList.children.length) ledgerList.removeChild(ledgerList.children[0]);
-		ledgerCount.textContent = items.length + ' found';
+		ledgerCount.textContent = campaignCount(items.length) + ' found';
 		if (!items.length) { ledgerList.hidden = true; return; }
 		ledgerList.hidden = false;
 		var desc = ledgerSortDesc, key = ledgerSortSelect.value;
 		items.sort(function (a, b) {
 			var av = ledgerSortValue(key, a.entry, a.record), bv = ledgerSortValue(key, b.entry, b.record);
-			var d = av !== bv ? av - bv : a.entry.ledgerIndex - b.entry.ledgerIndex;
+			var d = av !== bv ? av - bv : a.entry.serial - b.entry.serial;
 			return desc ? -d : d;
 		});
 		var shown = items.length < LEDGER_ROWS ? items.length : LEDGER_ROWS;
@@ -1005,18 +1008,27 @@
 	}
 	// Marker clicks resolve in the projected canvas space the painter just used, with the
 	// seam wrapped - the hit cache holds only what is actually visible on the overlay.
+	// Several records share one cell, so their diamonds land within a few pixels of each
+	// other: the nearest marker wins, and a filled viable one wins a tie over a hollow
+	// sub-economic one, because the filled diamond is the one drawn on top.
 	function hitDeposit(event) {
 		var base = gpu.on && gpu.ready ? gpuCanvas : canvas;
 		var rect = mapRect(base), width = base.width || grid.lookupW;
 		if (!rect.width || !rect.height) return null;
 		var x = (event.clientX - rect.left) / rect.width * width;
 		var y = (event.clientY - rect.top) / rect.height * (base.height || grid.lookupH);
+		var limit = MARKER_HIT_PX * MARKER_HIT_PX;
+		var best = null, bestDist = limit, bestViable = false;
 		for (var i = 0; i < markerHitsN; i++) {
 			var dx = Math.abs(markerHits[i * 2] - x); dx = Math.min(dx, width - dx);
 			var dy = Math.abs(markerHits[i * 2 + 1] - y);
-			if (dx * dx + dy * dy <= MARKER_HIT_PX * MARKER_HIT_PX) return markerHitRecords[i].id;
+			var dist = dx * dx + dy * dy;
+			if (dist > bestDist) continue;
+			var viable = !!markerHitRecords[i].viable;
+			if (dist === bestDist && best && !(viable && !bestViable)) continue;
+			best = markerHitRecords[i]; bestDist = dist; bestViable = viable;
 		}
-		return null;
+		return best ? best.id : null;
 	}
 	ledgerSortSelect.addEventListener('change', refreshLedgerRows);
 	ledgerSortDir.addEventListener('click', function () {
@@ -1050,6 +1062,9 @@
 		campaignJob = null; campaignPreparing = false; campaignRefreshArmed = false;
 		setPlaying(false);
 		refreshCampaignView();
+		// A sweep surveys every cell, so it retires and adds records like a local click does:
+		// the list and the pin follow the ledger here rather than at the next click.
+		refreshLedgerRows();
 	}
 	function discardCampaignForRebuild() {
 		campaignRequest++;
