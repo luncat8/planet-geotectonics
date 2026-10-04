@@ -85,10 +85,14 @@ contract, thresholds, module map and staging. the increments:
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
 Render3D.gridMesh, the Mesh/Normals selects, the mode-aware detail list; §14 is the 0.5.6
-height-mode plan (hex plateaus vs continuous vertex-interpolated heightmap). 0.5.6 slice 1 is in:
-js/heightfield.js (the setup-time barycentric lookup and its CPU reference sampler, not yet loaded
-by the page), tests/heightfield.js, experiments/heightfield-calibration.js. Slices 2-4 - the
-gather shader variant, the hmod3d toggle and the device gates - are still open.
+height-mode plan (hex plateaus vs continuous vertex-interpolated heightmap). 0.5.6 slices 1-3 are
+in: js/heightfield.js (the setup-time barycentric lookup, its resumable row-band build and the CPU
+reference sampler), the vertex gather variant in js/render3d.js (both pipelines cached at setup,
+a live allocation-free mode swap, attachRecords for a lookup that lands later), the Height select
+in index.html/js/ui.js (?hmod=hex|vertex, probe, capture header) driving that build across frames,
+and tests/heightfield.js, tests/render3d.js, tests/gui.js, tests/wgsl-struct.js,
+experiments/heightfield-calibration.js; 0.5.6-review.md reviews them. Slice 4 - the device gates
+and the default switch - needs the owner rig.
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.

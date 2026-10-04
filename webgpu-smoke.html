@@ -60,6 +60,7 @@ button { margin-right: 8px; padding: 4px 12px; }
 <script src="js/gpu/wgsl-diag.js"></script>
 <script src="js/gpu/sim-gpu.js"></script>
 <script src="js/gpu/render-gpu.js"></script>
+<script src="js/heightfield.js"></script>
 <script src="js/render3d.js"></script>
 <script src="js/gpu/d1diff.js"></script>
 <script src="js/clipboard.js"></script>
@@ -491,6 +492,72 @@ function captureLine(adapter, fallback) {
 		}
 		note('3d', 'live swap back to the icosphere k6 + derivative normals on the same session');
 		r3m.release();
+		// 0.5.6 slice 2: the vertex gather. The continuous-height lookup is built on the CPU
+		// (js/heightfield.js, ~1.3 s and 32 MiB at 2048x1024), the device interpolates the same
+		// records through the same shader both z sources use, and the height texture comes back
+		// and is diffed texel by texel against HeightField.gather over the same heights. Neither
+		// session is compared against a picture: the CPU reference is the oracle, as the plan
+		// requires, and the tolerance is the f32 spread of an interpolation whose inputs agree.
+		var recs = null, plateauShare = function (values) {
+			var equal = 0;
+			for (var i = 1; i < values.length; i++) if (values[i] === values[i - 1]) equal++;
+			return equal / (values.length - 1);
+		};
+		var diffHeights = function (dev, ref, label) {
+			var worst = 0, worstAt = -1, gaps = 0;
+			for (var i = 0; i < ref.length; i++) {
+				if (dev[i] === ref[i]) continue;
+				if (dev[i] === HeightField.GAP || ref[i] === HeightField.GAP) { gaps++; continue; }
+				var d = Math.abs(dev[i] - ref[i]);
+				if (d > worst) { worst = d; worstAt = i; }
+			}
+			note('3d', label + ': worst |device - CPU| ' + worst.toExponential(2) + ' m at texel ' + worstAt
+				+ (gaps ? ' · ' + gaps + ' gap-side texels' : ''));
+			if (!(worst <= 0.05)) fail('3d: ' + label + ' differs from the CPU reference by ' + worst + ' m');
+			return worst;
+		};
+		try {
+			recs = HeightField.build(cpu.grid, { width: Render3D.TW, height: Render3D.TH });
+			note('3d', 'vertex lookup: ' + (recs.bytes / 1048576).toFixed(1) + ' MiB in ' + recs.buildMs
+				+ ' ms · ' + recs.fallbacks + ' fallbacks · ' + recs.clamps + ' clamps · max weight error '
+				+ recs.maxWeightError.toExponential(2));
+			if (recs.fallbacks || recs.clamps) fail('3d: the vertex lookup needed a fallback or a clamp');
+			var refCpu = new Float64Array(recs.texels);
+			HeightField.gather(recs, cpu.z, refCpu);
+			var r3v = new Render3D(m3d).init({ device: device, mesh: 'ico', detail: 'k6', norm: 'deriv',
+				look: cpu.grid.lookup, V: V, zSource: 'cellZ', lw: cpu.grid.lookupW, lh: cpu.grid.lookupH,
+				records: recs.data, heightMode: 'vertex' });
+			r3v.initHeightReadback();
+			r3v.redraw(cpu);
+			await device.queue.onSubmittedWorkDone();
+			var vertexZ = await r3v.readHeights();
+			diffHeights(vertexZ, refCpu, 'vertex gather, cellZ');
+			// The live swap on the running session: the same records through the nearest-cell
+			// pipeline. The mode gap the plan exists for is visible in the texture itself - the
+			// hex gather parks whole patches on one cell's value, the interpolation leaves none.
+			r3v.setHeightMode('hex');
+			r3v.redraw(cpu);
+			await device.queue.onSubmittedWorkDone();
+			var hexZ = await r3v.readHeights();
+			var hp = plateauShare(hexZ), vp = plateauShare(vertexZ);
+			note('3d', 'plateau pairs: ' + (hp * 100).toFixed(1) + '% hex · ' + (vp * 100).toFixed(2) + '% vertex');
+			if (!(hp > 0.3 && vp < 0.01)) fail('3d: the vertex gather did not remove the nearest-cell plateaus');
+			r3v.release();
+			// The same lookup against the GPU run's own cellF (the mirror the parity stretch
+			// downloaded), so both z sources are diffed against the same CPU oracle.
+			var refGpu = new Float64Array(recs.texels);
+			HeightField.gather(recs, gpu.z, refGpu);
+			var r3f = new Render3D(m3d).init({ device: device, mesh: 'ico', detail: 'k6', norm: 'deriv',
+				look: cpu.grid.lookup, V: V, zSource: 'cellF', cellF: S.buf.cellF,
+				lw: cpu.grid.lookupW, lh: cpu.grid.lookupH, records: recs.data, heightMode: 'vertex' });
+			r3f.initHeightReadback();
+			r3f.redraw(gpu);
+			await device.queue.onSubmittedWorkDone();
+			diffHeights(await r3f.readHeights(), refGpu, 'vertex gather, cellF');
+			r3f.release();
+		} catch (e) {
+			fail('3d vertex gather threw: ' + ((e && e.stack) || e));
+		}
 	} catch (e) {
 		fail('3d phase threw: ' + ((e && e.stack) || e));
 	}

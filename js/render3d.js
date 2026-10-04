@@ -43,6 +43,8 @@ Render3D.TS_NAMES = ['gather', 'land', 'water', 'rim'];
 // gatherCode/renderCode replace by them, so the two can never drift apart again.
 Render3D.M_GATHER = '// layout constants appended here (W, H, LW, LH, GAP_Z)';
 Render3D.M_Z = '// z binding + read appended here (CELLF | CELLZ)';
+Render3D.M_REC = '// record binding appended here (vertex height source only)';
+Render3D.M_TEXEL = '// per-texel height source appended here (nearest cell | record)';
 Render3D.M_RENDER = '// layout constants appended here (W, H, R_INV, Z_FLOOR, Z_RIM)';
 Render3D.M_NORMAL = '// normal source appended here (deriv | analytic)';
 
@@ -83,24 +85,57 @@ Render3D.meshFor = function (mode, token) {
 
 /* The gather: one thread per height texel, the 2D shader's sourceCell convention (lookup
    row 0 = south, no flip anywhere). The one engine difference - where z comes from - is
-   injected at the marker: cellF (vec4 grid, z at [c*8].w) or the CPU upload (plain f32). */
+   injected at M_Z: cellF (vec4 grid, z at [c*8].w) or the CPU upload (plain f32). The one
+   height-source difference (0.5.6) is injected at M_TEXEL: the nearest-cell LOOK read of
+   `hex`, or the barycentric record of `vertex`, whose record buffer (M_REC, 16 bytes per
+   texel - HeightField's layout, three u32 cell indices and the two packed weights) is
+   declared and bound in that variant only. */
 Render3D.GATHER = `@group(0) @binding(0) var<storage, read> LOOK: array<f32>;
 @group(0) @binding(2) var HEIGHT: texture_storage_2d<r32float, write>;
+${Render3D.M_REC}
 ${Render3D.M_GATHER}
 ${Render3D.M_Z}
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 	if (gid.x >= W || gid.y >= H) { return; }
-	let lon = (f32(gid.x) + 0.5) / f32(W) * 6.28318530718 - 3.14159265359;
-	let lat = (f32(gid.y) + 0.5) / f32(H) * 3.14159265359 - 1.57079632679;
-	let sx = u32(clamp(floor((lon / 6.28318530718 + 0.5) * f32(LW)), 0.0, f32(LW - 1u)));
-	let sy = u32(clamp(floor((lat / 3.14159265359 + 0.5) * f32(LH)), 0.0, f32(LH - 1u)));
-	var z = zAt(u32(LOOK[sy * LW + sx]));
+${Render3D.M_TEXEL}
 	if (z != z) { z = GAP_Z; }
 	textureStore(HEIGHT, vec2<i32>(i32(gid.x), i32(gid.y)), vec4<f32>(z, 0.0, 0.0, 1.0));
 }
 `;
+/* The module-scope record binding, injected at M_REC in the `vertex` variant only: the storage
+   buffer holds one vec4<u32> per texel - three cell indices and the packed weight word. */
+Render3D.REC_U32 = 4;
+Render3D.REC_BINDING = '@group(0) @binding(3) var<storage, read> REC: array<vec4<u32>>;';
+/* `hex`: one nearest-cell read - the 0.5.0 gather body, verbatim. */
+Render3D.TEXEL_HEX = `	let lon = (f32(gid.x) + 0.5) / f32(W) * 6.28318530718 - 3.14159265359;
+	let lat = (f32(gid.y) + 0.5) / f32(H) * 3.14159265359 - 1.57079632679;
+	let sx = u32(clamp(floor((lon / 6.28318530718 + 0.5) * f32(LW)), 0.0, f32(LW - 1u)));
+	let sy = u32(clamp(floor((lat / 3.14159265359 + 0.5) * f32(LH)), 0.0, f32(LH - 1u)));
+	var z = zAt(u32(LOOK[sy * LW + sx]));`;
+/* `vertex`: the texel's record, interpolated in the CPU reference's own arithmetic. The packed
+   word is split by mask rather than unpack2x16unorm, so the three weights are the same integers
+   the reference accumulates (the third the exact remainder) and the renormalizing sum divides
+   the same numbers; a gap - a NaN cell, or the CPU path's -1e9 marker - drops out of both sums
+   and the rest renormalize, three gaps keep the marker. A cell's height is the sim's own z in
+   either engine, so a cellF session and a cellZ session still differ only in zAt. */
+Render3D.TEXEL_VERTEX = `	const INVALID_Z = GAP_Z * 0.5;
+	let rec = REC[gid.y * W + gid.x];
+	let packed = rec.w;
+	let q0 = f32(packed & 65535u);
+	let q1 = f32((packed >> 16u) & 65535u);
+	let q2 = 65535.0 - q0 - q1;
+	let h0 = zAt(rec.x);
+	let h1 = zAt(rec.y);
+	let h2 = zAt(rec.z);
+	var sum = 0.0;
+	var weight = 0.0;
+	if (h0 > INVALID_Z) { sum += q0 * h0; weight += q0; }
+	if (h1 > INVALID_Z) { sum += q1 * h1; weight += q1; }
+	if (h2 > INVALID_Z) { sum += q2 * h2; weight += q2; }
+	var z = GAP_Z;
+	if (weight > 0.0) { z = sum / weight; }`;
 
 Render3D.cellFRead = 'fn zAt(c: u32) -> f32 { return CELLF[c * 8u].w; }';
 Render3D.cellZRead = 'fn zAt(c: u32) -> f32 { return ZSRC[c]; }';
@@ -293,14 +328,29 @@ Render3D.renderConsts = function (w, h) {
 		'const R_INV = ' + (1 / R3DParams.radius) + ';',
 		'const Z_FLOOR = -15000.0;', 'const Z_RIM = 15000.0;'].join('\n');
 };
-Render3D.gatherCode = function (zSource, w, h, lw, lh) {
-	var cellF = zSource !== 'cellZ';
+Render3D.gatherCode = function (zSource, w, h, lw, lh, heightMode) {
+	var cellF = zSource !== 'cellZ', vertex = heightMode === 'vertex';
 	return Render3D.GATHER
+		.replace(Render3D.M_REC, vertex ? Render3D.REC_BINDING : '')
 		.replace(Render3D.M_GATHER, Render3D.gatherConsts(w, h, lw, lh))
+		.replace(Render3D.M_TEXEL, vertex ? Render3D.TEXEL_VERTEX : Render3D.TEXEL_HEX)
 		.replace(Render3D.M_Z,
 			(cellF ? Render3D.cellFBinding : Render3D.cellZBinding) + '\n' +
 			(cellF ? Render3D.cellFRead : Render3D.cellZRead));
 };
+// The gather's binding table, one source for the layout and the module-scope declarations it
+// compiles against: LOOK and the z source, the height target, and - `vertex` only - the record
+// buffer at 3.
+Render3D.gatherEntries = function (withRecords) {
+	var entries = [
+		{ binding: 0, visibility: 0x4, buffer: { type: 'read-only-storage' } },
+		{ binding: 1, visibility: 0x4, buffer: { type: 'read-only-storage' } },
+		{ binding: 2, visibility: 0x4, storageTexture: { access: 'write-only', format: 'r32float' } }
+	];
+	if (withRecords) entries.push({ binding: 3, visibility: 0x4, buffer: { type: 'read-only-storage' } });
+	return entries;
+};
+
 Render3D.renderCode = function (w, h, norm) {
 	return Render3D.RENDER
 		.replace(Render3D.M_NORMAL, norm === 'analytic' ? Render3D.NORM_ANALYTIC : Render3D.NORM_DERIV)
@@ -521,6 +571,15 @@ Render3D.prototype.setNormals = function (norm) {
 	this.buildDraw();
 };
 
+// The live height-source swap (0.5.6): `hex` is the nearest-cell gather, `vertex` the record
+// interpolation. Both pipelines and bind groups exist since init, so this is a state change the
+// next gather pass reads - no pipeline build, no buffer, no device work, and the mesh, the
+// textures, the sim and the deposits are untouched. A session without a record lookup, or an
+// unknown token, stays on hex.
+Render3D.prototype.setHeightMode = function (mode) {
+	this.heightMode = mode === 'vertex' && this.vertexPipe ? 'vertex' : 'hex';
+};
+
 Render3D.prototype.init = function (opts) {
 	var device = this.device = opts.device;
 	var canvas = this.canvas;
@@ -564,6 +623,10 @@ Render3D.prototype.init = function (opts) {
 	} else {
 		this.cellF = opts.cellF;
 	}
+	// The `vertex` height source (0.5.6): the CPU-built record lookup, one 16-byte record per
+	// height texel, owned by this session exactly like the borrowed LOOK is not. Built by
+	// HeightField at this same resolution, so the shader can index it by its own texel id.
+	this.heightMode = 'hex';
 	this.drawLayout = device.createBindGroupLayout({ entries: [
 		{ binding: 0, visibility: 0x1 | 0x2, buffer: { type: 'uniform' } },
 		{ binding: 1, visibility: 0x1 | 0x2, texture: { sampleType: 'unfilterable-float' } }
@@ -574,22 +637,26 @@ Render3D.prototype.init = function (opts) {
 		{ binding: 0, resource: { buffer: this.uniform } },
 		{ binding: 1, resource: this.heightView }
 	] });
+	var zBuf = this.zSource === 'cellZ' ? this.cellZ : this.cellF;
 	var gatherMod = device.createShaderModule({ code: Render3D.gatherCode(this.zSource,
 		Render3D.TW, Render3D.TH, opts.lw, opts.lh) });
-	this.gatherLayout = device.createBindGroupLayout({ entries: [
-		{ binding: 0, visibility: 0x4, buffer: { type: 'read-only-storage' } },
-		{ binding: 1, visibility: 0x4, buffer: { type: 'read-only-storage' } },
-		{ binding: 2, visibility: 0x4, storageTexture: { access: 'write-only', format: 'r32float' } }
-	] });
+	this.gatherLayout = device.createBindGroupLayout({ entries: Render3D.gatherEntries(false) });
 	this.gatherPipe = device.createComputePipeline({
 		layout: device.createPipelineLayout({ bindGroupLayouts: [this.gatherLayout] }),
 		compute: { module: gatherMod, entryPoint: 'main' }
 	});
 	this.gatherGroup = device.createBindGroup({ layout: this.gatherLayout, entries: [
 		{ binding: 0, resource: { buffer: this.look } },
-		{ binding: 1, resource: { buffer: this.zSource === 'cellZ' ? this.cellZ : this.cellF } },
+		{ binding: 1, resource: { buffer: zBuf } },
 		{ binding: 2, resource: this.heightView }
 	] });
+	// What the vertex assets need if the lookup arrives after setup: the sizes the gather
+	// shader was compiled with and the z buffer its bind group reads.
+	this.lw = opts.lw; this.lh = opts.lh; this.zBuf = zBuf;
+	if (opts.records) {
+		this.attachRecords(opts.records);
+		this.setHeightMode(opts.heightMode);
+	}
 	var blitMod = device.createShaderModule({ code: R3DBlit });
 	this.blitPipe = device.createRenderPipeline({
 		layout: 'auto',
@@ -650,9 +717,10 @@ Render3D.prototype.append = function (enc) {
 	this.knobW[1] = R3DParams.sea;
 	this.knobW[2] = R3DParams.zRange;
 	device.queue.writeBuffer(this.uniform, 0, this.uniformBytes);
+	var vertex = this.heightMode === 'vertex';
 	var g = enc.beginComputePass(this.gatherDesc);
-	g.setPipeline(this.gatherPipe);
-	g.setBindGroup(0, this.gatherGroup);
+	g.setPipeline(vertex ? this.vertexPipe : this.gatherPipe);
+	g.setBindGroup(0, vertex ? this.vertexGroup : this.gatherGroup);
 	g.dispatchWorkgroups(Render3D.TW / 8, Render3D.TH / 8);
 	g.end();
 	var p = enc.beginRenderPass(this.landDesc);
@@ -763,13 +831,74 @@ Render3D.prototype.readPixels = async function () {
 	return bytes;
 };
 
+// Height-texture readback (the 0.5.6 gather diff): r32float rows of 4 bytes need the same
+// 256-byte row alignment as the colour path, and 2048 texels is already a multiple of it, so
+// the copy carries no padding. The values are the gather's own output, byte for byte - the
+// CPU reference is diffed against these, not against a rendered picture.
+Render3D.prototype.initHeightReadback = function () {
+	this.heightRow = Math.ceil(Render3D.TW * 4 / 256) * 256;
+	this.heightStaging = this.device.createBuffer({ size: this.heightRow * Render3D.TH, usage: 0x1 | 0x8 });
+	return this;
+};
+
+Render3D.prototype.readHeights = async function () {
+	var enc = this.device.createCommandEncoder();
+	enc.copyTextureToBuffer({ texture: this.height },
+		{ buffer: this.heightStaging, bytesPerRow: this.heightRow },
+		[Render3D.TW, Render3D.TH]);
+	this.device.queue.submit([enc.finish()]);
+	await this.heightStaging.mapAsync(0x1);
+	var bytes = new Uint8Array(this.heightStaging.getMappedRange().slice(0));
+	this.heightStaging.unmap();
+	return new Float32Array(bytes.buffer, 0, Render3D.TW * Render3D.TH);
+};
+
 // Everything the session allocated; called on 3D-off, world rebuild and engine switch.
 // The sim's own buffers (a borrowed LOOK or cellF) are not ours to destroy.
+// The vertex variant's own assets: a second bind group layout over the same gather source with
+// the record array at binding 3, its pipeline, and the bind group that reads LOOK, the z buffer
+// and the records. Built from one place, so init and a later attach cannot drift.
+function buildVertexAssets(session) {
+	var device = session.device;
+	session.vertexLayout = device.createBindGroupLayout({ entries: Render3D.gatherEntries(true) });
+	session.vertexPipe = device.createComputePipeline({
+		layout: device.createPipelineLayout({ bindGroupLayouts: [session.vertexLayout] }),
+		compute: {
+			module: device.createShaderModule({ code: Render3D.gatherCode(session.zSource,
+				Render3D.TW, Render3D.TH, session.lw, session.lh, 'vertex') }),
+			entryPoint: 'main'
+		}
+	});
+	session.vertexGroup = device.createBindGroup({ layout: session.vertexLayout, entries: [
+		{ binding: 0, resource: { buffer: session.look } },
+		{ binding: 1, resource: { buffer: session.zBuf } },
+		{ binding: 2, resource: session.heightView },
+		{ binding: 3, resource: { buffer: session.records } }
+	] });
+}
+
+// Hand a session its lookup. init does this for opts.records; a page that built the lookup
+// across frames does it when the build lands, and the mode becomes selectable at once - both
+// allocate at setup time only, never in the frame loop. One lookup per session (a second call
+// is refused) and a session without one stays on `hex`.
+Render3D.prototype.attachRecords = function (records) {
+	if (this.records || !this.device) return false;
+	if (records.length !== Render3D.TW * Render3D.TH * Render3D.REC_U32) {
+		throw new RangeError('Render3D records must be ' + Render3D.TW * Render3D.TH * Render3D.REC_U32
+			+ ' u32 (one HeightField record per texel at ' + Render3D.TW + 'x' + Render3D.TH + ')');
+	}
+	this.records = this.device.createBuffer({ size: records.byteLength, usage: 0x80 | 0x8 });
+	this.device.queue.writeBuffer(this.records, 0, records);
+	buildVertexAssets(this);
+	return true;
+};
+
 Render3D.prototype.release = function () {
 	if (this.posBuf) { this.posBuf.destroy(); this.posBuf = null; }
 	if (this.idxBuf) { this.idxBuf.destroy(); this.idxBuf = null; }
 	if (this.uniform) { this.uniform.destroy(); this.uniform = null; }
 	if (this.ownsLook && this.look) { this.look.destroy(); this.look = null; }
+	if (this.records) { this.records.destroy(); this.records = null; }
 	if (this.cellZ) { this.cellZ.destroy(); this.cellZ = null; }
 	if (this.height) { this.height.destroy(); this.height = null; }
 	if (this.target) { this.target.destroy(); this.target = null; }
@@ -788,7 +917,9 @@ Render3D.prototype.release = function () {
 		this.tsMap = null;
 	}
 	if (this.staging) { this.staging.destroy(); this.staging = null; }
-	this.zScratch = null;
+	if (this.heightStaging) { this.heightStaging.destroy(); this.heightStaging = null; }
+	this.vertexPipe = null; this.vertexGroup = null; this.vertexLayout = null;
+	this.zBuf = null; this.zScratch = null;
 };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Render3D;

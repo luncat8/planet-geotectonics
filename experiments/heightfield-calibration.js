@@ -5,15 +5,22 @@
 // and the CPU reference's own sampling cost.
 // usage: node experiments/heightfield-calibration.js [levels] [seed]
 //   levels - comma list, default 5,6,7
+//   seed   - default 7. The geodesic grid's geometry is seed-independent (its own noise
+//            fields use the seed; the cell positions do not), so the seed varies the synthetic
+//            relief this script samples, not the triangulation: the reported fallbacks, clamps
+//            and plateau shares are then measured against a different field, not a different
+//            mesh. Repeat runs with different seeds are a data sweep, not a geometry sweep.
 var Grid = require('../js/geodesics.js');
 var HeightField = require('../js/heightfield.js');
 
 var levels = String(process.argv[2] || '5,6,7').split(',').map(Number);
 var seed = +(process.argv[3] || 7);
+var phase = (seed % 23) * 0.517;
 var RESOLUTIONS = [[1024, 512], [2048, 1024]];
 
 function relief(x, y, z) {
-	return 4200 * Math.sin(2.3 * x + 0.7) * Math.cos(1.7 * y) + 2600 * z - 900 * Math.sin(5.1 * z);
+	return 4200 * Math.sin(2.3 * x + 0.7 + phase) * Math.cos(1.7 * y - 0.31 * phase)
+		+ 2600 * z - 900 * Math.sin(5.1 * z + phase);
 }
 function field(grid) {
 	var out = new Float64Array(grid.V);

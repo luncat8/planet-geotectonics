@@ -1803,3 +1803,54 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	the best of the *four* lookup texels around the direction (one extra read, and the neighbour
 	is usually right) rather than trust one texel, and keep a generous climb cap with an early
 	exit: the cap is never the cost, the wrong seed is.
+
+## the shared-sign face test accepts the antipode (0.5.6 review, 2026-10-03)
+
+	For a face (a, b, c) of unit-sphere vertices, `dot(d, cross(b,c))` and its two cyclic
+	partners are the barycentric numerators of the ray's intersection with the face plane, and
+	they share a sign exactly when some point of the ray's *line* is inside the triangle - the
+	test cannot tell d from -d. The triangle at the antipode passes it too, with all three
+	products negated and the same three weights after the division, so "the three share a sign"
+	is not the containment predicate. The missing half is the plane-offset sign: `sum = s0+s1+s2`
+	and `h = det(a, b, c)` are both scaled by the ray parameter (`t = h / sum`), so the face is
+	in front of the origin exactly when the two signs agree. Measured at L3 64x32: every one of
+	the 2048 texels was "inside" exactly two faces - its own and the triangle at the antipode,
+	e.g. the north-polar [16, 209, 211] and the south-polar [36, 471, 491], same barycentric
+	values in mirrored orders. Nothing shipped was wrong: the builder only enumerates faces at
+	the seed and its ring, so an antipodal face is never a candidate (0 of 165,888 texels at
+	L3-L5 recorded a face the ray meets from behind, and the fix changed no record). But a
+	full-scan validation of a lookup is impossible while two faces "contain" every direction -
+	there is no unique answer to assert against. Cost of the exact test: one determinant, and
+	only for candidates that already share a sign, so the build time did not move.
+
+## validate generated WGSL offline with naga (0.5.6 review, 2026-10-03)
+
+	`npm i naga-wasi-cli` in a scratch directory (needs network), then run from that directory:
+	`node node_modules/naga-wasi-cli/bin/naga.mjs <in.wgsl> <out.spv>`. It parses, types and
+	validates WGSL; a real error prints "Could not parse WGSL:" with a source span. Two traps:
+	the WASI module preopens only "/" and the cwd, so both paths must be *relative to the cwd*
+	(absolute paths fail with "No such file or directory (os error 44)" - so does a missing
+	output directory), and the exit code stays 0 even on a parse error, so read the output
+	instead of `$?`. The repo's shaders are generated, so a twenty-line script that requires the
+	modules (CommonWGSL.module for the kernels, Render3D.gatherCode / renderCode for the 3D
+	ones) and writes one file per variant is enough to check the whole pack: 60 sources, every
+	kernel at both scan widths plus the renderer, the blit and all four 3D shader variants,
+	compile clean, and a negative control (`let x: u32 = 1.0;`) is caught. Compile-time only -
+	no dispatch, readback or timing - but when a shader is refactored into injection markers,
+	diffing the new SPIR-V against the old one proves the refactor changed nothing: the hex
+	gather after the 0.5.6 slice-2 split is byte-identical to the shipped one.
+
+## one-off setup work belongs in row bands, not in one frozen call (0.5.6, 2026-10-03)
+
+	The continuous-height lookup is 32 MiB and ~1.3 s at the gather's 2048x1024. As one call it
+	freezes the page for that long, shows no progress and cannot be stopped, so the builder takes
+	`rows` (stop after N rows and return the job) and `resume` (continue that job *in place* -
+	the same object comes back, so the frame loop driving it allocates nothing), plus `done` and
+	`y` for the caller. One call with neither option is the whole lookup, and it is byte-identical
+	to any chunked sequence over the same grid (that equivalence is the test). The page then
+	advances it for ~6 ms per frame: the sim keeps stepping and the probe line carries the
+	percentage. The campaign's per-frame step budget is the same trick. Two rules make it safe:
+	key the job to the world it was built for (a rebuilt grid's records name cells that no longer
+	exist, and a resumed job must not relabel itself), and never let the consumer switch to the
+	mode before the work is done - `setHeightMode('vertex')` refuses without records, so the
+	control, the session, the URL and the capture header cannot disagree.

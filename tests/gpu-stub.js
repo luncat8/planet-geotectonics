@@ -106,13 +106,18 @@ function makeDevice() {
 					this.copies = (this.copies || 0) + 1;
 				},
 				// Dispatches are accepted and dropped: the stub runs the scheduling, not WGSL.
+				// What each pass bound is recorded on its descriptor, so a test can pin which
+				// pipeline and bind group a frame used (the 0.5.6 height-mode swap).
 				beginComputePass: function (d) {
-					computePasses.push(d || {});
-					return { setPipeline: function () {},
+					d = d || {};
+					computePasses.push(d);
+					return { setPipeline: function (p) { d.pipeline = p; },
 						setBindGroup: function (slot, group, offsets) {
+							d.bindGroup = group;
 							if (offsets && offsets.length) Array.prototype.push.apply(dynamicOffsets, offsets);
 						},
-						dispatchWorkgroups: function () {}, end: function () {} };
+						dispatchWorkgroups: function (x, y, z) { d.dispatch = [x, y, z === undefined ? 1 : z]; },
+						end: function () {} };
 				},
 				beginRenderPass: function (d) {
 					renderPasses.push(d || {});

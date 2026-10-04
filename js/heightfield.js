@@ -31,7 +31,7 @@ var HeightField = (function () {
 	var dir3 = new Float64Array(3), w3 = new Float64Array(3), s3 = new Float64Array(3);
 	// Four distinct triples: the candidate under test, the best miss so far, the winner, and the
 	// caller's output - the last is the one that ends up in the record.
-	var candTri = new Int32Array(3), bestTri = new Int32Array(3);
+	var candTri = new Int32Array(3), bestTri = new Int32Array(3), buildTri = new Int32Array(3);
 	// The winning and best-miss coordinate sets carry their sum in the fourth slot.
 	var winTri = new Int32Array(3), winS = new Float64Array(4), bestS = new Float64Array(4);
 
@@ -91,13 +91,14 @@ var HeightField = (function () {
 		return a !== x ? a < x : b !== y ? b < y : c < z;
 	}
 	/* Three numbers do both jobs at once. For a face (a, b, c) the three edge normals
-	   cross(b,c), cross(c,a), cross(a,b) all point the same way round, so a direction is inside
-	   the spherical triangle exactly when its three dot products share a sign; divided by their
-	   sum they are the barycentric weights of the ray's intersection with the face plane. That
-	   is the same ratio the planar solve gives - the intersection point is a positive
-	   combination of the three vertices, and each triple product isolates one coefficient -
-	   without the 2x2 Gram determinant, which at L7 face sizes is ~1e-19 and loses every digit.
-	   Returns the sum, or 0 for a degenerate face. */
+	   cross(b,c), cross(c,a), cross(a,b) all point the same way round, so a direction shares the
+	   half-spaces of the spherical triangle *or the triangle at its antipode* exactly when its
+	   three dot products share a sign - the test cannot tell d from -d, and faceFront is what
+	   separates them; divided by their sum they are the barycentric weights of the ray's
+	   intersection with the face plane. That is the same ratio the planar solve gives - the intersection point is a
+	   positive combination of the three vertices, and each triple product isolates one
+	   coefficient - without the 2x2 Gram determinant, which at L7 face sizes is ~1e-19 and
+	   loses every digit. Returns the sum, or 0 for a degenerate face. */
 	function faceCoords(pos, a, b, c, dir, out) {
 		var bx = pos[b * 3], by = pos[b * 3 + 1], bz = pos[b * 3 + 2];
 		var cx = pos[c * 3], cy = pos[c * 3 + 1], cz = pos[c * 3 + 2];
@@ -120,6 +121,23 @@ var HeightField = (function () {
 	}
 	function contains(s) {
 		return (s[0] >= 0 && s[1] >= 0 && s[2] >= 0) || (s[0] <= 0 && s[1] <= 0 && s[2] <= 0);
+	}
+	// det(a, b, c): the face plane's offset from the centre, and the normal both side tests
+	// below are measured against. Same triple product faceCoords computes for the ray, with the
+	// face's own first vertex as the direction.
+	function faceDet(pos, a, b, c) {
+		var bx = pos[b * 3], by = pos[b * 3 + 1], bz = pos[b * 3 + 2];
+		var cx = pos[c * 3], cy = pos[c * 3 + 1], cz = pos[c * 3 + 2];
+		var ax = pos[a * 3], ay = pos[a * 3 + 1], az = pos[a * 3 + 2];
+		return ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx);
+	}
+	// Whether the ray meets the face plane from the front. The shared-sign half-space test also
+	// accepts the face at the antipode - a direction is "inside" a triangle and inside its
+	// antipodal twin at the same time - because it cannot tell d from -d. Both numbers are
+	// scaled by the ray parameter t (the intersection is t * dir, t = det / sum), so the two
+	// signs agree exactly when that parameter is positive.
+	function faceFront(pos, a, b, c, sum) {
+		return (sum > 0) === (faceDet(pos, a, b, c) > 0);
 	}
 	// The triangles incident to a cell are (c, ring[k], ring[k+1]): the ring is built from the
 	// face table's next-vertex map, so consecutive neighbours are exactly the faces at c. No
@@ -152,6 +170,11 @@ var HeightField = (function () {
 						}
 						continue;
 					}
+					// Inside the half-spaces, but a ray can meet a face's plane through the back:
+					// the antipodal triangle passes the same test. Skipped rather than ranked as
+					// a near miss, because its weights reconstruct the direction of the ray that
+					// came from the other side.
+					if (!faceFront(pos, candTri[0], candTri[1], candTri[2], sum)) continue;
 					if (haveIn && !lessTriple(candTri[0], candTri[1], candTri[2], winTri[0], winTri[1], winTri[2])) continue;
 					winTri.set(candTri); winS.set(s3); winS[3] = sum;
 					haveIn = true;
@@ -160,6 +183,16 @@ var HeightField = (function () {
 			if (haveIn) return accept(winTri, winS, outCells, outW, 1);
 		}
 		return haveBest ? accept(bestTri, bestS, outCells, outW, 0) : 0;
+	}
+	// One face, the whole predicate: does the face cover this direction? The barycentric
+	// numerators land in `out` either way (their sum is the denominator the caller divides by),
+	// and the answer is true only when the direction is inside the face and the ray meets its
+	// plane from the front. This is what "the record's face contains the texel's direction"
+	// means, and what a full scan over every face can be checked against.
+	function faceInside(pos, a, b, c, dir, out) {
+		var sum = faceCoords(pos, a, b, c, dir, out);
+		if (sum === 0 || !contains(out)) return false;
+		return faceFront(pos, a, b, c, sum);
 	}
 	function accept(tri, s, outCells, outW, contained) {
 		outCells[0] = tri[0]; outCells[1] = tri[1]; outCells[2] = tri[2];
@@ -199,44 +232,50 @@ var HeightField = (function () {
 	     exact          also keep the unquantized weights for the error budget (tests only)
 	     onProgress(f)  called with 0..1 as the build advances
 	     cancel()       return true to stop; the result then carries cancelled: true
-	   Setup may allocate; nothing downstream of it may. */
+	   Setup may allocate; nothing downstream of it may. A build is resumable in row bands so a
+	   page can spread the one-off cost across frames: opts.rows stops after that many rows and
+	   opts.resume continues that job *in place* (the same object comes back, so a frame loop
+	   allocates nothing), and a chunked sequence lands the same bytes as one call. */
 	function build(grid, opts) {
 		opts = opts || {};
-		var width = opts.width || 2048, height = opts.height || 1024;
-		var texels = width * height, data = new Uint32Array(texels * RECORD_FLOATS);
-		var exactCells = opts.exact ? new Int32Array(texels * 3) : null;
-		var exactWeights = opts.exact ? new Float64Array(texels * 3) : null;
-		var stats = { fallbacks: 0, clamps: 0, maxClamp: 0, maxWeightError: 0 };
-		var cellTri = new Int32Array(3);
-		var started = Date.now(), cancelled = false, texel = 0, x, y;
-		for (y = 0; y < height && !cancelled; y++) {
+		var job = opts.resume, fresh = !job;
+		var width = fresh ? (opts.width || 2048) : job.width;
+		var height = fresh ? (opts.height || 1024) : job.height, texels = width * height;
+		var data = fresh ? new Uint32Array(texels * RECORD_FLOATS) : job.data;
+		var exactCells = fresh ? (opts.exact ? new Int32Array(texels * 3) : null) : job.exactCells;
+		var exactWeights = fresh ? (opts.exact ? new Float64Array(texels * 3) : null) : job.exactWeights;
+		var stats = fresh ? { fallbacks: 0, clamps: 0, maxClamp: 0, maxWeightError: 0 } : job.stats;
+		var started = fresh ? Date.now() : job.started;
+		var y0 = fresh ? 0 : job.y, y1 = opts.rows ? Math.min(height, y0 + opts.rows) : height;
+		var cancelled = false, y, x, texel = y0 * width;
+		for (y = y0; y < y1 && !cancelled; y++) {
 			for (x = 0; x < width; x++, texel++) {
 				direction(width, height, x, y, dir3);
 				var seed = nearestCell(grid, dir3, lookupSeed(grid, dir3));
-				if (!chooseFace(grid, seed, dir3, cellTri, w3)) stats.fallbacks++;
+				if (!chooseFace(grid, seed, dir3, buildTri, w3)) stats.fallbacks++;
 				clampWeights(w3, stats);
 				var at = texel * RECORD_FLOATS;
-				packRecord(data, at, cellTri, w3, stats);
+				packRecord(data, at, buildTri, w3, stats);
 				if (exactCells) {
-					exactCells[texel * 3] = cellTri[0]; exactCells[texel * 3 + 1] = cellTri[1];
-					exactCells[texel * 3 + 2] = cellTri[2];
+					exactCells[texel * 3] = buildTri[0]; exactCells[texel * 3 + 1] = buildTri[1];
+					exactCells[texel * 3 + 2] = buildTri[2];
 					exactWeights[texel * 3] = w3[0]; exactWeights[texel * 3 + 1] = w3[1];
 					exactWeights[texel * 3 + 2] = w3[2];
 				}
 				if (opts.cancel && (texel & 8191) === 8191 && opts.cancel()) { cancelled = true; break; }
 			}
-			if (opts.onProgress && (y & 15) === 15) opts.onProgress((y + 1) / height);
+			if (opts.onProgress) opts.onProgress((y + 1) / height);
 		}
-		if (opts.onProgress) opts.onProgress(cancelled ? texel / texels : 1);
-		return {
-			level: grid.level, width: width, height: height, texels: texels,
-			bytes: texels * RECORD_FLOATS * 4, data: data,
-			exactCells: exactCells, exactWeights: exactWeights,
-			fallbacks: stats.fallbacks, clamps: stats.clamps, maxClamp: stats.maxClamp,
-			maxWeightError: stats.maxWeightError, cancelled: cancelled,
-			buildMs: Date.now() - started
-		};
+		var out = job || {};
+		out.level = grid.level; out.width = width; out.height = height; out.texels = texels;
+		out.bytes = texels * RECORD_FLOATS * 4; out.data = data;
+		out.exactCells = exactCells; out.exactWeights = exactWeights; out.stats = stats;
+		out.started = started; out.y = y; out.done = !cancelled && y >= height; out.cancelled = cancelled;
+		out.fallbacks = stats.fallbacks; out.clamps = stats.clamps; out.maxClamp = stats.maxClamp;
+		out.maxWeightError = stats.maxWeightError; out.buildMs = Date.now() - started;
+		return out;
 	}
+
 	// The CPU reference for one texel, in the arithmetic the gather shader will use: the packed
 	// word becomes w0 and w1, the third weight is the remainder, a gap drops out of the sum and
 	// the rest renormalize. Three gaps mean the gap marker - never -1e9 blended into relief.
@@ -270,7 +309,7 @@ var HeightField = (function () {
 	return {
 		GAP: GAP, QUANT: QUANT, RECORD_FLOATS: RECORD_FLOATS,
 		build: build, sample: sample, sampleExact: sampleExact, gather: gather,
-		direction: direction, faceCoords: faceCoords, nearestCell: nearestCell
+		direction: direction, faceCoords: faceCoords, faceInside: faceInside, nearestCell: nearestCell
 	};
 }());
 if (typeof module !== 'undefined' && module.exports) module.exports = HeightField;

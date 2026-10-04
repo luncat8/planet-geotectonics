@@ -114,6 +114,16 @@ Open `index.html` directly in a browser.
   L7, quantization 0.026/65535 of field range against a 2/65535 budget, 32 MiB and 1.2 s to build
   at 2048x1024, and the plateau share that motivates the mode falling from 75-94 % of texel pairs
   to 0 %.
+  Slice 2 adds the `vertex` gather variant to `js/render3d.js` (the record binding, a second
+  pipeline/layout/bind group cached at setup, an allocation-free live swap, the readback rig for
+  the device diff). Slice 3 wires the page: a Height select (`hmod3d`, `?hmod=hex|vertex`), the
+  probe line and the capture header. The lookup is built in row bands across frames - the sim
+  keeps stepping and the probe shows the percentage - cached per world, and handed to the live
+  session when it lands, so the switch itself allocates nothing. The default is still Cell
+  samples until the device gates run on the owner rig. Every generated shader source - all four
+  3D variants included - compiles clean under `naga`, and the `hex` variant's SPIR-V is
+  byte-identical to the pre-refactor one. `0.5.6-review.md` reviews all three slices: the
+  containment test that also accepted the antipode, and a calibration seed that varied nothing.
   `node experiments/heightfield-calibration.js`, log in `experiments/logs/`.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus the optional viable-deposit overlay, a column probe and a plate-lineage/split/merge readout. Drag the map to rotate

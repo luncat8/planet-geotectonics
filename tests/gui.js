@@ -79,6 +79,7 @@ assert.deepEqual(options(indexHtml, 'k3d'), RealRender3D.DETAILS.ico.map((d) => 
 	'index.html ships the icosphere detail tokens the module offers');
 assert.deepEqual(options(indexHtml, 'mesh3d'), ['ico', 'grid'], 'the mesh select offers both mesh modes');
 assert.deepEqual(options(indexHtml, 'norm3d'), ['deriv', 'analytic'], 'the normals select offers both sources');
+assert.deepEqual(options(indexHtml, 'hmod3d'), ['hex', 'vertex'], 'the height select offers both height modes');
 
 // The bench's accepted ranges, read out of its own source: the drift between these numbers and
 // the page's options is what dropped `20` from every bench run taken with the defaults.
@@ -163,7 +164,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 // --- 3. the page, running ----------------------------------------------------------------
 // The index.html script order, minus the GPU files and ui.js itself. The rotation model
 // loads before plates.js because Plates.steer resolves Rotations at load time (0.4.6c).
-const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
+const MODULES = ['env', 'geodesics', 'heightfield', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
@@ -265,8 +266,15 @@ function FakeRender3D(canvas) {
 	this.inits = []; this.orbits = []; this.appends = 0; this.redraws = 0;
 	this.presents = 0; this.releases = 0; this.tsText = '';
 	this.meshes = []; this.norms = [];
+	// The height source, as the real session has it: no lookup means no vertex mode, one lookup
+	// per session, and a mode swap that only ever changes state.
+	this.heightMode = 'hex'; this.records = null; this.attaches = 0; this.heightModes = [];
 	fakeR3ds.push(this);
 }
+// The only constant the fake shrinks: 512x256 keeps an in-page lookup build at 32 frames
+// instead of ~330. The real 2048x1024 and its record length are pinned in tests/render3d.js,
+// and a lookup of any other length is refused here exactly as the real session refuses it.
+FakeRender3D.TW = 512; FakeRender3D.TH = 256;
 FakeRender3D.PITCH_MAX = 89.5 * Math.PI / 180;
 FakeRender3D.DIST_MIN = 1.5; FakeRender3D.DIST_MAX = 10;
 FakeRender3D.DETAILS = RealRender3D.DETAILS;
@@ -276,7 +284,20 @@ FakeRender3D.prototype.init = function (opts) {
 	this.opts = opts; this.inits.push(opts);
 	this.meshMode = opts.mesh; this.detail = opts.detail; this.norm = opts.norm;
 	this.vCount = fakeVerts(opts.mesh, opts.detail);
+	if (opts.records) { this.attachRecords(opts.records); this.setHeightMode(opts.heightMode); }
 	return this;
+};
+FakeRender3D.prototype.attachRecords = function (records) {
+	if (this.records) return false;
+	if (records.length !== FakeRender3D.TW * FakeRender3D.TH * 4) {
+		throw new RangeError('records must be ' + FakeRender3D.TW * FakeRender3D.TH * 4 + ' u32');
+	}
+	this.records = records; this.attaches++;
+	return true;
+};
+FakeRender3D.prototype.setHeightMode = function (mode) {
+	this.heightMode = mode === 'vertex' && this.records ? 'vertex' : 'hex';
+	this.heightModes.push(this.heightMode);
 };
 FakeRender3D.prototype.setMesh = function (mode, detail) {
 	this.meshes.push([mode, detail]);
@@ -1497,6 +1518,21 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(offPage.el('k3d').options.map((o) => o.value).join(','), 'k6,k7,k8,k9',
 			'the detail select offers exactly the icosphere tokens');
 
+		// ?hmod=vertex pre-fills the height select; the lookup itself waits for the view that
+		// reads it, so a page with the 3D off never spends the 32 MiB.
+		const hmodPage = loadPage('?hmod=vertex');
+		assert.equal(hmodPage.el('hmod3d').value, 'vertex', '?hmod=vertex pre-fills the control');
+		hmodPage.pump(3);
+		assert.equal(fakeR3ds.length, 0, 'no session and no lookup without the 3D view');
+		hmodPage.el('hmod3d').value = 'hex';
+		hmodPage.el('hmod3d').dispatch('change');
+		hmodPage.el('hmod3d').value = 'vertex';
+		hmodPage.el('hmod3d').dispatch('change');
+		hmodPage.pump(3);
+		assert.match(hmodPage.el('probe').textContent, /the lookup builds while the 3D view is on/,
+			'the control says the build waits for the view that reads it');
+		assert.equal(fakeR3ds.length, 0, 'and nothing was built or booted');
+
 		// ?v3d=1 with no WebGPU at all: the toggle lands disabled with the reason.
 		const dryPage = loadPage('?v3d=1&disp=12&k3d=5');
 		assert.equal(dryPage.el('v3d').disabled, true, 'no WebGPU: the toggle is disabled');
@@ -1643,6 +1679,49 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		page3.el('map3d').dispatch('click', { clientX: 200, clientY: 90, currentTarget: page3.el('map3d') });
 		assert.ok(r3live.picks === 2, 'a click that ends an orbit drag is not a pick');
 
+		// The height control (0.5.6 slice 3): `vertex` needs a lookup the page builds itself -
+		// in row bands across frames, so the sim keeps stepping - and hands to the live session
+		// when it lands. The session never switches to a mode it has no pipeline for, and a
+		// finished lookup is cached, so the second switch is a state change and nothing more.
+		assert.equal(page3.el('hmod3d').value, 'hex', 'the height select ships on the cell samples');
+		assert.equal(r3.attaches, 0, 'and no lookup was built for it');
+		page3.el('hmod3d').value = 'vertex';
+		page3.el('hmod3d').dispatch('change');
+		assert.equal(r3.heightMode, 'hex', 'vertex waits for the lookup instead of switching without one');
+		assert.match(page3.el('probe').textContent, /building the lookup/, 'and the probe says what it is doing');
+		page3.pump(2, 9500);
+		assert.match(page3.el('probe').textContent, /Continuous heightmap: \d+% of the lookup/,
+			'the build reports its bands while the map keeps running');
+		assert.equal(r3.heightMode, 'hex', 'and nothing switches mid-build');
+		page3.pump(40, 9600);
+		assert.equal(r3.attaches, 1, 'the finished lookup attached to the live session');
+		assert.equal(r3.records.length, FakeRender3D.TW * FakeRender3D.TH * 4, 'at the gather\'s own resolution');
+		assert.equal(r3.heightMode, 'vertex', 'and the session runs the continuous heightmap');
+		assert.match(page3.el('probe').textContent, /Continuous heightmap ready · \d+ MiB in [\d.]+ s/,
+			'the probe reports the build: ' + page3.el('probe').textContent);
+		page3.pump(2, 9650);
+		const reportHeight = page3.copy();
+		assert.ok(worldLine(reportHeight).includes(' · height vertex'),
+			'the header names the mode: ' + worldLine(reportHeight));
+		page3.el('hmod3d').value = 'hex';
+		page3.el('hmod3d').dispatch('change');
+		assert.equal(r3.heightMode, 'hex', 'back to the cell samples');
+		page3.el('hmod3d').value = 'vertex';
+		page3.el('hmod3d').dispatch('change');
+		assert.equal(r3.heightMode, 'vertex', 'and back again with no rebuild: the cached lookup is reused');
+		assert.equal(r3.attaches, 1, 'nothing is attached twice');
+		// A new world is a new grid, and the records name its cells: the lookup is rebuilt.
+		page3.el('level').value = '6';
+		page3.el('level').dispatch('change');
+		await page3.tick();
+		page3.pump(2, 9700);
+		assert.match(page3.el('probe').textContent, /Continuous heightmap: \d+% of the lookup/,
+			'a rebuilt world rebuilds the lookup rather than reusing the old grid\'s cells');
+		page3.pump(60, 9750);
+		const r3l6 = fakeR3ds[fakeR3ds.length - 1];
+		assert.ok(r3l6 !== r3 && r3.releases === 1, 'the level rebuild booted a fresh session');
+		assert.equal(r3l6.heightMode, 'vertex', 'which ends on the new world\'s own heightmap');
+
 		// Off again: everything swaps back and the session is released.
 		v3.checked = false;
 		v3.dispatch('change');
@@ -1669,7 +1748,8 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' the detail list follows the mesh mode, the on path swaps the canvases and greys the'
 		+ ' layers, the orbit and wheel move only the camera, the knobs apply live, the header and'
 		+ ' the strip\'s V3D slot name the session, a mesh or normals change swaps buffers or pipelines'
-		+ ' on the live session without a world rebuild, and off restores the map;'
+		+ ' on the live session without a world rebuild, the height control builds its lookup in'
+		+ ' row bands, caches it per world and switches modes without a rebuild, and off restores the map;'
 		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
 		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
 })().catch((error) => { console.error(error); process.exit(1); });

@@ -38,6 +38,7 @@
 	var v3dInput = document.getElementById('v3d'), map3d = document.getElementById('map3d');
 	var dispInput = document.getElementById('disp'), k3dInput = document.getElementById('k3d');
 	var mesh3dInput = document.getElementById('mesh3d'), norm3dInput = document.getElementById('norm3d');
+	var hmod3dInput = document.getElementById('hmod3d');
 	var dispValue = document.getElementById('disp-value');
 	// Sea controls (0.3.5): two sliders, one active - the last one touched takes the level
 	// and greys the other. The level slider writes Params.sea directly (a recolour on both
@@ -244,6 +245,14 @@
 	var v3d = { on: false, busy: false, r3d: null }, v3dToken = 0;
 	var v3dDisp = 10, v3dMesh = 'ico', v3dDetail = Render3D.DEFAULT_DETAIL.ico;
 	var v3dNorm = 'deriv', v3dYaw = 0.65, v3dPitch = 0.42, v3dDist = 3;
+	// The height control (0.5.6 slice 3): `hex` is the shipped nearest-cell gather, `vertex`
+	// interpolates between cell centres through a setup-time lookup. That lookup is 32 MiB and
+	// ~1.3 s at the gather's own 2048x1024, so it is built in row bands across frames instead
+	// of freezing one: the sim keeps stepping and the probe line shows the band it is on. It is
+	// cached per world and handed to the live session the moment it lands, so the switch itself
+	// allocates nothing. `?hmod=vertex` pre-fills the control; the default is cell samples.
+	var v3dHeight = 'hex', v3dLookup = null;
+	var LOOKUP_ROWS = 4, LOOKUP_MS = 6;
 	function paintV3d() { dispValue.textContent = v3dDisp.toFixed(1) + '×'; }
 	// The detail select is mode-aware: its options are the module's table, rebuilt in
 	// place, so the page, the URL and the session cannot disagree about what a mode
@@ -286,8 +295,64 @@
 		if (v3d.r3d) v3d.r3d.setNormals(v3dNorm);
 		if (v3d.on) dirty = true;
 	}
+	// Hand the finished lookup to the session and select the mode. Idempotent: the session
+	// keeps the first lookup it is given, and a mode that is already current changes nothing.
+	function armHeight(r3d) {
+		if (!r3d) return;
+		if (!r3d.records) r3d.attachRecords(v3dLookup.data);
+		if (r3d.heightMode === 'vertex') return;
+		r3d.setHeightMode('vertex');
+		if (v3d.on) dirty = true;
+	}
+	function paintHeight() {
+		probe.textContent = 'Continuous heightmap ready · ' + (v3dLookup.bytes / 1048576).toFixed(0)
+			+ ' MiB in ' + (v3dLookup.buildMs / 1000).toFixed(1) + ' s · ' + v3dLookup.fallbacks
+			+ ' fallbacks · switch back to cell samples any time.';
+	}
+	// One band per frame, budgeted like a campaign step: the build is the page's own work and
+	// nothing reads it until it is done, so it never blocks a frame for longer than LOOKUP_MS.
+	function driveHeight() {
+		var wasDone = v3dLookup !== null && v3dLookup.done;
+		if (!v3dLookup || v3dLookup.level !== grid.level)
+			v3dLookup = HeightField.build(grid, { width: Render3D.TW, height: Render3D.TH, rows: LOOKUP_ROWS });
+		else if (!v3dLookup.done) {
+			var until = Date.now() + LOOKUP_MS;
+			do { v3dLookup = HeightField.build(grid, { resume: v3dLookup, rows: LOOKUP_ROWS }); }
+			while (!v3dLookup.done && Date.now() < until);
+		}
+		if (!v3dLookup.done) {
+			// The probe line is the build's progress readout; the hover path also writes it, and
+			// while the build lasts this rewrite is the one that shows.
+			probe.textContent = 'Continuous heightmap: '
+				+ Math.round(100 * v3dLookup.y / v3dLookup.height) + '% of the lookup · the map keeps running.';
+			return;
+		}
+		armHeight(v3d.r3d);
+		if (!wasDone) paintHeight();
+	}
+	function applyHeight() {
+		v3dHeight = hmod3dInput.value === 'vertex' ? 'vertex' : 'hex';
+		if (v3dHeight === 'vertex') {
+			if (v3dLookup && v3dLookup.done && v3dLookup.level === grid.level) armHeight(v3d.r3d);
+			else v3dLookup = null;   // a stale or half-built lookup is restartable work, not a state
+			if (!v3dLookup || !v3dLookup.done)
+				probe.textContent = v3dInput.checked ? 'Continuous heightmap: building the lookup.'
+					: 'Continuous heightmap: the lookup builds while the 3D view is on.';
+			return;
+		}
+		// Back to cell samples: a build in flight is dropped - it is the control's own work and
+		// nothing reads it - while a finished lookup stays cached for the next switch.
+		if (v3dLookup && !v3dLookup.done) v3dLookup = null;
+		if (v3d.r3d) { v3d.r3d.setHeightMode('hex'); if (v3d.on) dirty = true; }
+	}
 	function releaseV3d() {
 		if (v3d.r3d) { v3d.r3d.release(); v3d.r3d = null; }
+		// Half a lookup has no reader without a session, so the build stops with the view. A
+		// finished one is kept: it is per world and the next session takes it whole.
+		if (v3dLookup && !v3dLookup.done) {
+			v3dLookup = null;
+			probe.textContent = 'Continuous heightmap: the build stopped with the 3D view.';
+		}
 		v3d.on = false;
 		map3d.hidden = true;
 		// The engine's own canvas takes the map slot back (bootEngine keeps it that way).
@@ -304,6 +369,9 @@
 			zSource: gpuMode ? 'cellF' : 'cellZ', lw: grid.lookupW, lh: grid.lookupH,
 			look: gpuMode ? GpuSim.S.buf.lookup : grid.lookup };
 		if (gpuMode) o.cellF = GpuSim.S.buf.cellF;
+		if (v3dHeight === 'vertex' && v3dLookup && v3dLookup.done && v3dLookup.level === grid.level) {
+			o.records = v3dLookup.data; o.heightMode = 'vertex';
+		}
 		return o;
 	}
 	// The boot itself, minus the user-path gates: the engine (and its device) is final
@@ -382,6 +450,7 @@
 	mesh3dInput.addEventListener('change', applyMesh);
 	k3dInput.addEventListener('change', applyDetail);
 	norm3dInput.addEventListener('change', applyNorm);
+	hmod3dInput.addEventListener('change', applyHeight);
 
 	function syncAdjust() {
 		coolingInput.checked = state.cooling === 1;
@@ -710,8 +779,10 @@
 	// mesh does not have) lands on that mesh's default rather than on the first option.
 	if (query.get('mesh') === 'grid') v3dMesh = 'grid';
 	if (query.get('norm') === 'analytic') v3dNorm = 'analytic';
+	if (query.get('hmod') === 'vertex') v3dHeight = 'vertex';
 	mesh3dInput.value = v3dMesh;
 	norm3dInput.value = v3dNorm;
+	hmod3dInput.value = v3dHeight;
 	paintDetail(query.get('k3d') === null ? Render3D.DEFAULT_DETAIL[v3dMesh] : query.get('k3d'));
 	v3dDisp = +dispInput.value;
 	if (query.get('v3d') === '1') v3dInput.checked = true;
@@ -845,6 +916,7 @@
 		renderer = new Renderer(canvas, state);
 		renderer.setView(viewQ);
 		Deposits.release();      // catalogue scratch and cache were sized to the old grid.V
+		v3dLookup = null;        // and the height lookup's records name cells of the old grid
 		prospectLedger = new Instruments.Ledger(grid.V);
 		prospectPanel.textContent = prospectIntro;
 		refreshLedgerMarkers();  // the overlay and the list follow the ledger of the new world
@@ -1676,6 +1748,7 @@
 			if (v3dMesh !== 'ico') v3dLine += ' · mesh ' + v3dMesh;
 			if (v3dDetail !== Render3D.DEFAULT_DETAIL[v3dMesh]) v3dLine += ' · ' + v3dDetail;
 			if (v3dNorm !== 'deriv') v3dLine += ' · norm ' + v3dNorm;
+			if (v3dHeight !== 'hex') v3dLine += ' · height ' + v3dHeight;
 		}
 		return rig
 			+ '\nengine ' + engine + ' · L' + grid.level
@@ -1699,6 +1772,7 @@
 
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
+		if (v3dHeight === 'vertex' && v3dInput.checked) driveHeight();
 		var viewMoved = viewVersion !== shownVersion;
 		// Set by the render tail the moment this rAF's play encoder is built with the
 		// draw inside it; the bottom repaint gate then skips the standalone draw submit.

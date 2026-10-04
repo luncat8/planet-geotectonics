@@ -95,6 +95,92 @@ for (let c = 0; c < grid.V; c++) {
 assert.ok(edges > grid.V * 2, 'the edge sweep covers the whole triangulation');
 assert.ok(edgeError < 1e-6 * span, 'both faces of a shared edge agree on its height');
 
+// The exact face predicate: a face contains its own vertices and never their antipodes. The
+// shared-sign half-space test alone says a direction is inside a triangle and inside the
+// triangle at the antipode at once (it cannot tell d from -d), so a lookup could record a face
+// from the far side; only the plane-offset sign separates them.
+{
+	const probe = new Float64Array(3), w = new Float64Array(3);
+	let insideOwn = 0, insideAntipode = 0, sampled = 0;
+	for (let c = 0; c < grid.V; c += 61) {
+		const b = grid.ring[c * 6], d = grid.ring[c * 6 + 1];
+		// The face's centroid direction: strictly inside, so no product sits on the boundary.
+		let x = 0, y = 0, z = 0;
+		for (const v of [c, b, d]) { x += grid.pos[v * 3]; y += grid.pos[v * 3 + 1]; z += grid.pos[v * 3 + 2]; }
+		const len = Math.hypot(x, y, z);
+		probe[0] = x / len; probe[1] = y / len; probe[2] = z / len;
+		insideOwn += HeightField.faceInside(grid.pos, c, b, d, probe, w) ? 1 : 0;
+		probe[0] = -probe[0]; probe[1] = -probe[1]; probe[2] = -probe[2];
+		insideAntipode += HeightField.faceInside(grid.pos, c, b, d, probe, w) ? 1 : 0;
+		sampled++;
+	}
+	assert.equal(insideOwn, sampled, 'a face contains a direction strictly inside it');
+	assert.equal(insideAntipode, 0, 'and not the direction of its antipode');
+}
+
+// The recorded face is the face a full scan finds: every triangle of the triangulation is
+// tested with the exact predicate, exactly one of them must contain the texel direction (the
+// faces tile the sphere), it must be the record's, and the weights are re-solved by an
+// independent method - the ray-plane intersection projected into a local 2D frame and solved
+// there as a least-squares system - rather than by the triple products the builder uses.
+{
+	const scanGrid = new Grid(3, 7).build();
+	const scan = HeightField.build(scanGrid, { width: 64, height: 32, exact: true });
+	const faces = [], seenFace = new Set();
+	for (let c = 0; c < scanGrid.V; c++) {
+		const m = scanGrid.ringN[c];
+		for (let k = 0; k < m; k++) {
+			const b = scanGrid.ring[c * 6 + k], d = scanGrid.ring[c * 6 + (k + 1) % m];
+			if (b < 0 || d < 0) continue;
+			const key = [c, b, d].sort((x, y) => x - y).join(',');
+			if (seenFace.has(key)) continue;
+			seenFace.add(key);
+			faces.push(key.split(',').map(Number));
+		}
+	}
+	assert.equal(faces.length, 20 * Math.pow(4, 3), 'the L3 triangulation has 20 * 4^k faces');
+	const probe = new Float64Array(3), wScan = new Float64Array(3);
+	let notUnique = 0, scanMismatch = 0, solveErr = 0;
+	for (let t = 0; t < scan.texels; t++) {
+		HeightField.direction(64, 32, t % 64, (t - t % 64) / 64, probe);
+		let hits = 0, hit = 0;
+		for (let f = 0; f < faces.length; f++) {
+			if (HeightField.faceInside(scanGrid.pos, faces[f][0], faces[f][1], faces[f][2], probe, wScan)) {
+				hits++; hit = f;
+			}
+		}
+		if (hits !== 1) { notUnique++; continue; }
+		const face = faces[hit];
+		if (scan.data[t * 4] !== face[0] || scan.data[t * 4 + 1] !== face[1] || scan.data[t * 4 + 2] !== face[2]) scanMismatch++;
+		// Independent weights: P = t * dir on the face plane, solved in the plane's own 2D frame.
+		HeightField.faceInside(scanGrid.pos, face[0], face[1], face[2], probe, wScan);
+		const sum = wScan[0] + wScan[1] + wScan[2];
+		const det = (grid.pos[face[0] * 3] * (grid.pos[face[1] * 3 + 1] * grid.pos[face[2] * 3 + 2]
+			- grid.pos[face[1] * 3 + 2] * grid.pos[face[2] * 3 + 1])
+			+ grid.pos[face[0] * 3 + 1] * (grid.pos[face[1] * 3 + 2] * grid.pos[face[2] * 3]
+			- grid.pos[face[1] * 3] * grid.pos[face[2] * 3 + 2])
+			+ grid.pos[face[0] * 3 + 2] * (grid.pos[face[1] * 3] * grid.pos[face[2] * 3 + 1]
+			- grid.pos[face[1] * 3 + 1] * grid.pos[face[2] * 3])) || 1;
+		const tp = det / sum;   // the ray parameter, exact up to rounding
+		const A = [scanGrid.pos[face[0] * 3], scanGrid.pos[face[0] * 3 + 1], scanGrid.pos[face[0] * 3 + 2]];
+		const u = [scanGrid.pos[face[1] * 3] - A[0], scanGrid.pos[face[1] * 3 + 1] - A[1], scanGrid.pos[face[1] * 3 + 2] - A[2]];
+		const v = [scanGrid.pos[face[2] * 3] - A[0], scanGrid.pos[face[2] * 3 + 1] - A[1], scanGrid.pos[face[2] * 3 + 2] - A[2]];
+		const g = [tp * probe[0] - A[0], tp * probe[1] - A[1], tp * probe[2] - A[2]];
+		const uu = u[0] * u[0] + u[1] * u[1] + u[2] * u[2];
+		const uv = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+		const vv = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+		const uw = u[0] * g[0] + u[1] * g[1] + u[2] * g[2];
+		const vw = v[0] * g[0] + v[1] * g[1] + v[2] * g[2];
+		const inv = 1 / (uu * vv - uv * uv);
+		const lb = (uw * vv - vw * uv) * inv, lc = (vw * uu - uw * uv) * inv;
+		const triple = [scan.exactWeights[t * 3], scan.exactWeights[t * 3 + 1], scan.exactWeights[t * 3 + 2]];
+		solveErr = Math.max(solveErr, Math.abs(triple[1] - lb), Math.abs(triple[2] - lc), Math.abs(triple[0] - (1 - lb - lc)));
+	}
+	assert.equal(notUnique, 0, 'every texel direction is inside exactly one face of the tiling');
+	assert.equal(scanMismatch, 0, 'and the record holds that face, not a neighbour or an antipode');
+	assert.ok(solveErr < 1e-9, 'the recorded weights match an independent planar solve (max ' + solveErr.toExponential(2) + ')');
+}
+
 // Quantization budget: the plan allows 2/65535 of field range for the packed pair.
 let quantError = 0;
 for (let t = 0; t < small.texels; t++) {
@@ -124,6 +210,20 @@ assert.ok(bounded, 'no texel interpolates the gap marker into relief');
 const again = HeightField.build(grid, { width: 256, height: 128 });
 assert.equal(Buffer.compare(Buffer.from(small.data.buffer), Buffer.from(again.data.buffer)), 0,
 	'two builds of one grid are bit-identical, face ties included');
+
+// A chunked build is the same lookup as one call: the page spreads the one-off cost over
+// frames, and the bytes must not depend on where the chunk boundaries fell. The resume call
+// hands the same job object back, so a frame loop driving it allocates nothing per chunk.
+let job = null, chunks = 0;
+do {
+	job = HeightField.build(grid, { width: 256, height: 128, rows: 5, resume: job });
+	chunks++;
+	assert.ok(job.texels === 256 * 128, 'a job describes its grid from the first chunk');
+} while (!job.done);
+assert.equal(chunks, Math.ceil(128 / 5), 'the loop ran one chunk per band');
+assert.ok(job.cancelled === false && job.y === 128, 'and the job finished where the height ends');
+assert.equal(Buffer.compare(Buffer.from(small.data.buffer), Buffer.from(job.data.buffer)), 0,
+	'a build in row chunks is bit-identical to one call');
 
 // Cancellation: the builder stops on request and says so.
 let calls = 0;

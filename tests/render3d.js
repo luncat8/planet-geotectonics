@@ -324,6 +324,135 @@ assert.equal(r3d.vCount, 10 * Math.pow(4, 7) + 2, 'the new mesh is the k7 one');
 	assert.equal(r3d.norm, 'deriv', 'an unknown normal source falls back to the derivative one');
 }
 
+// --- the vertex height source (0.5.6 slice 2) -----------------------------------------------
+// The record lookup is the page's (HeightField's build), so the session only owns the device
+// copy; both gather pipelines and bind groups are cached at init, and the live height-mode swap
+// is a state change a frame reads - no shader build, no buffer, no device object. The shader
+// source itself is pinned in tests/wgsl-struct.js; here it is the JS contract.
+{
+	const dev = makeDevice();
+	const recs = new Uint32Array(Render3D.TW * Render3D.TH * Render3D.REC_U32);
+	for (let i = 0; i < recs.length; i += 4) {
+		recs[i] = 1; recs[i + 1] = 2; recs[i + 2] = 3;
+		recs[i + 3] = 40000 * 65536 + 20000;   // q0 = 20000 (low half), q1 = 40000 (high half)
+	}
+	assert.throws(function () {
+		new Render3D(canvasOf(64, 64)).init({ device: makeDevice(), mesh: 'ico', detail: 'k6',
+			look: look, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH,
+			records: new Uint32Array(4) });
+	}, /records must be/, 'a record lookup of the wrong size is refused, not read out of range');
+
+	const zState = new State(new Grid(3, 7).build(), 7);
+	const lookBuf = dev.createBuffer({ size: zState.grid.lookup.length * 4, usage: 0x80 | 0x4 | 0x8 });
+	const rv = new Render3D(canvasOf(512, 256)).init({ device: dev, mesh: 'ico', detail: 'k6',
+		look: lookBuf, V: zState.grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH,
+		records: recs, heightMode: 'vertex' });
+	assert.equal(rv.heightMode, 'vertex', 'the session boots in vertex mode when asked');
+	assert.equal(rv.records.size, recs.byteLength, 'the record lookup is uploaded into an owned buffer');
+	const vertexGroup = dev.bindGroups.filter((g) => g.entries && g.entries.length === 4).pop();
+	assert.equal(vertexGroup.entries[3].resource.buffer, rv.records, 'the vertex gather binds it at 3');
+	assert.equal(vertexGroup.entries[0].resource.buffer, lookBuf, 'and still binds the borrowed LOOK');
+	assert.equal(dev.bindGroupLayouts[dev.bindGroupLayouts.length - 1].entries.length, 4,
+		'the vertex layout declares the fourth binding');
+	dev.computePasses.length = 0;
+	rv.redraw(zState);
+	assert.equal(dev.computePasses.length, 1, 'one gather in vertex mode');
+	assert.equal(dev.computePasses[0].pipeline, rv.vertexPipe, 'and it is the vertex pipeline');
+	assert.equal(dev.computePasses[0].bindGroup, rv.vertexGroup, 'bound to the vertex group');
+	assert.deepEqual(dev.computePasses[0].dispatch, [Render3D.TW / 8, Render3D.TH / 8, 1],
+		'one thread per height texel');
+
+	// The live swap: hex is the other cached pipeline, the swap destroys and creates nothing.
+	const pipes = [rv.vertexPipe, rv.gatherPipe], layout = rv.vertexLayout, group = rv.vertexGroup;
+	const records = rv.records, height = rv.height;
+	dev.computePasses.length = 0;
+	rv.setHeightMode('hex');
+	assert.equal(rv.heightMode, 'hex');
+	rv.redraw(zState);
+	assert.equal(dev.computePasses[0].pipeline, rv.gatherPipe, 'the swapped frame runs the base gather');
+	assert.equal(dev.computePasses[0].bindGroup, rv.gatherGroup, 'bound to the base group');
+	rv.setHeightMode('vertex');
+	rv.redraw(zState);
+	assert.equal(dev.computePasses[1].pipeline, rv.vertexPipe, 'and back, with no rebuild');
+	assert.deepEqual([rv.vertexPipe, rv.gatherPipe], pipes, 'the pipelines are the same objects');
+	assert.equal(rv.vertexLayout, layout, 'so is the layout');
+	assert.equal(rv.vertexGroup, group, 'and the bind group');
+	rv.setHeightMode('nonsense');
+	assert.equal(rv.heightMode, 'hex', 'an unknown height mode falls back to the cell samples');
+	rv.setHeightMode('vertex');
+
+	// A mesh or normal swap is not a height-source swap: the record buffer and both pipelines
+	// survive it.
+	rv.setMesh('grid', '512x256');
+	rv.setNormals('analytic');
+	assert.equal(rv.records, records, 'a mesh and a normals swap leave the record lookup alone');
+	assert.equal(rv.vertexPipe, pipes[0], 'and the cached gather pipelines');
+	assert.equal(rv.height, height, 'and the height texture');
+
+	// A vertex-mode frame allocates nothing either: the record buffer, both pipelines and both
+	// bind groups are init-time, so the swap can never be a per-frame cost.
+	{
+		let allocs = 0;
+		const mkBuf = dev.createBuffer, mkTex = dev.createTexture;
+		dev.createBuffer = function (d) { allocs++; return mkBuf.call(dev, d); };
+		dev.createTexture = function (d) { allocs++; return mkTex.call(dev, d); };
+		for (let i = 0; i < 100; i++) {
+			rv.redraw(zState);
+			dev.computePasses.length = 0;
+			dev.renderPasses.length = 0;
+		}
+		dev.createBuffer = mkBuf; dev.createTexture = mkTex;
+		assert.equal(allocs, 0, '100 vertex-mode frames allocate no device object');
+	}
+
+	// A session with no record lookup has no vertex mode to enter.
+	const dev2 = makeDevice();
+	const rh = new Render3D(canvasOf(512, 256)).init({ device: dev2, mesh: 'ico', detail: 'k6',
+		look: grid.lookup, V: grid.V, zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH });
+	rh.setHeightMode('vertex');
+	assert.equal(rh.heightMode, 'hex', 'without records the session stays on the nearest-cell gather');
+	assert.equal(rh.vertexPipe, undefined, 'and never builds the second pipeline');
+
+	// The lookup can also arrive after setup: a page that builds one across frames attaches it
+	// to the live session, and only then does `vertex` become selectable. One lookup per
+	// session, one set of assets, and the same refusal for a lookup of the wrong size.
+	assert.throws(function () {
+		rh.attachRecords(new Uint32Array(4));
+	}, /records must be/, 'a late lookup of the wrong size is refused too');
+	assert.equal(rh.attachRecords(recs), true, 'the lookup attaches to a running session');
+	assert.equal(rh.records.size, recs.byteLength, 'as the session\'s own buffer');
+	rh.setHeightMode('vertex');
+	assert.equal(rh.heightMode, 'vertex', 'and vertex mode is selectable at once');
+	dev2.computePasses.length = 0;
+	rh.redraw(zState);
+	assert.equal(dev2.computePasses[0].pipeline, rh.vertexPipe, 'the next frame runs the vertex gather');
+	assert.equal(dev2.computePasses[0].bindGroup, rh.vertexGroup, 'with the records bound at 3');
+	const lateRecs = rh.records, latePipe = rh.vertexPipe;
+	assert.equal(rh.attachRecords(recs), false, 'a second lookup on one session is refused');
+	assert.equal(rh.records, lateRecs, 'and changes nothing');
+	assert.equal(rh.vertexPipe, latePipe, 'nor rebuilds the vertex assets');
+	assert.equal(rv.attachRecords(recs), false, 'so is one on a session that already has records');
+	let lateAllocs = 0;
+	const lateMk = dev2.createBuffer;
+	dev2.createBuffer = function (d) { lateAllocs++; return lateMk.call(dev2, d); };
+	rh.redraw(zState);
+	dev2.createBuffer = lateMk;
+	assert.equal(lateAllocs, 0, 'a frame after a late attach allocates no device object');
+	rh.release();
+	assert.ok(lateRecs.destroyed, 'release destroys a late-attached lookup');
+
+	// Release owns the records and the height staging, and neither the borrowed LOOK nor a swap
+	// replaces them.
+	rv.initHeightReadback();
+	const staging = rv.heightStaging, owned = [rv.records];
+	rv.release();
+	assert.ok(records.destroyed, 'release destroys the record lookup');
+	assert.ok(staging.destroyed, 'and the height readback staging');
+	assert.ok(!lookBuf.destroyed, 'the borrowed lookup is not the session\'s to destroy');
+	assert.ok(rv.vertexPipe === null && rv.vertexGroup === null, 'and the cached gather objects are dropped');
+	assert.equal(owned.length, 1);
+}
+
 // --- the draft's hard requirement: a height update never rebuilds the planet --------------
 // A play frame may create no device object at all - the mesh buffers, the height texture,
 // the target and the z scratch are all init-time - so the frame loop is run under counters
