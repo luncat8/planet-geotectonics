@@ -9,8 +9,10 @@ repository clone weight small (in accordance with `AGENTS.md`). Pre-computed and
 starting packs (`js/data/earth-*.js`), extracted reference data (`data/earth/*.json`), and the
 small 1° source textures + extracted bins behind the historical checkpoints (`data/earth/paleo/`,
 0.4.5) are committed.
-The Python bake tool (`tools/earth/bake_earth.py`) verifies checksums against this file prior to
-processing.
+The Python bake tool (`tools/earth/bake_earth.py`) verifies the MD5 of a `--paleo`, `--plate-ids`
+or `--sediment` input when that path is listed in `data/earth/manifest.json`. Those listings are
+the paleo MD5s in §7 and the CRUST1.0 extract in §3. It does not verify every dataset named in
+this file. An unlisted path is baked without a checksum check.
 
 ---
 
@@ -98,10 +100,13 @@ Sediment thickness $h_{\text{sed}}$ is an independent layer that contributes to 
 - **Contents:** `GlobSed-v3.nc` (NetCDF-4), `GlobSed-v3.xyz` (Lon, Lat, Value), `globsed-v3.asc` (ArcGIS ASCII)
 - **Resolution:** 5 arc-minutes (~9.2 km)
 
-### Fallback 1: CRUST1.0 Sedimentary Layers (1° x 1°)
-- Sum of upper, middle, and lower sedimentary layers from `crust1.bnds` (Laske et al. 2013).
-- Covers both continental basins and oceanic margins.
-- Resolution: 1° global.
+### Fallback 1: CRUST1.0 Sedimentary Layers (1° x 1°) — shipped modern sediment
+- Sum of the three sedimentary layers in `crust1.bnds` (boundary steps 2–4; water and ice excluded), Laske et al. 2013. Covers continental basins and oceanic crust. Resolution: 1° global, cell centres 89.5°N, −179.5°E, row 0 at the north.
+- Committed extract: `data/earth/sediment-crust1.bin` (`PGTSED01`, 360×180, uint16 little-endian metres). MD5 `457c6d090aad5c99062541f7871f9099`. SHA-256 `6b25e1615bae065a7d5f9fc2041635c311dcddeaa33c6c81f71ed23161da551f`. The raw `crust1.bnds` table is not committed.
+- The jrleeman GitHub tree is a Python/KMZ adaptation under MIT. That licence does not cover the CRUST1.0 grids. Cite Laske, Masters, Ma and Pasyanos (2013).
+- Modern packs (`js/data/earth-1deg.js`, `js/data/earth-05deg.js`) sample the containing 1° cell and quantize to the pack's 100 m sediment step. Zero is the model's zero, not an unknown. Oceans in those packs are this fallback, not GlobSed — GlobSed v3 was not retrieved. The pack source string says so. Erosion overwrites `hSed` within a step; the inspector reports the live column, not this grid.
+- `z` moves only where the loader's thickness clamps cannot carry the new sediment. The datum, age, kind and plate table are unchanged. Historical packs are not corrected. See `0.4.8-plan-earth-data.md`.
+- Rebuild: `node tools/earth/sediment.js --extract-bnds <crust1.bnds> --out data/earth/sediment-crust1.bin`, then `--apply`. `bake_earth.py --sediment` is the same post-pass, default off, and refuses a non-`earth` or non-epoch-0 pack. It does not reopen the datum search.
 
 ### Fallback 2: Geometric Distance-to-Coast & Basinal Accumulation Heuristic
 $$h_{\text{sed,synth}} = h_{\text{margin}} \cdot \exp\left(-\frac{d_{\text{coast}}}{d_{\text{decay}}}\right) + h_{\text{pelagic}} \cdot \frac{\text{age}}{80}$$
@@ -133,6 +138,9 @@ $$h_{\text{Fel,Airy}} = \max\left(0, \left(z + 3342 + 2091 - \frac{h_{\text{sed}
 ## 5. Plate Boundaries and Closed Polygons
 
 Assigns every surface cell to a tectonic plate ID.
+
+The committed modern packs do not use the polygons below. Their plate table is a nearest-seed
+Voronoi of NNR-MORVEL56 (§6). PB2002 is a candidate dataset that was not ingested.
 
 ### Primary: PB2002 Global Plate Model (Bird 2003)
 - **Author:** Peter Bird (UCLA)
@@ -373,3 +381,7 @@ ingest reports that rather than smoothing it.
 | **Paleo Rotations (0.4.6)** | Scotese PaleoAtlas v3 `m15g60_v2d3` | `10.5281/zenodo.5460860` | GPlates `.rot` → `js/data/rot-paleomap.js` | 258 plates, 0–1100 Ma | CC-BY 4.0 |
 | **Paleo Plate Polygons (0.4.6)** | Scotese PaleoAtlas v3 `ContOCeanPolyv10u_v2d3` | `10.5281/zenodo.5460860` | GPlates `.gpml` | 503 rings, 241 plate ids | CC-BY 4.0 |
 | **PaleoCoastlines (assessed)** | PaleoCoastlines v7 | `10.5281/zenodo.7994000` | Shapefile + `.gpml` | 81 epochs, 0–535 Ma, no plate ids | CC-BY 4.0 |
+
+The sediment row is the intended oceanic dataset. The shipped modern packs use the CRUST1.0
+fallback in §3; GlobSed was not retrieved. The plate-boundary row is a candidate; the shipped
+modern plate table is the NNR-MORVEL56 Voronoi in §6.

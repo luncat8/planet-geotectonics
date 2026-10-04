@@ -1,0 +1,52 @@
+{
+  "extract": "data/earth/sediment-crust1.bin",
+  "extractMd5": "457c6d090aad5c99062541f7871f9099",
+  "extractSha256": "6b25e1615bae065a7d5f9fc2041635c311dcddeaa33c6c81f71ed23161da551f",
+  "note": "Prior banks are the three-number paleo sediment, before the CRUST1.0 replacement. Compared fields have no timestamp. Accepted banks are the envelope rewrite: sediment is the quantized containing-cell extract; z moves only where the loader hits a thickness bound.",
+  "prior": {
+    "js/data/earth-1deg.js": {
+      "zSha256": "6161b5126a7b9c05a4bffd83a2686cbf518ac4e6a563c8f9603e137ac2a81e64",
+      "sedSha256": "f611a4dcc164ae67ba473cb58fa16d039fcdbedc23fa93332e9ece259d182599",
+      "sedMin": 1000,
+      "sedMax": 6000,
+      "sedAreaMean": 2053.1546116808286,
+      "wet": 0.7078856347141462,
+      "meanLand": 721.9532715970917,
+      "meanOcean": -4413.157412344378
+    },
+    "js/data/earth-05deg.js": {
+      "zSha256": "afdcdb46382e3fe818305df6b76f56d83f5fdcf34d3ddf202fafb3919b46cea2",
+      "sedSha256": "4c3053a61ae8256419b59140c3a94daa18705807e39fd16a11621d5eafb0facf",
+      "sedMin": 1000,
+      "sedMax": 6000,
+      "sedAreaMean": 1862.5613916948648,
+      "wet": 0.7078604410975684,
+      "meanLand": 743.8710892651605,
+      "meanOcean": -4397.545098543428
+    }
+  },
+  "accepted": {
+    "js/data/earth-1deg.js": {
+      "zSha256": "29a69fa37390b811a78d22b81f98fbf9393f1dde8e3a1fd114050b308847c4c5",
+      "sedSha256": "fc838157d1554a9c25e622e2cc1b4f2ee3e0a9d7b6ebc3a436b61dbb2c8356c8",
+      "moved": 1131,
+      "flips": 2,
+      "residual": 348,
+      "maxResidualM": 75.0,
+      "wet": 0.7078382151878028,
+      "sedAreaMean": 1011.4469663969385,
+      "datum": -460
+    },
+    "js/data/earth-05deg.js": {
+      "zSha256": "660afef4857f07e944476b3699f142320c099814d8a46d303e94d8f61e294425",
+      "sedSha256": "395ea83bdbdb130b5b27a6854ce34d5e182d9c2f5c3adcb545d818cddb910dcf",
+      "moved": 4796,
+      "flips": 11,
+      "residual": 1446,
+      "maxResidualM": 74.9,
+      "wet": 0.7077953374387472,
+      "sedAreaMean": 1011.4469663964769,
+      "datum": -444
+    }
+  }
+}

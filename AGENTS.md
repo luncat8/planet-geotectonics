@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 37 kernel, rig and GUI tests, ~2.5 min here
+node tests/run-all.js		short profile (default): 38 kernel, rig and GUI tests, ~2.5 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 
@@ -65,7 +65,8 @@ tests/gpu-parity.js (headless CPU/GPU ensemble; needs the Chromium rig).
 0.4.6-plan-plate-history.md - plate positions through time: prescribed kinematics, exact backtracking,
 the reverse-time answer, and what is not possible. 0.4.6a is in: data/earth/PALEOMAP_PlateModel.rot,
 tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotations.js.
-0.4.8-plan-earth-data.md - modern sediment/provenance improvement and holdout bake gates.
+0.4.8-plan-earth-data.md - modern sediment: CRUST1.0 extract replaces the three-number prior;
+	z moves only on a thickness-bound hit. No holdout claim until an observations file exists.
 0.6.x-plan-deposit-prospector.md - the deposit prospector umbrella: vocabulary, the stability
 contract, thresholds, module map and staging. the increments:
 0.6.0-review.md - implementation review, short-profile results and follow-up scope.

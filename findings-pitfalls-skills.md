@@ -1854,3 +1854,15 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	exist, and a resumed job must not relabel itself), and never let the consumer switch to the
 	mode before the work is done - `setHeightMode('vertex')` refuses without records, so the
 	control, the session, the URL and the capture header cannot disagree.
+
+## sediment replacement must not chase a smoothstep fixed point (0.4.8)
+
+	Earth.invert on continental crust iterates the hFel smoothstep five times, the same count
+	the loader uses. A new sediment thickness can leave |elevation(invert(z)) - z| of tens of
+	metres with hFel nowhere near 1 km or 80 km. An integer search will find a z hundreds of
+	metres away that closes that residual, and that z moves the shelf. Do not store it.
+	Continental invert always writes maf = 0; that is the branch, not a clamp. The only z
+	rewrite is a real thickness bound (oceanic hMaf 2–35 km, continental hFel 1–80 km): store
+	the clamped elevation, which round-trips, and leave the unbound residual labelled. A second
+	apply is then byte-identical. null >= 0 is true in JS, so a zero-thickness observation with
+	a missing uncertainty has to be rejected by type, not by a >= comparison.

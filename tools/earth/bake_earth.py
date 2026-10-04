@@ -8,6 +8,8 @@ compatible with file:// execution, without runtime network dependencies.
 Usage:
     python3 tools/earth/bake_earth.py [--deg 1.0] [--out js/data/earth-1deg.js]
     python3 tools/earth/bake_earth.py --deg 0.5 --out js/data/earth-05deg.js
+    python3 tools/earth/bake_earth.py --paleo data/earth/paleo/000Ma_1deg.bin --name earth \\
+        --wet-target 0.7081 --sediment data/earth/sediment-crust1.bin
 
 Options:
     --deg FLOAT          Raster grid resolution in degrees (default: 1.0)
@@ -22,8 +24,10 @@ import sys
 import math
 import json
 import base64
+import hashlib
 import struct
 import argparse
+import subprocess
 from collections import deque
 from datetime import datetime
 
@@ -478,6 +482,57 @@ def generate_report(raster_data, datum_shift, achieved_wet, width, height, repor
 # band coastline and crust type are the real reconstruction; within-band
 # elevation/age/sediment are documented priors (kind bit 4), and the K9
 # fixed point below makes the pack round-trip the loader within quantization.
+
+def repo_root():
+	return os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+
+def load_manifest():
+	path = os.path.join(repo_root(), 'data', 'earth', 'manifest.json')
+	with open(path, encoding='utf-8') as f:
+		return json.load(f)
+
+def verify_listed_input(path, manifest):
+	"""MD5-check a bake input when data/earth/manifest.json lists it.
+
+	Unlisted paths are not checked: the registry does not cover every scratch file.
+	A listed file that does not match is a failed bake, not a warning.
+	"""
+	if not path:
+		return
+	root = repo_root()
+	abs_path = os.path.abspath(path)
+	listed = None
+	for rel, expect in manifest.get('files', {}).items():
+		if os.path.abspath(os.path.join(root, rel)) == abs_path or os.path.normpath(path) == os.path.normpath(rel):
+			listed = (rel, expect)
+			break
+	if listed is None:
+		print(f'[*] {path} is not listed in data/earth/manifest.json; checksum not checked')
+		return
+	rel, expect = listed
+	digest = hashlib.md5(open(abs_path, 'rb').read()).hexdigest()
+	if digest != expect:
+		raise SystemExit(f'FAIL: {rel} MD5 {digest} != manifest {expect}')
+	print(f'[*] checksum ok {rel}')
+
+def apply_sediment_pass(args, epoch):
+	"""Post-pass. Default off. Does not reopen the datum search.
+
+	The paleo bake has already written its prior sediment and its datum. This only
+	replaces the sediment bank of a modern earth pack, and only where the loader's
+	clamps cannot carry that sediment does z move. Historical packs are refused.
+	"""
+	if not args.sediment:
+		return
+	if args.name != 'earth' or epoch != 0:
+		raise SystemExit('FAIL: --sediment is modern earth epoch-0 packs only, refused '
+			+ args.name + ' epoch ' + str(epoch))
+	script = os.path.join(os.path.dirname(__file__), 'sediment.js')
+	cmd = ['node', script, '--apply', '--pack', args.out, '--sediment', args.sediment]
+	print('[*] ' + ' '.join(cmd))
+	result = subprocess.run(cmd)
+	if result.returncode != 0:
+		raise SystemExit('FAIL: sediment apply exited ' + str(result.returncode))
 
 def load_paleo_bin(path):
 	"""Reads a paleo_extract.js raster: [w:u16][h:u16][epoch:u16] z i16, age u8, kind u8."""
@@ -937,6 +992,7 @@ def bake_paleo(args):
 	with open(args.report, 'w', encoding='utf-8') as f:
 		f.write(report_txt)
 	print(f"[+] Validation report written to {args.report}")
+	apply_sediment_pass(args, epoch)
 	# Clamp-ceiling census: a paleo pack should not pile columns on the hMaf/hFel clamps.
 	ceil = sum(1 for i in range(n) if raster['z'][i] < 0 and not cont[i]
 		and age[i] < 20000 and min(35000.0, max(2000.0,
@@ -969,8 +1025,14 @@ def main():
 		help="Datum wet fraction override (default: the map's own drawn sea level; use 0.7081 for the present-day re-bake)")
 	parser.add_argument('--source', type=str, default=None,
 		help="Provenance string for the pack (default: derived from the raster epoch)")
+	parser.add_argument('--sediment', type=str, default=None,
+		help="PGTSED01 extract applied after the pack is written (default off; modern earth epoch 0 only)")
 
 	args = parser.parse_args()
+	manifest = load_manifest()
+	verify_listed_input(args.paleo, manifest)
+	verify_listed_input(args.plate_ids, manifest)
+	verify_listed_input(args.sediment, manifest)
 
 	if args.paleo:
 		bake_paleo(args)
@@ -1019,6 +1081,7 @@ def main():
 	report_txt = generate_report(raster, datum_shift, achieved_wet, width, height, args.report)
 	print(f"[+] Validation report written to {args.report}")
 	print(report_txt)
+	apply_sediment_pass(args, 0)
 
 if __name__ == '__main__':
 	main()

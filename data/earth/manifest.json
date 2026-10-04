@@ -1,0 +1,31 @@
+{
+  "algorithm": "md5",
+  "note": "MD5s of inputs the bake verifies when the path is listed. Paleo values are the published checksums in SOURCES.md \u00a77, not a new registry. sediment-crust1.bin is the CRUST1.0 extract in \u00a73.",
+  "files": {
+    "data/earth/paleo/000Ma_0p5deg.bin": "87d237870a5fd5c00f7269cae5a3b73f",
+    "data/earth/paleo/000Ma_1deg.bin": "40657630da47fc8aeb3b9531405be54f",
+    "data/earth/paleo/000Ma_source.jpg": "71a45fbb4c7b8e457d38212285f3dcc7",
+    "data/earth/paleo/020Ma_1deg.bin": "fd5d286025344007010011298d42b337",
+    "data/earth/paleo/020Ma_source.jpg": "d2f857ac16541a3c1d7faddcc7579b39",
+    "data/earth/paleo/040Ma_1deg.bin": "cc7ca9107b613b37dda8bd20a2eff371",
+    "data/earth/paleo/040Ma_source.jpg": "3648a630d7cc3eca6b2d8af1971cc8b3",
+    "data/earth/paleo/065Ma_1deg.bin": "f52d6a55a924b53dd230550ba3396e1a",
+    "data/earth/paleo/065Ma_source.jpg": "73040c7a6d882a7d8c31766ecd605a20",
+    "data/earth/paleo/100Ma_1deg.bin": "434336ac15d15bcd2099cf725e52ea27",
+    "data/earth/paleo/100Ma_source.jpg": "3ed48301cd7ec92d43f8f51b2d6f7427",
+    "data/earth/paleo/150Ma_1deg.bin": "7e334ab10c59a96230242ed1c9a13557",
+    "data/earth/paleo/150Ma_source.jpg": "415acaa0b480e63110d6eedd6aa17f9c",
+    "data/earth/paleo/200Ma_1deg.bin": "af101df51aa0cc8762af877daadb3d44",
+    "data/earth/paleo/200Ma_source.jpg": "e92afb780f00c40bed6661bd6b9b8eca",
+    "data/earth/paleo/250Ma_1deg.bin": "461a5745bbd1e63b2e80006d7dab840f",
+    "data/earth/paleo/250Ma_source.jpg": "bb7580e7a3ce2138093a71aec6428444",
+    "data/earth/paleo/plates-020Ma.bin": "4bcaa3079cbf40f444c6ae2a3715823f",
+    "data/earth/paleo/plates-040Ma.bin": "2845d618df9ce0bc9fefbc8760c7532a",
+    "data/earth/paleo/plates-065Ma.bin": "582bb06410fefa45d1a8fdc0c8d0dfb1",
+    "data/earth/paleo/plates-100Ma.bin": "a4c2941ace6efba5b42c24df61a96cbc",
+    "data/earth/paleo/plates-150Ma.bin": "fceb3594b6e14fd7c4cebcb84726eb69",
+    "data/earth/paleo/plates-200Ma.bin": "e774d07ee2c4a9df62bf6ad5446e3a59",
+    "data/earth/paleo/plates-250Ma.bin": "724fd05731e075c987ee0cd78a533a71",
+    "data/earth/sediment-crust1.bin": "457c6d090aad5c99062541f7871f9099"
+  }
+}
