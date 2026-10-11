@@ -205,7 +205,7 @@ class table (§10 of `0.6.1-plan-deposit-catalogue.md`) and
 ## Test
 
 ```
-node tests/run-all.js            short profile: 37 tests except the four histories (~2 min)
+node tests/run-all.js            short profile: 38 tests except the four histories (~2 min)
 node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
 node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```
@@ -220,6 +220,15 @@ A capture's first line is its environment, kept short: date to the minute, brows
 and the GPU as a type plus one vendor word (`2026-09-15 01:34 · chrome 151 · linux x86_64 ·
 gpu hardware nvidia`, built by `js/env.js`).
 The runner launches the retained-memory test with `--expose-gc`.
+
+The offline Earth bake has a separate, standard-library-only Python regression suite:
+`python3 -m unittest discover -s tests -p 'test_*.py'`. It checks sediment target preflight,
+output preservation on refusal and manifest mismatch rejection; it does not run a full bake.
+Future point-observation tables can be checked without changing any pack with
+`node tools/earth/sediment.js --validate-observations <json>` (JSON result, exit 1 on schema
+errors). This validates row structure, not source licences or scientific accuracy. No point
+observation dataset or holdout improvement is shipped; see `0.4.8-review.md`.
+
 The JS side of the GPU engine - the mirror transfer and the play path's scheduling - runs
 headless against a stub device (`tests/gpu-play.js` on `tests/gpu-stub.js`), and
 `node experiments/roundtrip-cost.js` times the round trip.

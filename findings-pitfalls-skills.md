@@ -1866,3 +1866,12 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	the clamped elevation, which round-trips, and leave the unbound residual labelled. A second
 	apply is then byte-identical. null >= 0 is true in JS, so a zero-thickness observation with
 	a missing uncertainty has to be rejected by type, not by a >= comparison.
+
+## an unknown sample must be absent from both IDW sums (0.4.8 review, 2026-10-11)
+
+	A schema can correctly accept `value: null` with an unknown reason while the consumer
+	still turns it into data: in JavaScript, `weight * null` is zero. Adding its weight to
+	the denominator then depresses every nearby measurement; alone it replaces the prior
+	with zero. Validate at the correction boundary and exclude unknowns before either sum.
+	Test mixed unknown/measurement input against the measurement alone, not just an empty
+	observation list. Separately test measured zero so the fix cannot discard real zeros.

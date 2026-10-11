@@ -510,10 +510,16 @@ def verify_listed_input(path, manifest):
 		print(f'[*] {path} is not listed in data/earth/manifest.json; checksum not checked')
 		return
 	rel, expect = listed
-	digest = hashlib.md5(open(abs_path, 'rb').read()).hexdigest()
+	with open(abs_path, 'rb') as f:
+		digest = hashlib.md5(f.read()).hexdigest()
 	if digest != expect:
 		raise SystemExit(f'FAIL: {rel} MD5 {digest} != manifest {expect}')
 	print(f'[*] checksum ok {rel}')
+
+def validate_sediment_target(args, epoch):
+	if args.sediment and (args.name != 'earth' or epoch != 0):
+		raise SystemExit('FAIL: --sediment is modern earth epoch-0 packs only, refused '
+			+ args.name + ' epoch ' + str(epoch))
 
 def apply_sediment_pass(args, epoch):
 	"""Post-pass. Default off. Does not reopen the datum search.
@@ -524,9 +530,7 @@ def apply_sediment_pass(args, epoch):
 	"""
 	if not args.sediment:
 		return
-	if args.name != 'earth' or epoch != 0:
-		raise SystemExit('FAIL: --sediment is modern earth epoch-0 packs only, refused '
-			+ args.name + ' epoch ' + str(epoch))
+	validate_sediment_target(args, epoch)
 	script = os.path.join(os.path.dirname(__file__), 'sediment.js')
 	cmd = ['node', script, '--apply', '--pack', args.out, '--sediment', args.sediment]
 	print('[*] ' + ' '.join(cmd))
@@ -911,6 +915,7 @@ def morvel_plate_assignment(width, height, morvel_data, mode='morvel25'):
 
 def bake_paleo(args):
 	w, h, epoch, z, age, cont = load_paleo_bin(args.paleo)
+	validate_sediment_target(args, epoch)
 	n = w * h
 	print(f"[*] Paleo raster {args.paleo}: {w}x{h} epoch {epoch} Ma")
 	if w != int(round(360.0 / args.deg)) or h != int(round(180.0 / args.deg)):
@@ -1038,6 +1043,7 @@ def main():
 		bake_paleo(args)
 		return
 
+	validate_sediment_target(args, 0)
 	width = int(round(360.0 / args.deg))
 	height = int(round(180.0 / args.deg))
 

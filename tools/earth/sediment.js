@@ -113,6 +113,7 @@ function loadCrust1(file) {
 		throw new Error('not a PGTSED01 sediment extract: ' + file);
 	}
 	const w = buf.readUInt16LE(8), h = buf.readUInt16LE(10);
+	if (w !== 360 || h !== 180) throw new Error('CRUST1.0 sediment extract must be 360x180');
 	const n = w * h;
 	if (buf.length !== 16 + n * 2) throw new Error('sediment extract length ' + buf.length + ' != ' + (16 + n * 2));
 	const sed = new Uint16Array(n);
@@ -128,7 +129,10 @@ function writeCrust1(file, w, h, metres) {
 	buf.writeUInt16LE(h, 10);
 	for (let i = 0; i < n; i++) {
 		const v = Math.round(metres[i]);
-		buf.writeUInt16LE(v < 0 ? 0 : v > 65535 ? 65535 : v, 16 + i * 2);
+		if (!Number.isFinite(v) || v < 0 || v > 65535) {
+			throw new Error('sediment cell ' + i + ' is outside uint16 metres');
+		}
+		buf.writeUInt16LE(v, 16 + i * 2);
 	}
 	fs.mkdirSync(path.dirname(file) || '.', { recursive: true });
 	fs.writeFileSync(file, buf);
@@ -136,9 +140,7 @@ function writeCrust1(file, w, h, metres) {
 
 function sampleCrust1(grid, lat, lon) {
 	let ilat = Math.floor(90 - lat);
-	let ilon = Math.floor(180 + lon);
-	if (ilon >= grid.w) ilon -= grid.w;
-	if (ilon < 0) ilon += grid.w;
+	const ilon = ((Math.floor(180 + lon) % grid.w) + grid.w) % grid.w;
 	if (ilat < 0) ilat = 0;
 	if (ilat >= grid.h) ilat = grid.h - 1;
 	return grid.sed[ilat * grid.w + ilon];
@@ -186,13 +188,18 @@ function haversineM(lat1, lon1, lat2, lon2) {
 // round-trips. Holdout rows and the other crust class do not contribute.
 function correctPoints(grid, observations, opts) {
 	opts = opts || {};
+	const validation = validateObservations({ observations: observations });
+	if (!validation.ok) throw new Error(validation.errors.join('\n'));
 	const w = grid.w, h = grid.h, n = w * h;
-	const radius = opts.radiusM || DEFAULT_RADIUS_M;
+	const radius = opts.radiusM === undefined ? DEFAULT_RADIUS_M : opts.radiusM;
+	if (!Number.isFinite(radius) || radius <= 0) throw new Error('radiusM must be finite and positive');
 	const sed = new Float64Array(n);
 	let pulled = 0, touched = 0;
 	const usable = [];
 	for (let k = 0; k < observations.length; k++) {
-		if (!observations[k].holdout) usable.push(observations[k]);
+		const o = observations[k];
+		// Unknown is not a measured zero and must not enter either IDW sum.
+		if (!o.holdout && o.value !== null) usable.push(o);
 	}
 	for (let i = 0; i < n; i++) {
 		const cont = grid.kind[i] & 1;
@@ -225,7 +232,7 @@ function correctPoints(grid, observations, opts) {
 }
 
 function need(obj, key, errors, id) {
-	if (obj[key] === undefined || obj[key] === '') errors.push(id + ': missing ' + key);
+	if (typeof obj[key] !== 'string' || !obj[key].trim()) errors.push(id + ': missing ' + key + ' (nonempty string required)');
 }
 
 function validateObservations(doc) {
@@ -238,14 +245,14 @@ function validateObservations(doc) {
 	for (let i = 0; i < rows.length; i++) {
 		const o = rows[i];
 		const id = o && o.id ? String(o.id) : '#' + i;
-		if (!o || typeof o !== 'object') { errors.push(id + ': not an object'); continue; }
+		if (!o || typeof o !== 'object' || Array.isArray(o)) { errors.push(id + ': not an object'); continue; }
 		need(o, 'id', errors, id);
 		if (o.id !== undefined) {
 			if (seen[o.id]) errors.push(id + ': duplicate id');
 			seen[o.id] = 1;
 		}
-		if (typeof o.lat !== 'number' || o.lat < -90 || o.lat > 90) errors.push(id + ': lat out of range');
-		if (typeof o.lon !== 'number' || o.lon < -180 || o.lon > 180) errors.push(id + ': lon out of range');
+		if (!Number.isFinite(o.lat) || o.lat < -90 || o.lat > 90) errors.push(id + ': lat out of range');
+		if (!Number.isFinite(o.lon) || o.lon < -180 || o.lon > 180) errors.push(id + ': lon out of range');
 		if (o.field !== 'sediment_thickness') errors.push(id + ': field must be sediment_thickness');
 		if (o.crust !== 'continental' && o.crust !== 'oceanic') errors.push(id + ': crust class required');
 		if (o.role !== 'observed' && o.role !== 'interpreted' && o.role !== 'prior') errors.push(id + ': role required');
@@ -254,22 +261,22 @@ function validateObservations(doc) {
 		need(o, 'dataset_version', errors, id);
 		need(o, 'extraction', errors, id);
 		need(o, 'record', errors, id);
-		if (typeof o.footprint_m !== 'number' || o.footprint_m < 0) errors.push(id + ': footprint_m required');
+		if (!Number.isFinite(o.footprint_m) || o.footprint_m < 0) errors.push(id + ': footprint_m required');
 		if (o.value === null) {
-			if (!o.unknown_reason) errors.push(id + ': null value needs unknown_reason');
-		} else if (typeof o.value !== 'number' || o.value < 0) {
+			need(o, 'unknown_reason', errors, id);
+		} else if (!Number.isFinite(o.value) || o.value < 0) {
 			errors.push(id + ': value must be metres or null');
 		} else {
 			if (o.unit !== 'm') errors.push(id + ': unit must be m');
 			// null >= 0 is true in JS, so a missing uncertainty must be rejected by type.
-			if (o.value === 0 && !(typeof o.uncertainty_m === 'number' && o.uncertainty_m >= 0)) {
+			if (o.value === 0 && !(Number.isFinite(o.uncertainty_m) && o.uncertainty_m >= 0)) {
 				errors.push(id + ': zero is not unknown; give uncertainty_m');
 			}
 		}
-		if (o.uncertainty_m !== null && o.uncertainty_m !== undefined && !(o.uncertainty_m >= 0)) {
-			errors.push(id + ': uncertainty_m must be >= 0 or null');
+		if (o.uncertainty_m !== null && o.uncertainty_m !== undefined && (!Number.isFinite(o.uncertainty_m) || o.uncertainty_m < 0)) {
+			errors.push(id + ': uncertainty_m must be finite and >= 0 or null');
 		}
-		if (o.radius_m !== undefined && !(o.radius_m > 0)) errors.push(id + ': radius_m must be positive');
+		if (o.radius_m !== undefined && (!Number.isFinite(o.radius_m) || o.radius_m <= 0)) errors.push(id + ': radius_m must be finite and positive');
 	}
 	return { ok: errors.length === 0, errors: errors };
 }
@@ -419,7 +426,11 @@ function extractBnds(bndsFile, outFile) {
 	for (let i = 0; i < lines.length; i++) {
 		const b = lines[i].trim().split(/\s+/).map(Number);
 		if (b.length !== 9) throw new Error('bnds row ' + i + ' has ' + b.length + ' values');
-		metres[i] = (Math.abs(b[3] - b[2]) + Math.abs(b[4] - b[3]) + Math.abs(b[5] - b[4])) * 1000;
+		if (!b.every(Number.isFinite)) throw new Error('bnds row ' + i + ' has nonfinite values');
+		for (let j = 1; j < b.length; j++) {
+			if (b[j] > b[j - 1]) throw new Error('bnds row ' + i + ' boundaries must descend');
+		}
+		metres[i] = (b[2] - b[5]) * 1000;
 	}
 	writeCrust1(outFile, 360, 180, metres);
 	let min = metres[0], max = metres[0];
@@ -437,6 +448,14 @@ function flag(name) {
 }
 
 function main() {
+	const observationsFile = flag('validate-observations');
+	if (observationsFile) {
+		const doc = JSON.parse(fs.readFileSync(observationsFile, 'utf8'));
+		const validation = validateObservations(doc);
+		console.log(JSON.stringify(validation, null, 2));
+		if (!validation.ok) process.exitCode = 1;
+		return;
+	}
 	const bnds = flag('extract-bnds');
 	if (bnds) {
 		const out = flag('out');
@@ -471,6 +490,7 @@ function main() {
 	}
 	console.error('usage: sediment.js --apply --pack <js> --sediment <bin>');
 	console.error('       sediment.js --report --pack <js>');
+	console.error('       sediment.js --validate-observations <json>');
 	console.error('       sediment.js --extract-bnds <crust1.bnds> --out <bin>');
 	process.exit(1);
 }

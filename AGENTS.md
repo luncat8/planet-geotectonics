@@ -43,6 +43,7 @@ see 0.1.5-final-design.md.
 node tests/run-all.js		short profile (default): 38 kernel, rig and GUI tests, ~2.5 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
+python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
 
 do not run the full profile in the sandbox. It is ~15 min against ~1 min for short:
 longrun alone is ~10 min on these two cores (12 of 18 min on the owner rig) and the other
@@ -67,6 +68,7 @@ the reverse-time answer, and what is not possible. 0.4.6a is in: data/earth/PALE
 tools/earth/rot_ingest.js, js/data/rot-paleomap.js, js/rotations.js, tests/rotations.js.
 0.4.8-plan-earth-data.md - modern sediment: CRUST1.0 extract replaces the three-number prior;
 	z moves only on a thickness-bound hit. No holdout claim until an observations file exists.
+0.4.8-review.md - sediment review: unknown-vs-zero, input validation, bake preflight and gates.
 0.6.x-plan-deposit-prospector.md - the deposit prospector umbrella: vocabulary, the stability
 contract, thresholds, module map and staging. the increments:
 0.6.0-review.md - implementation review, short-profile results and follow-up scope.

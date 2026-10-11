@@ -44,6 +44,9 @@ assert.ok(zeros > 0, 'the extract contains modelled zeros');
 assert.equal(S.sampleCrust1(grid, 12.25, -59.75), S.sampleCrust1(grid, 12.75, -59.25));
 assert.equal(S.sampleCrust1(grid, 0, 179.5), S.sampleCrust1(grid, 0, -180.5));
 assert.equal(S.sampleCrust1(grid, -90, 10), S.sampleCrust1(grid, -89.5, 10));
+for (const turns of [-3, -1, 0, 1, 3]) {
+	assert.equal(S.sampleCrust1(grid, 12.5, 10.5 + 360 * turns), S.sampleCrust1(grid, 12.5, 10.5));
+}
 
 // --- envelope: keep z, except a thickness bound the loader cannot carry ---------------
 // A round-tripping column is left alone.
@@ -86,6 +89,29 @@ assert.ok(!bare.ok && bare.errors.some((e) => /source_id/.test(e)));
 assert.ok(bare.errors.some((e) => /zero is not unknown/.test(e)));
 const missing = S.validateObservations({ observations: [row({ dataset_version: undefined })] });
 assert.ok(!missing.ok);
+for (const key of ['id', 'source_id', 'dataset_version', 'extraction', 'record']) {
+	for (const value of [undefined, null, '', '  ', 0, {}, []]) {
+		const result = S.validateObservations({ observations: [row({ [key]: value })] });
+		assert.ok(!result.ok && result.errors.some((e) => e.includes(key)), key + ' requires text');
+	}
+}
+for (const key of ['lat', 'lon', 'value', 'footprint_m', 'uncertainty_m', 'radius_m']) {
+	for (const value of [NaN, Infinity, -Infinity, '500', true]) {
+		assert.equal(S.validateObservations({ observations: [row({ [key]: value })] }).ok, false,
+			key + ' must reject ' + value);
+	}
+}
+for (const over of [{ lat: 91 }, { lon: -181 }, { footprint_m: -1 }, { value: -1 },
+	{ radius_m: 0 }, { radius_m: null }, { uncertainty_m: -1 }, { value: 0, uncertainty_m: null }]) {
+	assert.equal(S.validateObservations({ observations: [row(over)] }).ok, false);
+}
+for (const unknown_reason of [undefined, null, '', ' ', 1]) {
+	assert.equal(S.validateObservations({ observations: [row({ value: null, unknown_reason })] }).ok, false);
+}
+assert.equal(S.validateObservations({ observations: [row({ value: 0, uncertainty_m: 0 })] }).ok, true);
+assert.equal(S.validateObservations({ observations: [row({ value: 4000, uncertainty_m: null })] }).ok, true);
+assert.equal(S.validateObservations({ observations: [null, [], 'row'] }).ok, false);
+
 
 const points = {
 	w: 4, h: 2,
@@ -96,6 +122,22 @@ const points = {
 };
 const ll0 = S.cellLatLon(4, 2, 0);
 const llOcean = S.cellLatLon(4, 2, 4);
+const unknown = row({ id: 'unknown', lat: ll0[0], lon: ll0[1], value: null, unknown_reason: 'not sampled' });
+assert.equal(S.validateObservations({ observations: [unknown] }).ok, true);
+const unknownOnly = S.correctPoints(points, [unknown]);
+assert.equal(unknownOnly.touched, 0, 'unknown observations do not support a correction');
+assert.deepEqual(unknownOnly.sed, points.sed, 'unknown preserves the prior, not zero');
+const measured = row({ id: 'measured', lat: ll0[0], lon: ll0[1], value: 4000 });
+assert.deepEqual(S.correctPoints(points, [unknown, measured]), S.correctPoints(points, [measured]),
+	'unknown must not dilute the measured IDW sum');
+const zero = S.correctPoints(points, [row({ lat: ll0[0], lon: ll0[1], value: 0, uncertainty_m: 0 })]);
+assert.equal(zero.touched, 1, 'measured zero contributes');
+assert.equal(zero.sed[0], 0);
+assert.throws(() => S.correctPoints(points, [row({ value: NaN })]), /value/);
+for (const radiusM of [0, -1, NaN, Infinity, '500', null]) {
+	assert.throws(() => S.correctPoints(points, [], { radiusM }), /radiusM/);
+}
+
 const holdoutOnly = S.correctPoints(points, [row({ lat: ll0[0], lon: ll0[1], holdout: true, value: 9000 })]);
 assert.equal(holdoutOnly.touched, 0);
 assert.equal(holdoutOnly.sed[0], 2000, 'a holdout does not move the prior');
@@ -195,37 +237,98 @@ function tinyPack(z, age, sed, kind) {
 		+ '\t\t},\n\t\tplates: { count: 1, ids: \'' + b64(Buffer.from([0])) + '\','
 		+ ' seeds: [[0, 0, 1]], poles: [[0, 0, 1, 0]] }\n\t});\n})();\n';
 }
-const tmp = path.join(os.tmpdir(), 'pgt-sediment-tiny.js');
-fs.writeFileSync(tmp, tinyPack(-2000, 40, 10, 0));
-const beforeAge = fs.readFileSync(tmp, 'utf8').match(/age: '[^']+'/)[0];
-const beforeKind = fs.readFileSync(tmp, 'utf8').match(/kind: '[^']+'/)[0];
-const { spawnSync } = require('child_process');
-function runApply(packFile) {
-	return spawnSync(process.execPath, [
-		path.join(ROOT, 'tools/earth/sediment.js'),
-		'--apply', '--pack', packFile, '--sediment', EXTRACT
-	], { encoding: 'utf8' });
-}
-const first = runApply(tmp);
-assert.equal(first.status, 0, first.stderr);
-const once = fs.readFileSync(tmp);
-const text = once.toString('utf8');
-assert.ok(text.indexOf(beforeAge) >= 0, 'age bank preserved');
-assert.ok(text.indexOf(beforeKind) >= 0, 'kind bank preserved');
-assert.ok(text.indexOf('datum: -460.0') >= 0, 'datum preserved');
-assert.ok(/CRUST1\.0 sediment \(not GlobSed\)/.test(text));
-const second = runApply(tmp);
-assert.equal(second.status, 0, second.stderr);
-assert.equal(fs.readFileSync(tmp).equals(once), true, 'second apply is byte-identical');
-fs.unlinkSync(tmp);
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pgt-sediment-'));
+try {
+	const tmp = path.join(tmpDir, 'tiny.js');
+	fs.writeFileSync(tmp, tinyPack(-2000, 40, 10, 0));
+	const beforeAge = fs.readFileSync(tmp, 'utf8').match(/age: '[^']+'/)[0];
+	const beforeKind = fs.readFileSync(tmp, 'utf8').match(/kind: '[^']+'/)[0];
+	const { spawnSync } = require('child_process');
+	function runApply(packFile, sedimentFile = EXTRACT) {
+		return spawnSync(process.execPath, [
+			path.join(ROOT, 'tools/earth/sediment.js'),
+			'--apply', '--pack', packFile, '--sediment', sedimentFile
+		], { encoding: 'utf8' });
+	}
+	const first = runApply(tmp);
+	assert.equal(first.status, 0, first.stderr);
+	const once = fs.readFileSync(tmp);
+	const text = once.toString('utf8');
+	assert.ok(text.indexOf(beforeAge) >= 0, 'age bank preserved');
+	assert.ok(text.indexOf(beforeKind) >= 0, 'kind bank preserved');
+	assert.ok(text.indexOf('datum: -460.0') >= 0, 'datum preserved');
+	assert.ok(/CRUST1\.0 sediment \(not GlobSed\)/.test(text));
+	const second = runApply(tmp);
+	assert.equal(second.status, 0, second.stderr);
+	assert.equal(fs.readFileSync(tmp).equals(once), true, 'second apply is byte-identical');
 
-const hist = path.join(os.tmpdir(), 'pgt-sediment-250.js');
-fs.copyFileSync(path.join(ROOT, 'js/data/earth-250Ma.js'), hist);
-const histBefore = sha(fs.readFileSync(hist));
-const refused = runApply(hist);
-assert.notEqual(refused.status, 0);
-assert.ok(/refused/.test(refused.stderr));
-assert.equal(sha(fs.readFileSync(hist)), histBefore, 'a historical pack is not written');
-fs.unlinkSync(hist);
+
+	const hist = path.join(tmpDir, '250.js');
+	fs.copyFileSync(path.join(ROOT, 'js/data/earth-250Ma.js'), hist);
+	const histBefore = sha(fs.readFileSync(hist));
+	const refused = runApply(hist);
+	assert.notEqual(refused.status, 0);
+	assert.ok(/refused/.test(refused.stderr));
+	assert.equal(sha(fs.readFileSync(hist)), histBefore, 'a historical pack is not written');
+	fs.unlinkSync(hist);
+
+	// Malformed extracts must fail before touching the destination pack.
+	const badExtract = path.join(tmpDir, 'bad.bin');
+	for (const [w, h] of [[0, 0], [1, 1], [180, 360]]) {
+		const buf = Buffer.alloc(16 + w * h * 2);
+		buf.write('PGTSED01');
+		buf.writeUInt16LE(w, 8);
+		buf.writeUInt16LE(h, 10);
+		fs.writeFileSync(badExtract, buf);
+		assert.throws(() => S.loadCrust1(badExtract), /360x180/);
+		const result = runApply(tmp, badExtract);
+		assert.notEqual(result.status, 0);
+		assert.deepEqual(fs.readFileSync(tmp), once, 'invalid dimensions cannot overwrite a pack');
+	}
+	for (const buf of [Buffer.alloc(16), fs.readFileSync(EXTRACT).subarray(0, 20)]) {
+		fs.writeFileSync(badExtract, buf);
+		assert.throws(() => S.loadCrust1(badExtract), /PGTSED01|length/);
+	}
+
+	// Extraction rejects invalid boundaries rather than turning them into modelled zeros.
+	const bnds = path.join(tmpDir, 'crust1.bnds');
+	const output = path.join(tmpDir, 'extracted.bin');
+	const goodRow = '0 -1 -2 -3 -5 -6 -10 -20 -30';
+	function runExtract(firstRow, count = 64800) {
+		fs.writeFileSync(bnds, firstRow + '\n' + (goodRow + '\n').repeat(count - 1));
+		return spawnSync(process.execPath, [path.join(ROOT, 'tools/earth/sediment.js'),
+			'--extract-bnds', bnds, '--out', output], { encoding: 'utf8' });
+	}
+	const extracted = runExtract(goodRow);
+	assert.equal(extracted.status, 0, extracted.stderr);
+	const extractedBytes = fs.readFileSync(output);
+	assert.ok(S.loadCrust1(output).sed.every((v) => v === 4000), 'water and ice excluded');
+	for (const firstRow of [
+		'0 -1 -2 NaN -5 -6 -10 -20 -30',
+		'0 -1 -2 -3 -5 -Infinity -10 -20 -30',
+		'0 -1 -2 -1 -5 -6 -10 -20 -30',
+		'0 -1 -2 -3 -5 -70 -80 -90 -100',
+		'0 -1 -2 -3 -5 -6 -10 -20'
+	]) {
+		const result = runExtract(firstRow);
+		assert.notEqual(result.status, 0, 'invalid boundary row refused');
+		assert.deepEqual(fs.readFileSync(output), extractedBytes, 'failed extract preserves output');
+	}
+	assert.notEqual(runExtract(goodRow, 1).status, 0, 'incomplete grid refused');
+
+	// The validation-only CLI reports machine-readable errors and never edits its input.
+	const observationsFile = path.join(tmpDir, 'observations.json');
+	for (const [observations, ok] of [[[row(), unknown], true], [[row({ source_id: null })], false]]) {
+		const doc = JSON.stringify({ observations });
+		fs.writeFileSync(observationsFile, doc);
+		const result = spawnSync(process.execPath, [path.join(ROOT, 'tools/earth/sediment.js'),
+			'--validate-observations', observationsFile], { encoding: 'utf8' });
+		assert.equal(result.status, ok ? 0 : 1, result.stderr);
+		assert.equal(JSON.parse(result.stdout).ok, ok);
+		assert.equal(fs.readFileSync(observationsFile, 'utf8'), doc);
+	}
+} finally {
+	fs.rmSync(tmpDir, { recursive: true, force: true });
+}
 
 console.log('PASS sediment: extract sample, envelope rule, point schema, modern packs fixed');
