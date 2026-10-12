@@ -250,8 +250,12 @@
 	// ~1.3 s at the gather's own 2048x1024, so it is built in row bands across frames instead
 	// of freezing one: the sim keeps stepping and the probe line shows the band it is on. It is
 	// cached per world and handed to the live session the moment it lands, so the switch itself
-	// allocates nothing. `?hmod=vertex` pre-fills the control; the default is cell samples.
-	var v3dHeight = 'hex', v3dLookup = null;
+	// allocates nothing. The default is the continuous heightmap: the §14.4 gates were
+	// measured on the owner rig (experiments/logs/webgpu-smoke-2026-10-12-20-43.log,
+	// gather 0.065 ms, draws 0.79 ms at ico k8 / 2048x1024, both modes), so a session
+	// opens on `hex` only while its lookup builds and swaps when it lands.
+	// `?hmod=hex|vertex` pre-fills the control; an invalid value keeps the default.
+	var v3dHeight = 'vertex', v3dLookup = null;
 	var LOOKUP_ROWS = 4, LOOKUP_MS = 6;
 	function paintV3d() { dispValue.textContent = v3dDisp.toFixed(1) + '×'; }
 	// The detail select is mode-aware: its options are the module's table, rebuilt in
@@ -779,6 +783,7 @@
 	// mesh does not have) lands on that mesh's default rather than on the first option.
 	if (query.get('mesh') === 'grid') v3dMesh = 'grid';
 	if (query.get('norm') === 'analytic') v3dNorm = 'analytic';
+	if (query.get('hmod') === 'hex') v3dHeight = 'hex';
 	if (query.get('hmod') === 'vertex') v3dHeight = 'vertex';
 	mesh3dInput.value = v3dMesh;
 	norm3dInput.value = v3dNorm;
@@ -1748,7 +1753,7 @@
 			if (v3dMesh !== 'ico') v3dLine += ' · mesh ' + v3dMesh;
 			if (v3dDetail !== Render3D.DEFAULT_DETAIL[v3dMesh]) v3dLine += ' · ' + v3dDetail;
 			if (v3dNorm !== 'deriv') v3dLine += ' · norm ' + v3dNorm;
-			if (v3dHeight !== 'hex') v3dLine += ' · height ' + v3dHeight;
+			if (v3dHeight !== 'vertex') v3dLine += ' · height ' + v3dHeight;
 		}
 		return rig
 			+ '\nengine ' + engine + ' · L' + grid.level

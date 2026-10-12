@@ -121,9 +121,11 @@ Open `index.html` directly in a browser.
   keeps stepping and the probe shows the percentage - cached per world, and handed to the live
   session when it lands, so the switch itself allocates nothing. Owner-rig 2026-10-12: vertex
   gather matches the CPU oracle to 1e-3 m, the plateau gate holds, the 3-seed ensemble is
-  inside bounds. The default is still Cell samples until the §14.4 timing gates (gather
-  ≤ 0.5 ms, 3D passes ≤ 5 ms) are measured at ico k8 / 2048×1024 - the smoke's k6 / 512×256
-  silhouette session is not that number. Every generated shader source - all four
+  inside bounds, and the §14.4 timing gates are measured at ico k8 / 2048×1024 (gather
+  0.065 ms against 0.5 ms, draws 0.79 ms against 5 ms, both height modes;
+  `webgpu-smoke-2026-10-12-20-43.log`), so Continuous heightmap is now the default and
+  Cell samples remains on the select and `?hmod=hex`. The smoke's gate line now reports
+  median and max over 8 collects per mode. Every generated shader source - all four
   3D variants included - compiles clean under `naga`, and the `hex` variant's SPIR-V is
   byte-identical to the pre-refactor one. `0.5.6-review.md` reviews all three slices: the
   containment test that also accepted the antipode, and a calibration seed that varied nothing.

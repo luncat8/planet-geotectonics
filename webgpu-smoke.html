@@ -580,8 +580,16 @@ function captureLine(adapter, fallback) {
 			// k6/512×256 is the silhouette session - on NVIDIA it rounds to 0.00 ms at
 			// two decimals, which is not a gate number. A missed gate does not fail the
 			// smoke (SwiftShader will miss); an unmapped ring does.
+			// §14.4 asks for a timing distribution, not one collect: after the warm-up
+			// submits, each further submit is collected in turn (the ring reads two
+			// submits back, so one collect per submit walks the samples in order) and
+			// the line reports median and max per pass. The gate reads the max: the
+			// worst collected frame must fit, not the typical one. The 2026-10-12-20-43
+			// numbers that moved the default were single collects (gather 0.065 ms,
+			// draws 0.79 ms, both modes); this keeps them comparable and adds the spread.
 			var gateC = document.createElement('canvas');
 			gateC.width = 2048; gateC.height = 1024;
+			var GATE_SAMPLES = 8;
 			var timeGate = async function (mode, records) {
 				var r = new Render3D(gateC).init({
 					device: device, mesh: 'ico', detail: 'k8', norm: 'deriv',
@@ -594,18 +602,40 @@ function captureLine(adapter, fallback) {
 				await device.queue.onSubmittedWorkDone();
 				await r.collect();
 				var on = r.tsOn, valid = r.tsValid;
-				var g = r.tsMs[0], land = r.tsMs[1], water = r.tsMs[2], rim = r.tsMs[3];
+				var samples = [];
+				if (valid) samples.push([r.tsMs[0], r.tsMs[1], r.tsMs[2], r.tsMs[3]]);
+				for (f = 0; valid && f < GATE_SAMPLES - 1; f++) {
+					r.redraw(null);
+					await device.queue.onSubmittedWorkDone();
+					await r.collect();
+					if (r.tsValid) samples.push([r.tsMs[0], r.tsMs[1], r.tsMs[2], r.tsMs[3]]);
+				}
+				if (!r.tsValid) valid = false;   // a map that failed mid-loop is still unmapped
 				r.release();
 				var label = '§14.4 ico k8 2048x1024 ' + mode;
 				if (!on) { note('3d', label + ': no timestamp-query'); return; }
-				if (!valid) { fail('3d: ' + label + ' timestamp ring did not map'); return; }
-				var draws = land + water + rim;
-				var gOk = g <= 0.5, pOk = draws <= 5;
-				note('3d', label + ': gather ' + g.toFixed(3) + ' · land ' + land.toFixed(3)
-					+ ' · water ' + water.toFixed(3) + ' · rim ' + rim.toFixed(3)
-					+ ' · draws ' + draws.toFixed(3) + ' ms · '
-					+ (gOk && pOk ? 'gate MET' : 'gate MISS (gather ' + (gOk ? 'ok' : '>0.5')
-						+ ', draws ' + (pOk ? 'ok' : '>5') + ')'));
+				if (!valid || !samples.length) { fail('3d: ' + label + ' timestamp ring did not map'); return; }
+				var cols = [[], [], [], [], []];
+				for (f = 0; f < samples.length; f++) {
+					cols[0].push(samples[f][0]); cols[1].push(samples[f][1]);
+					cols[2].push(samples[f][2]); cols[3].push(samples[f][3]);
+					cols[4].push(samples[f][1] + samples[f][2] + samples[f][3]);
+				}
+				var stat = function (a) {
+					var v = a.slice().sort(function (x, y) { return x - y; });
+					return [(v[(v.length - 1) >> 1] + v[v.length >> 1]) / 2, v[v.length - 1]];
+				};
+				var gS = stat(cols[0]), lS = stat(cols[1]), wS = stat(cols[2]),
+					rS = stat(cols[3]), dS = stat(cols[4]);
+				var gOk = gS[1] <= 0.5, pOk = dS[1] <= 5;
+				note('3d', label + ': gather med ' + gS[0].toFixed(3) + ' max ' + gS[1].toFixed(3)
+					+ ' · land med ' + lS[0].toFixed(3) + ' max ' + lS[1].toFixed(3)
+					+ ' · water med ' + wS[0].toFixed(3) + ' max ' + wS[1].toFixed(3)
+					+ ' · rim med ' + rS[0].toFixed(3) + ' max ' + rS[1].toFixed(3)
+					+ ' · draws med ' + dS[0].toFixed(3) + ' max ' + dS[1].toFixed(3) + ' ms · '
+					+ (gOk && pOk ? 'gate MET' : 'gate MISS (gather ' + (gOk ? 'ok' : 'max >0.5')
+						+ ', draws ' + (pOk ? 'ok' : 'max >5') + ')')
+					+ ' (n=' + samples.length + ', gate reads max)');
 			};
 			await timeGate('hex');
 			await timeGate('vertex', recs.data);

@@ -508,6 +508,16 @@
 	at two decimals even when the queries are real. §14.4 is ico k8 / 2048×1024
 	(the page default), printed to 3 decimals, both height modes. A missed gate
 	does not fail the smoke (SwiftShader will miss); an unmapped ring does.
+	- hardware timestamps quantize coarsely, and identical pass numbers are
+	what that looks like, not a copied line: on NVIDIA 2026-10-12-20-43 the
+	k8 gate session read gather 0.065 ms and land/water/rim 0.262 ms each in
+	both height modes (a ~65 µs quantum; the same log's k6 session reads
+	0.000, sub-quantum, its gather straddling 0/1 ticks between sessions).
+	Adjudicate a gate against the quantum, not the digits: charge one full
+	quantum per pass and the §14.4 draws stay ~1.0 ms of a 5 ms gate. For
+	the distribution §14.4 asks for, collect per submit after warm-up (the
+	ring reads two submits back, so one collect per submit walks samples in
+	order), print median and max, and gate on the max.
 
 ## The no-readback renderer (H4) and where the mirror is allowed back
 

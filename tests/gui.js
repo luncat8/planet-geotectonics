@@ -1515,6 +1515,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(offPage.el('k3d').value, 'k8', 'the detail select ships on k8');
 		assert.equal(offPage.el('mesh3d').value, 'ico', 'the mesh select ships on the icosphere');
 		assert.equal(offPage.el('norm3d').value, 'deriv', 'and the normals on the derivative source');
+		assert.equal(offPage.el('hmod3d').value, 'vertex', 'the height select ships on the continuous heightmap');
 		assert.equal(offPage.el('k3d').options.map((o) => o.value).join(','), 'k6,k7,k8,k9',
 			'the detail select offers exactly the icosphere tokens');
 
@@ -1532,6 +1533,15 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.match(hmodPage.el('probe').textContent, /the lookup builds while the 3D view is on/,
 			'the control says the build waits for the view that reads it');
 		assert.equal(fakeR3ds.length, 0, 'and nothing was built or booted');
+
+		// ?hmod=hex is the explicit opt-out to the cell samples; an invalid value
+		// falls back to the continuous default, and neither builds without the view.
+		const hexPage = loadPage('?hmod=hex');
+		assert.equal(hexPage.el('hmod3d').value, 'hex', '?hmod=hex pre-fills the cell samples');
+		hexPage.pump(3);
+		assert.equal(fakeR3ds.length, 0, 'the cell samples boot no session on their own');
+		const bogusPage = loadPage('?hmod=bogus');
+		assert.equal(bogusPage.el('hmod3d').value, 'vertex', 'an invalid ?hmod= keeps the continuous default');
 
 		// ?v3d=1 with no WebGPU at all: the toggle lands disabled with the reason.
 		const dryPage = loadPage('?v3d=1&disp=12&k3d=5');
@@ -1574,6 +1584,8 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(page3.el('map').hidden && page3.el('mapgpu').hidden, true, 'the 2D canvases hide');
 		assert.ok(page3.el('layer').classes.includes('off'), 'the layer buttons grey out (the 3D is the look)');
 		assert.match(page3.el('probe').textContent, /3D on · icosphere k7 · 163,842 vertices/, 'the probe names the session');
+		assert.equal(r3.heightMode, 'hex', 'the session opens on cell samples while the default lookup builds');
+		assert.equal(r3.attaches, 0, 'and no lookup has landed yet');
 		const pumpsBefore = r3.redraws;
 		page3.pump(4, 9000);
 		assert.ok(r3.redraws > pumpsBefore, 'a dirty frame redraws the 3D');
@@ -1679,33 +1691,27 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		page3.el('map3d').dispatch('click', { clientX: 200, clientY: 90, currentTarget: page3.el('map3d') });
 		assert.ok(r3live.picks === 2, 'a click that ends an orbit drag is not a pick');
 
-		// The height control (0.5.6 slice 3): `vertex` needs a lookup the page builds itself -
-		// in row bands across frames, so the sim keeps stepping - and hands to the live session
-		// when it lands. The session never switches to a mode it has no pipeline for, and a
-		// finished lookup is cached, so the second switch is a state change and nothing more.
-		assert.equal(page3.el('hmod3d').value, 'hex', 'the height select ships on the cell samples');
-		assert.equal(r3.attaches, 0, 'and no lookup was built for it');
-		page3.el('hmod3d').value = 'vertex';
-		page3.el('hmod3d').dispatch('change');
-		assert.equal(r3.heightMode, 'hex', 'vertex waits for the lookup instead of switching without one');
-		assert.match(page3.el('probe').textContent, /building the lookup/, 'and the probe says what it is doing');
-		page3.pump(2, 9500);
-		assert.match(page3.el('probe').textContent, /Continuous heightmap: \d+% of the lookup/,
-			'the build reports its bands while the map keeps running');
-		assert.equal(r3.heightMode, 'hex', 'and nothing switches mid-build');
-		page3.pump(40, 9600);
-		assert.equal(r3.attaches, 1, 'the finished lookup attached to the live session');
+		// The height control (0.5.6 slices 3-4): the continuous heightmap is the default
+		// since the §14.4 gates were measured on the owner rig, so the frame loop has been
+		// building the lookup in row bands since the view came on - the sim kept stepping,
+		// the session stayed on cell samples until the lookup landed, and the finished
+		// lookup attached once. Switching to cell samples is a state change the capture
+		// header names (the default goes unnamed), and switching back reuses the cache.
+		assert.equal(page3.el('hmod3d').value, 'vertex', 'the height select ships on the continuous heightmap');
+		assert.equal(r3.attaches, 1, 'the lookup the default asked for attached to the live session');
 		assert.equal(r3.records.length, FakeRender3D.TW * FakeRender3D.TH * 4, 'at the gather\'s own resolution');
 		assert.equal(r3.heightMode, 'vertex', 'and the session runs the continuous heightmap');
-		assert.match(page3.el('probe').textContent, /Continuous heightmap ready · \d+ MiB in [\d.]+ s/,
-			'the probe reports the build: ' + page3.el('probe').textContent);
 		page3.pump(2, 9650);
 		const reportHeight = page3.copy();
-		assert.ok(worldLine(reportHeight).includes(' · height vertex'),
-			'the header names the mode: ' + worldLine(reportHeight));
+		assert.ok(!worldLine(reportHeight).includes('height'),
+			'the header leaves the default height mode unnamed: ' + worldLine(reportHeight));
 		page3.el('hmod3d').value = 'hex';
 		page3.el('hmod3d').dispatch('change');
 		assert.equal(r3.heightMode, 'hex', 'back to the cell samples');
+		page3.pump(2, 9660);
+		const reportHex = page3.copy();
+		assert.ok(worldLine(reportHex).includes(' · height hex'),
+			'the header names the off-default cell samples: ' + worldLine(reportHex));
 		page3.el('hmod3d').value = 'vertex';
 		page3.el('hmod3d').dispatch('change');
 		assert.equal(r3.heightMode, 'vertex', 'and back again with no rebuild: the cached lookup is reused');
@@ -1748,8 +1754,9 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		+ ' the detail list follows the mesh mode, the on path swaps the canvases and greys the'
 		+ ' layers, the orbit and wheel move only the camera, the knobs apply live, the header and'
 		+ ' the strip\'s V3D slot name the session, a mesh or normals change swaps buffers or pipelines'
-		+ ' on the live session without a world rebuild, the height control builds its lookup in'
-		+ ' row bands, caches it per world and switches modes without a rebuild, and off restores the map;'
+		+ ' on the live session without a world rebuild, the height control ships on the continuous'
+		+ ' heightmap, builds its lookup in row bands, caches it per world and switches modes'
+		+ ' without a rebuild, and off restores the map;'
 		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
 		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
 })().catch((error) => { console.error(error); process.exit(1); });
