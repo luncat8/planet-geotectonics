@@ -118,6 +118,13 @@ assert.ok(/overflow-x: auto/.test(spanCss) && /scrollbar-width: none/.test(spanC
 assert.ok(/cursor: copy/.test(rowsCss), 'the whole strip reads as a copy control');
 rule('.perf .rows.copied');
 rule('.perf .rows.copy-failed');
+const stageCss = rule('.map-stage');
+const stageCanvasCss = rule('.map-stage > canvas:not(#markers)');
+assert.ok(/width: min\(100%, 120vh\)/.test(stageCss) && /aspect-ratio: 2 \/ 1/.test(stageCss),
+	'the map stage stays 2:1 and fits inside the 60vh height budget without squeezing its canvases');
+assert.ok(!/max-height/.test(rule('canvas')) && /width: 100%/.test(stageCanvasCss)
+	&& /height: auto/.test(stageCanvasCss) && /max-height: none/.test(stageCanvasCss),
+	'map canvases keep their intrinsic ratio instead of being height-clamped independently');
 const prospectCss = rule('#prospect');
 assert.ok(/max-height: 24em/.test(prospectCss) && /overflow: auto/.test(prospectCss)
 	&& /max-width: 100%/.test(prospectCss),

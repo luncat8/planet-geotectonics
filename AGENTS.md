@@ -100,6 +100,8 @@ timing gates measured at ico k8 / 2048x1024 (experiments/logs/webgpu-smoke-2026-
 gather 0.065 ms, draws 0.79 ms, both modes; gates 0.5 / 5 ms), so the Height default is now
 vertex (Continuous heightmap) with hex on the select and ?hmod=hex; the smoke's gate line
 reports median/max over 8 collects. archive/0.5.6-closeout-report.md records the switch.
+0.5.7-plan-3d-visual-quality.md - deferred, renderer-only review plan for canvas/projection aspect
+ratio, high-detail surface appearance, controlled visual fixtures and owner-GPU acceptance gates.
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.
