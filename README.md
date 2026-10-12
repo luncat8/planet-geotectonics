@@ -119,8 +119,11 @@ Open `index.html` directly in a browser.
   the device diff). Slice 3 wires the page: a Height select (`hmod3d`, `?hmod=hex|vertex`), the
   probe line and the capture header. The lookup is built in row bands across frames - the sim
   keeps stepping and the probe shows the percentage - cached per world, and handed to the live
-  session when it lands, so the switch itself allocates nothing. The default is still Cell
-  samples until the device gates run on the owner rig. Every generated shader source - all four
+  session when it lands, so the switch itself allocates nothing. Owner-rig 2026-10-12: vertex
+  gather matches the CPU oracle to 1e-3 m, the plateau gate holds, the 3-seed ensemble is
+  inside bounds. The default is still Cell samples until the §14.4 timing gates (gather
+  ≤ 0.5 ms, 3D passes ≤ 5 ms) are measured at ico k8 / 2048×1024 - the smoke's k6 / 512×256
+  silhouette session is not that number. Every generated shader source - all four
   3D variants included - compiles clean under `naga`, and the `hex` variant's SPIR-V is
   byte-identical to the pre-refactor one. `0.5.6-review.md` reviews all three slices: the
   containment test that also accepted the antipode, and a calibration seed that varied nothing.

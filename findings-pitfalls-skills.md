@@ -498,6 +498,16 @@
 	in the buffer, and a fire-and-forget collect() left the smoke's 3d gate line
 	printing 0.00 ms on real hardware (the §14.4 gather/pass gates had no numbers to
 	mine). collect() returns its mapping promise; the 2 Hz strip still ignores it.
+	Awaiting is not enough: tsMs starts at 0 and `ms[i] >= 0` is true for those
+	zeros, so tsLine printed `3d gather 0.00` on NVIDIA 2026-10-12-20-09 (sim
+	timestamps on the same device were live: loserRank 0.26 ms) whenever collect
+	returned null or the 2-slot one-behind map was still the constructor's buffer.
+	tsValid stays false until a map succeeds; the ring is GpuSim-deep (4, collect
+	reads `(tsSlot+1)%4`); decode is GpuSim's Uint32 pair split, not BigUint64Array.
+	And the silhouette session is k6 / 512×256 - on hardware that rounds to 0.00 ms
+	at two decimals even when the queries are real. §14.4 is ico k8 / 2048×1024
+	(the page default), printed to 3 decimals, both height modes. A missed gate
+	does not fail the smoke (SwiftShader will miss); an unmapped ring does.
 
 ## The no-readback renderer (H4) and where the mirror is allowed back
 

@@ -28,7 +28,9 @@ FakeBuffer.prototype.getMappedRange = function () {
 FakeBuffer.prototype.unmap = function () { this.mapped = false; };
 FakeBuffer.prototype.destroy = function () { this.destroyed = true; };
 
-function makeDevice() {
+function makeDevice(opts) {
+	opts = opts || {};
+	var timestamps = !!opts.timestamps;
 	var writes = 0, submits = 0;
 	var queue = {
 		writeBuffer: function (buf, offset, data, dataOff, size) {
@@ -75,7 +77,11 @@ function makeDevice() {
 			return t;
 		},
 		createSampler: function () { return { of: 'sampler' }; },
-		createQuerySet: function () { throw new Error('stub: no timestamp-query'); },
+		createQuerySet: function (d) {
+			if (!timestamps) throw new Error('stub: no timestamp-query');
+			return { type: d.type, count: d.count, destroyed: false,
+				destroy: function () { this.destroyed = true; } };
+		},
 		createShaderModule: function () { return { getCompilationInfo: function () { return Promise.resolve({ messages: [] }); } }; },
 		createBindGroupLayout: function (d) { bindGroupLayouts.push(d); return d || {}; },
 		createBindGroup: function (d) { bindGroups.push(d); return d || {}; },
@@ -100,7 +106,22 @@ function makeDevice() {
 					}
 					new Uint8Array(dst.bytes).set(new Uint8Array(src.bytes, srcOff, size), dstOff);
 				},
-				resolveQuerySet: function () {},
+				resolveQuerySet: function (q, first, count, dest, destOff) {
+					if (!dest || !dest.bytes) return;
+					// Known pair durations (ns) so Render3D.collect can be pinned without a GPU:
+					// gather 0.31 · land 1.20 · water 0.55 · rim 0.08 ms.
+					var u32 = new Uint32Array(dest.bytes, destOff || 0, count * 2);
+					var dts = [310000, 1200000, 550000, 80000];
+					var t = 1000000000, i, t0, t1, n = count >> 1;
+					for (i = 0; i < n; i++) {
+						t0 = t; t1 = t + dts[i];
+						u32[i * 4] = t0 >>> 0;
+						u32[i * 4 + 1] = (t0 / 4294967296) | 0;
+						u32[i * 4 + 2] = t1 >>> 0;
+						u32[i * 4 + 3] = (t1 / 4294967296) | 0;
+						t = t1 + 1000;
+					}
+				},
 				copyTextureToBuffer: function (src, dst, size) {
 					// Recorded so the readback rigs can pin what was copied from where.
 					this.copies = (this.copies || 0) + 1;

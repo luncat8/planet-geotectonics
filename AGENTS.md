@@ -94,8 +94,10 @@ reference sampler), the vertex gather variant in js/render3d.js (both pipelines 
 a live allocation-free mode swap, attachRecords for a lookup that lands later), the Height select
 in index.html/js/ui.js (?hmod=hex|vertex, probe, capture header) driving that build across frames,
 and tests/heightfield.js, tests/render3d.js, tests/gui.js, tests/wgsl-struct.js,
-experiments/heightfield-calibration.js; 0.5.6-review.md reviews them. Slice 4 - the device gates
-and the default switch - needs the owner rig.
+experiments/heightfield-calibration.js; 0.5.6-review.md reviews them. Slice 4 correctness is
+closed on the owner rig (vertex gather readback, plateau, ensemble); the §14.4 timing gates
+and the default switch still need a k8 / 2048×1024 measurement - k6 / 512×256 is not a gate
+number. Default stays hex.
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.

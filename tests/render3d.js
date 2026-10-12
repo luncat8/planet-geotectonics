@@ -500,3 +500,89 @@ console.log('PASS render3d: icosphere counts/winding/dedup, orbit clamps, the fr
 	+ '(gather, land, water, rim into the 3D target; present alone on the canvas), the live '
 	+ 'knob uniform, the gap-safe z pack with a reused scratch, a 1000-frame loop that '
 	+ 'allocates nothing, and release/detail-change destroying exactly what they own');
+
+// Timestamp ring (slice 4): the stub writes known pair durations on resolveQuerySet, so
+// collect's slot formula and the Uint32 decode can be pinned without a GPU. The 2-slot
+// one-behind ring plus tsLine formatting constructor zeros is what printed `0.00 ms` on
+// NVIDIA while GpuSim's 4-deep ring on the same device was live.
+(async function () {
+	assert.equal(Render3D.TS_RING, 4, 'the 3D ring is GpuSim-deep');
+	const tsDev = makeDevice({ timestamps: true });
+	const rts = new Render3D(canvasOf(512, 256)).init({
+		device: tsDev, mesh: 'ico', detail: 'k6', look: grid.lookup, V: grid.V,
+		zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
+	});
+	assert.equal(rts.tsOn, true, 'a timestamp-capable stub turns the 3D ring on');
+	assert.equal(rts.tsResolve.length, Render3D.TS_RING, 'four resolve buffers');
+	assert.equal(rts.tsMap.length, Render3D.TS_RING, 'four map buffers');
+	assert.equal(rts.tsLine(), '', 'tsLine is silent until a slot two submits back has been mapped');
+	assert.equal(rts.collect(), null, 'collect refuses an empty ring');
+
+	rts.redraw(state);
+	assert.equal(rts.collect(), null, 'one submit is not two-behind yet');
+	rts.redraw(state);
+	assert.equal(rts.collect(), null, 'two submits still leave slot (tsSlot+1)%4 empty');
+	rts.redraw(state);
+	const mapped = rts.collect();
+	assert.ok(mapped, 'three submits fill slot 0, which is (3+1)%4 of tsSlot=3');
+	await mapped;
+	assert.equal(rts.tsValid, true, 'the map sets tsValid');
+	assert.ok(Math.abs(rts.tsMs[0] - 0.31) < 1e-9, 'gather duration from the stub pairs');
+	assert.ok(Math.abs(rts.tsMs[1] - 1.20) < 1e-9, 'land');
+	assert.ok(Math.abs(rts.tsMs[2] - 0.55) < 1e-9, 'water');
+	assert.ok(Math.abs(rts.tsMs[3] - 0.08) < 1e-9, 'rim');
+	assert.equal(rts.tsLine(), '3d gather 0.31 · land 1.20 · water 0.55 · rim 0.08 ms',
+		'tsLine formats the mapped slot');
+
+	// A second collect on the same slot is a no-op: the slot was consumed, tsValid keeps the line.
+	assert.equal(rts.collect(), null, 'a consumed slot is not remapped');
+	assert.equal(rts.tsLine(), '3d gather 0.31 · land 1.20 · water 0.55 · rim 0.08 ms',
+		'the line stays until a later map replaces it');
+
+	// mapAsync failure self-disables, like GpuSim.tsCollect.
+	rts.redraw(state); // tsSlot 0→1 after the three above; this write is slot 3, tsSlot=0
+	rts.redraw(state);
+	rts.redraw(state);
+	rts.redraw(state);
+	const failSlot = (rts.tsSlot + 1) % Render3D.TS_RING;
+	assert.equal(rts.tsWritten[failSlot], 1, 'the two-behind slot is populated');
+	rts.tsMap[failSlot].mapAsync = function () { return Promise.reject(new Error('stub: map failed')); };
+	await rts.collect();
+	assert.equal(rts.tsOn, false, 'a map failure disables the ring');
+	assert.equal(rts.tsLine(), '', 'and the line goes silent');
+
+	const q = rts.tsQ, res = rts.tsResolve.slice(), maps = rts.tsMap.slice();
+	let ringAllocs = 0;
+	const mkBuf = tsDev.createBuffer;
+	tsDev.createBuffer = function (d) { ringAllocs++; return mkBuf.call(tsDev, d); };
+	rts.release();
+	tsDev.createBuffer = mkBuf;
+	assert.equal(ringAllocs, 0, 'release allocates nothing');
+	assert.ok(q.destroyed, 'release destroys the query set');
+	for (const b of res.concat(maps)) assert.ok(b.destroyed, 'and every ring buffer');
+
+	// A live session's append must not allocate ring buffers.
+	const tsDev2 = makeDevice({ timestamps: true });
+	const rts2 = new Render3D(canvasOf(512, 256)).init({
+		device: tsDev2, mesh: 'ico', detail: 'k6', look: grid.lookup, V: grid.V,
+		zSource: 'cellZ', lw: grid.lookupW, lh: grid.lookupH
+	});
+	let frameAllocs = 0;
+	const mk2 = tsDev2.createBuffer, mkT = tsDev2.createTexture;
+	tsDev2.createBuffer = function (d) { frameAllocs++; return mk2.call(tsDev2, d); };
+	tsDev2.createTexture = function (d) { frameAllocs++; return mkT.call(tsDev2, d); };
+	for (let i = 0; i < 100; i++) {
+		rts2.redraw(state);
+		tsDev2.computePasses.length = 0;
+		tsDev2.renderPasses.length = 0;
+	}
+	tsDev2.createBuffer = mk2; tsDev2.createTexture = mkT;
+	assert.equal(frameAllocs, 0, '100 timestamped frames allocate no device object');
+	rts2.release();
+
+	console.log('PASS render3d timestamps: 4-deep ring, two-behind collect, Uint32 decode, '
+		+ 'tsLine silent until tsValid, map failure disables, release owns the ring');
+})().catch(function (e) {
+	console.error(e && e.stack || e);
+	process.exit(1);
+});

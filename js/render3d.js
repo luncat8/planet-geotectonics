@@ -24,7 +24,7 @@ function Render3D(canvas) {
 	this.canvas = canvas;
 	this.exag = 10;
 	this.yaw = 0.65; this.pitch = 0.42; this.dist = 3.0;
-	this.tsOn = false; this.tsBusy = false;
+	this.tsOn = false; this.tsBusy = false; this.tsValid = false;
 	this.tsMs = new Float64Array(4);
 }
 
@@ -34,6 +34,11 @@ Render3D.NEAR = 0.2; Render3D.FAR = 30;
 Render3D.DIST_MIN = 1.5; Render3D.DIST_MAX = 10;
 Render3D.PITCH_MAX = 89.5 * Math.PI / 180;
 Render3D.TS_NAMES = ['gather', 'land', 'water', 'rim'];
+// 4-deep ring, collect reads two submits back: GpuSim.tsCollect's formula. A 2-slot
+// one-behind ring plus tsLine formatting unmapped zeros printed `3d gather 0.00` on
+// NVIDIA while the sim ring (same device) was live - the §14.4 gate had no number.
+Render3D.TS_RING = 4;
+Render3D.TS_BYTES = 64;
 // Spec GPUTextureUsage / GPUBufferUsage / GPUShaderStage bits, as everywhere in this repo.
 // 0x1 COPY_SRC (buffer+texture), 0x2 COPY_DST (buffer), 0x4 TEXTURE_BINDING,
 // 0x8 STORAGE+COPY_DST disambiguated by namespace, 0x10 INDEX/RENDER_ATTACHMENT,
@@ -683,15 +688,16 @@ Render3D.prototype.init = function (opts) {
 	this.rimDesc = { colorAttachments: [{ view: this.targetView, loadOp: 'load', storeOp: 'store' }],
 		depthStencilAttachment: { view: this.depthView, depthLoadOp: 'load', depthStoreOp: 'store', depthClearValue: 1 } };
 	this.gatherDesc = {};
-	this.tsSlot = 0; this.tsWritten = [false, false];
+	this.tsSlot = 0;
+	this.tsWritten = new Uint8Array(Render3D.TS_RING);
+	this.tsValid = false;
 	try {
 		this.tsQ = device.createQuerySet({ type: 'timestamp', count: 8 });
-		this.tsResolve = [0, 1].map(function () {
-			return device.createBuffer({ size: 64, usage: 0x4 | 0x200 });
-		});
-		this.tsMap = [0, 1].map(function () {
-			return device.createBuffer({ size: 64, usage: 0x1 | 0x8 });
-		});
+		this.tsResolve = []; this.tsMap = [];
+		for (var ti = 0; ti < Render3D.TS_RING; ti++) {
+			this.tsResolve.push(device.createBuffer({ size: Render3D.TS_BYTES, usage: 0x4 | 0x200 }));
+			this.tsMap.push(device.createBuffer({ size: Render3D.TS_BYTES, usage: 0x1 | 0x8 }));
+		}
 		// Timestamps assume a 1 ns period (Dawn/Metal/Vulkan in practice), like GpuSim.ts.
 		this.landDesc.timestampWrites = { querySet: this.tsQ, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 };
 		this.waterDesc.timestampWrites = { querySet: this.tsQ, beginningOfPassWriteIndex: 4, endOfPassWriteIndex: 5 };
@@ -748,10 +754,11 @@ Render3D.prototype.append = function (enc) {
 	p.drawIndexed(this.iCount);
 	p.end();
 	if (this.tsOn) {
-		enc.resolveQuerySet(this.tsQ, 0, 8, this.tsResolve[this.tsSlot], 0);
-		enc.copyBufferToBuffer(this.tsResolve[this.tsSlot], 0, this.tsMap[this.tsSlot], 0, 64);
-		this.tsWritten[this.tsSlot] = true;
-		this.tsSlot ^= 1;
+		var pair = this.tsSlot;
+		enc.resolveQuerySet(this.tsQ, 0, 8, this.tsResolve[pair], 0);
+		enc.copyBufferToBuffer(this.tsResolve[pair], 0, this.tsMap[pair], 0, Render3D.TS_BYTES);
+		this.tsWritten[pair] = 1;
+		this.tsSlot = (pair + 1) % Render3D.TS_RING;
 	}
 };
 
@@ -786,24 +793,38 @@ Render3D.prototype.presentWhenDrained = function () {
 	this.device.queue.onSubmittedWorkDone().then(function () { self.present(); });
 };
 
-// The 2 Hz strip line: one collect per tick maps the last completed slot pair. Returns the
-// mapping promise so a one-shot reader (the smoke's gate line) can await real numbers -
-// fire-and-forget left tsLine formatting the previous zeros.
+// The 2 Hz strip line: one collect per tick maps the slot two submits back (GpuSim.tsCollect:
+// `(ringI + 1) % 4`). Returns the mapping promise so a one-shot reader can await real
+// numbers. tsValid stays false until a map succeeds, so tsLine does not format the
+// constructor's zeros as `0.00 ms`. A map failure self-disables, like GpuSim.
 Render3D.prototype.collect = function () {
-	if (this.tsBusy || !this.tsWritten[this.tsSlot ^ 1]) return null;
-	var self = this, buf = this.tsMap[this.tsSlot ^ 1];
+	if (!this.tsOn || this.tsBusy) return null;
+	var slot = (this.tsSlot + 1) % Render3D.TS_RING;
+	if (!this.tsWritten[slot]) return null;
+	var self = this, buf = this.tsMap[slot];
 	this.tsBusy = true;
 	return buf.mapAsync(0x1).then(function () {
-		var q = new BigUint64Array(buf.getMappedRange());
-		for (var i = 0; i < 4; i++) self.tsMs[i] = Number(q[i * 2 + 1] - q[i * 2]) / 1e6;
-		buf.unmap();
-		self.tsBusy = false;
-	}, function () { self.tsBusy = false; });
+		try {
+			var u32 = new Uint32Array(buf.getMappedRange()), i, b, t0, t1;
+			for (i = 0; i < 4; i++) {
+				b = i * 4;
+				t0 = (u32[b + 1] * 4294967296 + u32[b]) / 1e6;
+				t1 = (u32[b + 3] * 4294967296 + u32[b + 2]) / 1e6;
+				self.tsMs[i] = t1 - t0;
+			}
+			self.tsWritten[slot] = 0;
+			self.tsValid = true;
+		} finally {
+			buf.unmap();
+			self.tsBusy = false;
+		}
+	}, function () { self.tsBusy = false; self.tsOn = false; self.tsValid = false; });
 };
 
 Render3D.prototype.tsLine = function () {
 	if (!this.tsOn) return '';
 	this.collect();
+	if (!this.tsValid) return '';
 	var ms = this.tsMs, i;
 	for (i = 0; i < 4; i++) if (!(ms[i] >= 0)) return '';
 	return '3d ' + Render3D.TS_NAMES[0] + ' ' + ms[0].toFixed(2)

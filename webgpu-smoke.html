@@ -453,9 +453,19 @@ function captureLine(adapter, fallback) {
 		note('3d', 'sea -2 km vs 0: ' + coastal + ' pixels differ');
 		if (coastal <= 0) fail('3d: the display sea level does not move the coast');
 		Params.sea = sea0;
-		// One-shot gate line: await the timestamp map, or tsLine formats the previous zeros.
+		// Warm the 4-slot ring (collect reads two submits back) and await the map.
+		// tsLine stays silent until tsValid - formatting constructor zeros as 0.00 ms
+		// was the NVIDIA 2026-10-12-20-09 line, not a measurement.
+		var w;
+		for (w = 0; w < 4; w++) r3.redraw(null);
+		await device.queue.onSubmittedWorkDone();
 		await r3.collect();
-		note('3d', r3.tsLine() || 'no 3d timing (timestamp-query off)');
+		if (r3.tsOn && !r3.tsValid) fail('3d: timestamp ring did not map after the silhouette frames');
+		note('3d', r3.tsValid
+			? ('3d gather ' + r3.tsMs[0].toFixed(3) + ' · land ' + r3.tsMs[1].toFixed(3)
+				+ ' · water ' + r3.tsMs[2].toFixed(3) + ' · rim ' + r3.tsMs[3].toFixed(3)
+				+ ' ms · k6 512x256')
+			: (r3.tsLine() || 'no 3d timing (timestamp-query off)'));
 		r3.release();
 		// The CPU-engine mode: same device, but z packed from the CPU state per frame.
 		var r3z = new Render3D(m3d).init({ device: device, mesh: 'ico', detail: 'k6', look: cpu.grid.lookup, V: V,
@@ -566,6 +576,39 @@ function captureLine(adapter, fallback) {
 			await device.queue.onSubmittedWorkDone();
 			diffHeights(await r3f.readHeights(), refGpu, 'vertex gather, cellF');
 			r3f.release();
+			// §14.4: the page default (ico k8, 2048×1024 canvas) in both height modes.
+			// k6/512×256 is the silhouette session - on NVIDIA it rounds to 0.00 ms at
+			// two decimals, which is not a gate number. A missed gate does not fail the
+			// smoke (SwiftShader will miss); an unmapped ring does.
+			var gateC = document.createElement('canvas');
+			gateC.width = 2048; gateC.height = 1024;
+			var timeGate = async function (mode, records) {
+				var r = new Render3D(gateC).init({
+					device: device, mesh: 'ico', detail: 'k8', norm: 'deriv',
+					look: cpu.grid.lookup, V: V, zSource: 'cellF', cellF: S.buf.cellF,
+					lw: cpu.grid.lookupW, lh: cpu.grid.lookupH,
+					records: records, heightMode: mode
+				});
+				var f;
+				for (f = 0; f < 4; f++) r.redraw(null);
+				await device.queue.onSubmittedWorkDone();
+				await r.collect();
+				var on = r.tsOn, valid = r.tsValid;
+				var g = r.tsMs[0], land = r.tsMs[1], water = r.tsMs[2], rim = r.tsMs[3];
+				r.release();
+				var label = '§14.4 ico k8 2048x1024 ' + mode;
+				if (!on) { note('3d', label + ': no timestamp-query'); return; }
+				if (!valid) { fail('3d: ' + label + ' timestamp ring did not map'); return; }
+				var draws = land + water + rim;
+				var gOk = g <= 0.5, pOk = draws <= 5;
+				note('3d', label + ': gather ' + g.toFixed(3) + ' · land ' + land.toFixed(3)
+					+ ' · water ' + water.toFixed(3) + ' · rim ' + rim.toFixed(3)
+					+ ' · draws ' + draws.toFixed(3) + ' ms · '
+					+ (gOk && pOk ? 'gate MET' : 'gate MISS (gather ' + (gOk ? 'ok' : '>0.5')
+						+ ', draws ' + (pOk ? 'ok' : '>5') + ')'));
+			};
+			await timeGate('hex');
+			await timeGate('vertex', recs.data);
 		} catch (e) {
 			fail('3d vertex gather threw: ' + ((e && e.stack) || e));
 		}
