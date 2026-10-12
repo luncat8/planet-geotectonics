@@ -458,11 +458,46 @@
 	into the same f32 on both engines, both then break the tie by the smaller cell
 	index, and frame-1 low flips drop 745 -> 28 (~0.3% of cells). The residual is the
 	mirror image of the old failure: the GPU's own z differs from fround(cpu z) by
-	1-4 ulp (different arithmetic paths through the elevation formula), so where the
-	CPU now sees a tie the GPU still sees a real difference. Only a full f32 reference
-	sim (all crust state rounded every frame) would close that; the ensemble bounds
-	remain the gate for long runs. Rule: every discrete decision shared with the GPU
-	(low, wet, fraction thresholds) should be taken on f32-quantized inputs on the CPU.
+	1-5 ulp (different arithmetic paths through the elevation formula), so where the
+	CPU now sees a tie the GPU still sees a real difference. Rule: every discrete
+	decision shared with the GPU (low, wet, fraction thresholds) should be taken on
+	f32-quantized inputs on the CPU. The residual's closure is the next section - a
+	full f32 reference sim is NOT required for the shared formulas themselves.
+
+## WebGPU parity: evaluate shared formulas in the device's own f32 order (elev32)
+
+	fround of a f64 formula is not the f32 formula: from identical inputs the two
+	evaluations of the elevation expression differ by up to 5 ulp (measured on every
+	owned L5 cell), which is the whole residual above. Evaluate the shared formula
+	itself in f32 op order - Math.fround after each step, in the WGSL expression's own
+	order - and the two outputs are bit-identical from identical inputs:
+	js/surface.js elev32 mirrors elevationZ verbatim and measured 10242/10242 exact
+	cells on an L5 world, so s.z holds the value the GPU compares and the drainage
+	pick reads it directly (no separate quantization). Frame-0 low flips drop 83 -> 0
+	on SwiftShader; the hardware's 28 and their 2-column hSed/oBas signature (one
+	flipped chain cell moving a whole sediment packet, both fields off by the same
+	~2x) vanish with them, and `__run` frames=1 is clean. Residual at frame 2+:
+	input drift through kernels that still evaluate in f64 - above all zDyn's exp,
+	where the WGSL builtin is vendor-specific and V8's Math.exp is correctly rounded -
+	flips ~2 cells; the cosx/sinx pattern in wgsl-common.js (shared series accurate to
+	<1e-12) is the model if an expx is ever needed. Ensemble bounds remain the
+	long-run gate, and removing the flip seed cut the 3-seed L5 drift from a
+	2.03% bound violation to 1.35% worst columns. Same-trip harness lessons:
+
+	- a texture that readHeights copies out needs COPY_SRC (0x1) in its usage, exactly
+	like GpuRenderer.world - hardware validates the copy (the world texture's own
+	lesson) and a stub never complains. Without the bit the smoke's three vertex
+	gather diffs read back zeros and "fail" by 5-6 km against a correct shader.
+	- plateau-share gates follow the plan's "genuinely flat input is allowed to remain
+	flat": a real world gives ~2.5% equal pairs in f64 (flat floors + u16 weight
+	quantization) and f32 rounding expands it to ~19% on the device texture, so
+	vp < 0.01 - calibrated on a synthetic f64 field - fails on every real run even
+	when the gather matches its CPU oracle to 1e-3 m. Gate vertex against the same
+	session's hex share and print the CPU-oracle share as the floor.
+	- a one-shot timestamp read must await the ring map: tsLine() formats whatever is
+	in the buffer, and a fire-and-forget collect() left the smoke's 3d gate line
+	printing 0.00 ms on real hardware (the §14.4 gather/pass gates had no numbers to
+	mine). collect() returns its mapping promise; the 2 Hz strip still ignores it.
 
 ## The no-readback renderer (H4) and where the mirror is allowed back
 

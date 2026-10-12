@@ -3,10 +3,24 @@ var SurfaceParams = typeof module !== 'undefined' && module.exports ? require('.
 // ascending cell order; column fields are only changed by the owning cell, so the result is
 // independent of traversal order and has no per-frame allocation.
 var Surface = {
-	smoothstep: function (x, lo, hi) {
-		var t = (x - lo) / (hi - lo);
-		t = Math.max(0, Math.min(1, t));
-		return t * t * (3 - 2 * t);
+	// The elevation formula in the device's own f32 arithmetic (elevationZ verbatim, op for
+	// op). The drainage pick, wet and the routing thresholds are discrete decisions the GPU
+	// takes on its f32 z: evaluating the same formula in f64 differs from it by 1-5 ulp,
+	// which flips every near-tie (findings: collapse ties on the CPU too). From identical
+	// inputs this chain is bit-identical to the WGSL output (measured over a whole L5
+	// world), so s.z holds the value the device compares against and the pick needs no
+	// separate quantization. The smoothstep(5000, 20000) is inlined in the same f32 order.
+	elev32: function (fel, maf, sed, age, zDyn) {
+		var F = Math.fround;
+		fel = F(fel); maf = F(maf); sed = F(sed); age = F(age); zDyn = F(zDyn);
+		var t = F(F(fel - 5000) / 15000);
+		t = t < 0 ? 0 : t > 1 ? 1 : t;
+		var ci = F(F(t * t) * F(3 - F(2 * t)));
+		var thermal = F(F(F(F(1 - ci) * 350) * F(Math.sqrt(Math.min(age, 80)))) + F(ci * 2091));
+		var z = F(-3342 + F(fel / 6));
+		z = F(z + F(F(F(maf * 350) + F(sed * 900)) / 3300));
+		z = F(z - thermal);
+		return F(z + zDyn);
 	},
 	updateDynamics: function (s, dt) {
 		if (!(dt > 0)) return;
@@ -37,9 +51,7 @@ var Surface = {
 				s.slope[c] = 0; s.low[c] = -1;
 				continue;
 			}
-			var felsic = s.hFel[o], ci = Surface.smoothstep(felsic, 5000, 20000);
-			var thermal = (1 - ci) * 350 * Math.sqrt(Math.min(s.age[o], 80)) + ci * 2091;
-			s.z[c] = -3342 + felsic / 6 + (s.hMaf[o] * 350 + s.hSed[o] * 900) / 3300 - thermal + s.zDyn[o];
+			s.z[c] = Surface.elev32(s.hFel[o], s.hMaf[o], s.hSed[o], s.age[o], s.zDyn[o]);
 			s.wet[c] = s.z[c] < 0 ? 1 : 0;
 		}
 		if (gradient === false) return;
@@ -52,12 +64,10 @@ var Surface = {
 				if (zj !== zj) continue;
 				var dz = zj - zi;
 				bx += dz * g.pos[jb]; by += dz * g.pos[jb + 1]; bz += dz * g.pos[jb + 2];
-				// The drainage pick is a discrete decision the GPU must reproduce exactly; f32
-				// (Math.fround on the CPU, native on the device) collapses sub-ulp z
-				// differences into the same tie, which both engines then break by the
-				// smaller cell index, so routing cannot diverge between engines.
-				var zf = Math.fround(zj);
-				if (zf < lowZ || (zf === lowZ && j2 < low)) { low = j2; lowZ = zf; }
+				// The drainage pick is a discrete decision the GPU must reproduce exactly.
+				// z is already the device's own f32 value (elev32), so both engines compare
+				// the same numbers and break a tie by the smaller cell index (elevationG).
+				if (zj < lowZ || (zj === lowZ && j2 < low)) { low = j2; lowZ = zj; }
 			}
 			var i9 = c2 * 9;
 			var gx = inv[i9] * bx + inv[i9 + 1] * by + inv[i9 + 2] * bz;

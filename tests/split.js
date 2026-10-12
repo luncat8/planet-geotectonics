@@ -182,18 +182,18 @@ function convergence(W) {
 }
 
 // --- events are deterministic and leave the ledger alone ------------------------------------
-// The natural run is re-baselined on seed 23 / 200 Myr: the 0.4.0 owner-remap fix removed the
-// spurious damage that used to make plates rift early, and the 0.5.0 sediment limit
-// (thickness counts in the collision barrier and in collapse, so artifact piles stopped
-// feeding the damage field) first split seed 4 at 167 Myr and seed 23 at 97 Myr - the
-// strength feedback restored the natural rift cadence in every probed seed - with seed 23
-// first merging at 18 Myr, so 200 Myr exercises both paths with margin. The statistics
-// themselves are the 0.4.0 recalibration's business; the prescribed corridor above keeps a
-// fixed split target either way.
+// The natural run is re-baselined on seed 17 / 200 Myr: the f32 elevation (elev32, the CPU
+// evaluating z in the device's own arithmetic so drainage picks match the GPU) moved each
+// seed's chaotic rift timing by tens of Myr - seed 23's first split left the old 97 Myr for
+// 216 Myr and left the horizon - so the window was re-measured. Seed 17 first merges at
+// 28 Myr and first splits at 48 Myr, both paths well inside the 200 Myr horizon with more
+// margin than any probed alternative. The statistics themselves are the 0.4.0
+// recalibration's business; the prescribed corridor above keeps a fixed split target
+// either way.
 {
 	const runs = [];
 	for (let pass = 0; pass < 2; pass++) {
-		const s = new State(g, 23);
+		const s = new State(g, 17);
 		s.ckptCap = 0;
 		Sim.raster(s);
 		s.rebase();

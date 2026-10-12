@@ -589,8 +589,11 @@ Render3D.prototype.init = function (opts) {
 	this.format = 'rgba8unorm';
 	this.context.configure({ device: device, format: this.format, alphaMode: 'opaque' });
 	this.setMesh(opts.mesh || 'ico', opts.detail || Render3D.DEFAULT_DETAIL.ico);
+	// COPY_SRC (0x1) on the height texture is load-bearing: initHeightReadback/readHeights
+	// copy it out for the gather diff, and a texture without that bit fails validation on
+	// hardware (the world-texture lesson verbatim - the stub never complains).
 	this.height = device.createTexture({
-		size: [Render3D.TW, Render3D.TH], format: 'r32float', usage: 0x8 | 0x4
+		size: [Render3D.TW, Render3D.TH], format: 'r32float', usage: 0x8 | 0x4 | 0x1
 	});
 	this.heightView = this.height.createView();
 	this.target = device.createTexture({
@@ -783,12 +786,14 @@ Render3D.prototype.presentWhenDrained = function () {
 	this.device.queue.onSubmittedWorkDone().then(function () { self.present(); });
 };
 
-// The 2 Hz strip line: one collect per tick maps the last completed slot pair.
+// The 2 Hz strip line: one collect per tick maps the last completed slot pair. Returns the
+// mapping promise so a one-shot reader (the smoke's gate line) can await real numbers -
+// fire-and-forget left tsLine formatting the previous zeros.
 Render3D.prototype.collect = function () {
-	if (this.tsBusy || !this.tsWritten[this.tsSlot ^ 1]) return;
+	if (this.tsBusy || !this.tsWritten[this.tsSlot ^ 1]) return null;
 	var self = this, buf = this.tsMap[this.tsSlot ^ 1];
 	this.tsBusy = true;
-	buf.mapAsync(0x1).then(function () {
+	return buf.mapAsync(0x1).then(function () {
 		var q = new BigUint64Array(buf.getMappedRange());
 		for (var i = 0; i < 4; i++) self.tsMs[i] = Number(q[i * 2 + 1] - q[i * 2]) / 1e6;
 		buf.unmap();
