@@ -209,6 +209,11 @@ State.prototype.reset = function (seed) {
 	this.subductedMaf = 0; this.subductedSed = 0;
 	this.subductedArea = 0; this.massFel = 0; this.massMaf = 0; this.massSed = 0;
 	this.massFel0 = 0; this.massMaf0 = 0; this.massSed0 = 0;
+	// A live resolution change (0.7.0) re-partitions the same crust, and the area-weighted mean
+	// it uses leaves a residual volume that depends on the two tessellations rather than on the
+	// crust. It is booked as a source here, so `mass0 + produced + regrid - losses = mass` holds
+	// exactly across a level change; every step leaves these at zero.
+	this.regridFel = 0; this.regridMaf = 0; this.regridSed = 0;
 	this.body.fill(0); this.world.fill(0); this.area.fill(0);
 	this.hFel.fill(0); this.hMaf.fill(0); this.hSed.fill(0); this.age.fill(0);
 	this.fert.fill(0); this.oVms.fill(0); this.oMaf.fill(0);
@@ -286,5 +291,6 @@ State.prototype.rebase = function () {
 	this.massFel0 = this.massFel; this.massMaf0 = this.massMaf; this.massSed0 = this.massSed;
 	this.producedFel = 0; this.producedMaf = 0; this.erodedFel = 0; this.erodedMaf = 0;
 	this.subductedMaf = 0; this.subductedSed = 0;
+	this.regridFel = 0; this.regridMaf = 0; this.regridSed = 0;
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = State;

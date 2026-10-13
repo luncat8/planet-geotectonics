@@ -232,15 +232,22 @@ var Instruments = (function () {
 		var distance = state.grid.nbrDist[cell] * 1.5 / EARTH_RADIUS;
 		return Math.cos(Math.min(Math.PI, distance));
 	}
+	// `priorTolerance` is the one thing that can loosen a match: a level change re-lattices the
+	// plate frame, so Resolution.ledger stamps each surviving entry with the previous frame's own
+	// tolerance (1.5 neighbour distances). A record the re-lattice displaced by less than that can
+	// still be matched to the entry that already names it, instead of being discovered twice. The
+	// stamp is dropped as soon as the entry is re-anchored, so it cannot loosen a settled ledger.
 	function considerReanchor(ledger, record, cell, cosLimit) {
 		var list = ledger.byRecordCell[String(cell)];
 		if (!list) return;
 		for (var i = 0; i < list.length; i++) {
 			var entry = list[i];
 			if (entry.kind !== record.kind || entry.id === record.id) continue;
+			var limit = entry.priorTolerance !== undefined && entry.priorTolerance < cosLimit
+				? entry.priorTolerance : cosLimit;
 			var direction = entry.direction, next = record.direction;
 			var dot = direction[0] * next[0] + direction[1] * next[1] + direction[2] * next[2];
-			if (dot >= cosLimit && dot > reanchorBest.dot) {
+			if (dot >= limit && dot > reanchorBest.dot) {
 				reanchorBest.entry = entry; reanchorBest.dot = dot;
 			}
 		}
@@ -254,7 +261,7 @@ var Instruments = (function () {
 			return exact;
 		}
 		var cosLimit = reanchorTolerance(state, record.cell);
-		reanchorBest.entry = null; reanchorBest.dot = cosLimit;
+		reanchorBest.entry = null; reanchorBest.dot = -1;
 		if (ledger.found.length) {
 			var g = state.grid, ring = g.ring, ringN = g.ringN, first = record.cell;
 			considerReanchor(ledger, record, first, cosLimit);
@@ -267,6 +274,7 @@ var Instruments = (function () {
 		}
 		var best = reanchorBest.entry;
 		if (best) {
+			delete best.priorTolerance;
 			delete ledger.byId[best.id];
 			moveRecordCell(ledger, best, record.cell);
 			best.id = record.id;
