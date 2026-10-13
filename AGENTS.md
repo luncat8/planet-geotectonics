@@ -105,6 +105,13 @@ contract, thresholds, module map and staging. the increments:
 	loader and the same v2 writer; provenance and fixture-corpus rules.
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
+0.8.0-slice-agent-prompt.md - standing handoff prompt for the planet-tectonics-2d-slice agent:
+	verified globe facts at 85f4a59, the slice repo's stale inventory, phase A work that needs no
+	v2 artifacts, the coordinated phase B v2 cutover and the report format; paste as-is.
+0.9.0-plan-climate-integration.md - the planet-climate integration plan: comparison verdict and
+	borrow lists, the two-clock design (geological Myr vs climate days/kyr), the field seam both
+	directions, project structure, the file:// multithreading verdict, staged increments and the
+	keep-compatible rules current work must obey; planning artifact, nothing in 0.8 waits on it.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
