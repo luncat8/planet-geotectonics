@@ -95,6 +95,16 @@ contract, thresholds, module map and staging. the increments:
 	field is attributed to the sediment accommodation limit removing the blanket that shielded the
 	felsic crust. The measured candidates (collision barrier form, basin bypass, erosion intake)
 	are recorded there, none shipped. experiments/continental-probe.js is the measurement harness.
+0.8.x-draft-2d-slice-integration.md - original request and source pointers for a staged globe /
+	2D-slice integration. The final standalone plans are:
+0.8.0-plan-slice-exchange-foundation.md - coordinated `pgt-slice-pack` v2 contract, checksum /
+	validation repair, byte-identical port manifest and counterpart handoff; no live link.
+0.8.1-plan-slice-cutter.md - globe-owned two-click great-circle cutter, pure cell-run writer,
+	map overlay, CPU/GPU snapshot discipline and manual Copy/Save transport.
+0.8.2-plan-slice-bake.md - deterministic Node Earth-start section bakes through the real Earth
+	loader and the same v2 writer; provenance and fixture-corpus rules.
+0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
+	explicit gates that defer topology mutation / continuous two-way coupling.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
