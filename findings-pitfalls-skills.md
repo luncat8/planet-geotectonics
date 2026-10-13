@@ -1993,3 +1993,22 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	clock built from 15000 `t += 0.1`, which lands on 1000.0000000001588 - so the t=1000
 	epoch is silently excluded and the window is really 500-900 Myr. check any `<=` against
 	an accumulated float before trusting how many samples a window has.
+
+## portable columnar JSON needs raw validation and semantic hash bytes (0.8.0, 2026-10-13)
+
+	typed-array construction is not validation: `new Uint8Array([1.5])` truncates to 1 and a
+	missing array normalized as a requested-length buffer becomes plausible all-zero geology.
+	parse JSON, prove exact keys, raw arrays, lengths, integrality/ranges and cross-field rules,
+	then construct typed arrays. expose that order as one `decode` entry point; keep normalization
+	private so a second reader cannot quietly restore the normalize-first hole.
+
+	do not hash native typed-array memory in a portable file contract. its bytes depend on host
+	endianness, and concatenated metadata needs explicit boundaries. hash UTF-8 of a compact,
+	fixed-key-order canonical JSON projection behind a format-specific domain line instead. this
+	also makes exclusions reviewable: `built` is provenance outside full identity; `cellKm` is
+	source-grid metadata outside geographic path identity.
+
+	cross-check wire dtypes against sentinel wording. the slice draft said a gap's i32 `zM` equals
+	the volume solver's fractional `sea.levelM`, which cannot be represented. pin the coercion in
+	the shared helper and validator (`Math.round` after shared quantization), not independently in
+	the writer and reader.

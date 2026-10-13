@@ -1,0 +1,31 @@
+{
+	"format": "pgt-port-manifest",
+	"version": 2,
+	"contract": "pgt-slice-pack-v2",
+	"repositories": [
+		{
+			"role": "globe-writer",
+			"repo": "luncat8/planet-geotectonics",
+			"commit": "ee43f6478de60046298354a87ca5ac89a19d8878",
+			"note": "globe revision where the hashed v2 codec and fixture first landed"
+		},
+		{
+			"role": "section-reader",
+			"repo": "luncat8/planet-tectonics-2d-slice",
+			"commit": "fd044e19f9281b728ed3f43fdf3c1836a029a472",
+			"note": "reviewed v1 reader baseline; replace its v1 port and fixtures with these v2 artifacts as one cutover"
+		}
+	],
+	"files": [
+		{
+			"path": "port/slice-format.js",
+			"sha256": "e5df45754c564168394f4d818b67ce4c5039d912481c65619e4bb82d0554564c",
+			"what": "byte-identical pgt-slice-pack v2 schema, canonical identities, validation and path geometry"
+		},
+		{
+			"path": "port/fixtures/slice-pack-v2.json",
+			"sha256": "ca5e92d72611efad4121f1e1f2816f2b728b3c7ca9f2135d65533ebc1a5bd907",
+			"what": "hand-auditable v2 contract fixture: two live plates, all boundary kinds, fractional sea level, one gap and six potentials"
+		}
+	]
+}

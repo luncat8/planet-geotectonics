@@ -41,6 +41,12 @@ Open `index.html` directly in a browser.
   or **Fresh world** (the rebuild). A failed transfer leaves the running world untouched. The
   field volume residual is booked to `regrid*` and reported; `0.7.0-review.md` §4 lists the open
   decision on it. The GPU engine still rebuilds until its device path lands.
+- Slice exchange foundation (0.8.0, globe side): `port/slice-format.js` defines the strict,
+  file-safe `pgt-slice-pack` v2 contract, canonical full/path identities, path geometry and the
+  raw-before-typed-array validation that v1 lacked. `PORT.json` SHA-256-gates the shared codec and
+  its all-boundaries/gap fixture under both Node and classic scripts. The section repository's v2
+  cutover and fixture reconstruction still gate completion, so there is intentionally no cutter
+  control or live-link claim yet; see `0.8.0-review.md`.
 - Metallogeny: six saturating potentials per column (VMS, mafic, arc, orogenic, basin, placer)
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
@@ -216,7 +222,7 @@ class table (§10 of `0.6.1-plan-deposit-catalogue.md`) and
 ## Test
 
 ```
-node tests/run-all.js            short profile: 39 tests except the four histories (~3 min)
+node tests/run-all.js            short profile: 41 tests except the four histories (~3 min)
 node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
 node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```

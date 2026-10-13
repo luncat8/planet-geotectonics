@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 39 kernel, rig and GUI tests, ~3 min here
+node tests/run-all.js		short profile (default): 41 kernel, protocol, rig and GUI tests, ~3 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
@@ -99,6 +99,8 @@ contract, thresholds, module map and staging. the increments:
 	2D-slice integration. The final standalone plans are:
 0.8.0-plan-slice-exchange-foundation.md - coordinated `pgt-slice-pack` v2 contract, checksum /
 	validation repair, byte-identical port manifest and counterpart handoff; no live link.
+0.8.0-review.md - globe-side v2 implementation review: exact artifact identities, raw-before-type
+	validation decisions and tests; counterpart v1 cutover/fixture reconstruction still gates completion.
 0.8.1-plan-slice-cutter.md - globe-owned two-click great-circle cutter, pure cell-run writer,
 	map overlay, CPU/GPU snapshot discipline and manual Copy/Save transport.
 0.8.2-plan-slice-bake.md - deterministic Node Earth-start section bakes through the real Earth
@@ -106,8 +108,8 @@ contract, thresholds, module map and staging. the increments:
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
 0.8.0-slice-agent-prompt.md - standing handoff prompt for the planet-tectonics-2d-slice agent:
-	verified globe facts at 85f4a59, the slice repo's stale inventory, phase A work that needs no
-	v2 artifacts, the coordinated phase B v2 cutover and the report format; paste as-is.
+	verified globe facts, the slice repo's stale inventory, parallel preparation, the coordinated
+	phase B v2 artifact cutover and the report format; paste as-is.
 0.9.0-plan-climate-integration.md - the planet-climate integration plan: comparison verdict and
 	borrow lists, the two-clock design (geological Myr vs climate days/kyr), the field seam both
 	directions, project structure, the file:// multithreading verdict, staged increments and the

@@ -15,7 +15,7 @@ const release = argv.includes('--release');
 const full = release || argv.includes('--full');
 const HISTORIES = ['kinematics', 'ores', 'alloc', 'longrun'];
 const SHORT = [
-	'browser-scripts', 'deposits', 'core', 'instruments', 'resolution', 'gui', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces',
+	'port', 'slice-format', 'browser-scripts', 'deposits', 'core', 'instruments', 'resolution', 'gui', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces',
 	'determinism', 'water', 'raster', 'conveyor', 'rift', 'isostasy', 'erosion', 'adj', 'collapse', 'split',
 	'checkpoint', 'view-dir', 'rotations', 'gpml-plates', 'earth', 'paleo', 'sediment', 'reconstruct', 'heightfield',
 	'perf', 'clipboard',
