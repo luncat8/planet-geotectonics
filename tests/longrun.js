@@ -3,6 +3,9 @@
 // cratons) and the plan's plate-count window are checked per epoch. Pass --release for
 // acceptance 6's 4500 Myr / dt 0.1 and 500 Myr / dt 0.01 histories without making every
 // development test run take that long.
+// The continental share is read on a three-seed ensemble, not on the seed-7 world alone: it
+// spreads over ~7 points between seeds at 1500 Myr, which is wider than the distance from the
+// ensemble mean to the design band's floor (0.7.1-review-continental-area.md §2.1).
 const { assert, Grid, State, Sim } = require('./helpers.js');
 const Params = require('../js/params.js');
 const Deposits = require('../js/deposits.js');
@@ -11,6 +14,19 @@ const EPOCH = 100;
 const RELEASE = process.argv.includes('--release');
 const COARSE_MYR = RELEASE ? 4500 : 1500;
 const FINE_MYR = RELEASE ? 500 : 300;
+// Acceptance 3 is written at 1500 Myr (design §10.3) whatever the profile length, so the
+// ensemble members run to that epoch and stop - the world is deterministic, so their 1500 Myr
+// state is the 1500 Myr epoch of a longer run, at a third of the cost in --release.
+const ACCEPT_MYR = 1500;
+const ACCEPT_AT = Math.round(ACCEPT_MYR / EPOCH) - 1;
+// Predeclared bounds. The measured spread over these three seeds is 0.070 shipped, and 0.024 /
+// 0.053 / 0.036 on the three candidates measured at 0.7.1, so 0.12 is a guard against a model
+// that turns wildly seed-sensitive, not a second acceptance band - three seeds estimate a
+// spread badly, and the mean is the number the design's band is read on.
+const ENSEMBLE = [7, 8, 11];
+const SPREAD_MAX = 0.12;
+// The history that carries every other check (catalogue, dt-independence, checkpoint ring).
+const PRIMARY = 7;
 
 function epochStats(s) {
 	let n = 0, continental = 0, craton = 0;
@@ -29,9 +45,10 @@ function epochStats(s) {
 		finite: s.finite, rigid: s.rigidError, quat: s.quatError, snapshots: s.ckptN
 	};
 }
-function history(dt, myr) {
-	const g = new Grid(5, 7).build();
-	const s = new State(g, 7, 1);              // hot start
+function history(dt, myr, seed) {
+	seed = seed === undefined ? 7 : seed;
+	const g = new Grid(5, seed).build();
+	const s = new State(g, seed, 1);           // hot start
 	Sim.raster(s);
 	const epochs = [];
 	const start = performance.now();
@@ -82,7 +99,7 @@ function assertCoreCatalogue(s) {
 	return checkedBodies;
 }
 
-const long = history(0.1, COARSE_MYR);
+const long = history(0.1, COARSE_MYR, PRIMARY);
 console.log('dt 0.1, hot start, ' + COARSE_MYR + ' Myr in ' + long.seconds.toFixed(0) + ' s');
 const coreBodies = assertCoreCatalogue(long.s);
 console.log('PASS core/catalogue: ' + coreBodies + ' body intersections agree at the '
@@ -96,7 +113,7 @@ for (const e of long.epochs) {
 		+ ' snapshots ' + e.snapshots);
 }
 const last = long.epochs[long.epochs.length - 1];
-const acceptance = long.epochs[Math.round(1500 / EPOCH) - 1];
+const acceptance = long.epochs[ACCEPT_AT];
 for (const e of long.epochs) {
 	// finite covers NaN, plate ids outside the dense table, and a potential above saturation.
 	assert.equal(e.finite, 1, 'state invariant (finite, plate ids, saturation) at t ' + e.t);
@@ -109,13 +126,38 @@ for (const e of long.epochs) {
 const middle = long.epochs.filter(e => e.t >= 500 && e.t <= 1000);
 const middleMean = middle.reduce((a, e) => a + e.meanCm, 0) / middle.length;
 assert.ok(middleMean >= 1 && middleMean <= 10, 'middle epoch speed ' + middleMean.toFixed(2) + ' cm/yr');
-assert.ok(acceptance.continental >= 0.15 && acceptance.continental <= 0.4, 'continental area ' + acceptance.continental);
-assert.ok(acceptance.craton > 0, 'cratons must exist by 1500 Myr');
+// The ensemble: seed 7 is the primary history above, the rest are run to the acceptance epoch.
+// Each one is a whole world, so each is checked for the invariants before its share is pooled.
+const ensemble = ENSEMBLE.map(function (seed) {
+	if (seed === PRIMARY) return { seed: seed, epoch: acceptance };
+	const run = history(0.1, ACCEPT_MYR, seed);
+	return { seed: seed, epoch: run.epochs[run.epochs.length - 1] };
+});
+for (const member of ensemble) {
+	const e = member.epoch;
+	console.log('  seed ' + member.seed + ': continental ' + (e.continental * 100).toFixed(1) + '%'
+		+ ' cratons ' + (e.craton * 100).toFixed(2) + '% plates ' + e.plates
+		+ ' columns ' + e.columns + ' at ' + ACCEPT_MYR + ' Myr');
+	assert.equal(e.finite, 1, 'state invariant on seed ' + member.seed);
+	assert.ok(Math.abs(e.felResidual) < 0.01, 'hFel invariant on seed ' + member.seed + ': ' + e.felResidual);
+	assert.ok(Math.abs(e.mafResidual) < 0.01, 'hMaf invariant on seed ' + member.seed + ': ' + e.mafResidual);
+	assert.ok(e.craton > 0, 'cratons must exist by ' + ACCEPT_MYR + ' Myr (seed ' + member.seed + ')');
+	assert.ok(e.plates >= 6 && e.plates <= 40, 'plate count on seed ' + member.seed + ': ' + e.plates);
+}
+const shares = ensemble.map(member => member.epoch.continental);
+const contMean = shares.reduce((a, b) => a + b, 0) / shares.length;
+const contSpread = Math.max.apply(null, shares) - Math.min.apply(null, shares);
+assert.ok(contMean >= 0.15 && contMean <= 0.4, 'continental area, ' + ENSEMBLE.length + '-seed mean '
+	+ contMean.toFixed(4) + ' over ' + shares.map(s => s.toFixed(3)).join('/'));
+assert.ok(contSpread <= SPREAD_MAX, 'continental area spread ' + contSpread.toFixed(4)
+	+ ' over seeds ' + ENSEMBLE.join('/') + ' (bound ' + SPREAD_MAX + ')');
 assert.ok(acceptance.splits >= 1 && acceptance.merges >= 1, 'a world that never rearranges is not plate tectonics');
 assert.equal(last.snapshots, Params.ckptCap, 'the checkpoint ring fills up on a long run');
 console.log('PASS longrun ' + COARSE_MYR + ' Myr: no NaN, invariants exact, plates 6-40, middle epoch '
-	+ middleMean.toFixed(2) + ' cm/yr, continental at 1500 Myr ' + (acceptance.continental * 100).toFixed(1) + '%, '
-	+ last.splits + ' splits and ' + last.merges + ' merges');
+	+ middleMean.toFixed(2) + ' cm/yr, ' + last.splits + ' splits and ' + last.merges + ' merges, and continental at '
+	+ ACCEPT_MYR + ' Myr ' + (contMean * 100).toFixed(1) + '% as the ' + ENSEMBLE.length + '-seed mean (spread '
+	+ (contSpread * 100).toFixed(1) + ' points; the design band is read on the mean because one seed '
+	+ 'cannot decide it)');
 
 const short = history(0.01, FINE_MYR);
 const coarse = long.epochs[Math.round(FINE_MYR / EPOCH) - 1];

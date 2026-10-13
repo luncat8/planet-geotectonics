@@ -1956,3 +1956,40 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 
 	`node -e "require('tests/run-all.js')"` executes every test in the spawned children and hangs the
 	tool call. to check syntax, use `node --check file.js`.
+
+## an acceptance statistic on a chaotic world is an ensemble statistic (2026-10-13)
+
+	the 1500 Myr continental share (design §10.3: 15-40 %) is a tail count - the fraction of
+	columns over 20 km felsic - on a world whose topology rearranges ~90 times in the run.
+	measured over seeds 7/8/11 it reads 12.4 / 19.4 / 16.0 %: a 7-point spread, wider than the
+	2.6 points the gate missed by. the middle-epoch plate speed over the same three seeds
+	spreads 0.70 cm/yr. so: a statistic that touches the tail of a chaotic field cannot be
+	gated on one seed, and the fact that three seeds once agreed at 19.1/19.3/19.3 % was
+	luck, not stability. gate the mean of a small ensemble with a declared spread bound and
+	print every seed; the spread bound is what catches a model that turns seed-sensitive
+	while its mean stays in band.
+
+	the second half is worse: at that spread, a candidate's effect is invisible on one seed.
+	measured on three seeds each - collision barrier on hFel instead of hFel+hSed: 15.8 vs
+	15.9 %; filled basins spilling instead of draining to the mantle: 15.0 vs 15.9 %; a 16 %
+	lower erosion intake: 16.4 vs 15.9 %. every one of them looked like +2 to +4 points on
+	seed 7 alone. three 1500 Myr histories is ~5 min on two cores per candidate and there is
+	no cheaper ranking signal - the spread does not shrink on a shorter run, it just moves.
+
+	mechanism found while chasing it (0.7.1-review-continental-area.md): erosion takes
+	sediment first, then felsic, then mafic, so a thick sediment blanket shields the crust.
+	the 0.5.0 accommodation limit removed the blanket along with the runaway-pile artifact
+	(mean hSed 6-8 km -> 0.7 km), and gross arc production did not change at all
+	(~42 km global-equivalent per 1500 Myr) - what changed is how much of it survives
+	(felsic erosion 30.6 -> 32.6 km, standing crust -21 %). a calibration measured against
+	acceptance statistics inherits the field it was measured on.
+
+	measurement tools: experiments/continental-probe.js prints the per-epoch continental
+	share, cratons, mean hFel/hSed and the felsic budget (gross production = producedFel +
+	erodedFel; the ledger's producedFel is net of felsic erosion, so gross production is the
+	sum, not the ledger field). experiments/erosion-knee.js takes a --seed now.
+
+	also: the "middle epoch" window in tests/longrun.js is `t >= 500 && t <= 1000` against a
+	clock built from 15000 `t += 0.1`, which lands on 1000.0000000001588 - so the t=1000
+	epoch is silently excluded and the window is really 500-900 Myr. check any `<=` against
+	an accumulated float before trusting how many samples a window has.

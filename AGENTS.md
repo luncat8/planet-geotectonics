@@ -45,8 +45,10 @@ node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, l
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
 
-do not run the full profile in the sandbox. It is ~15 min against ~1 min for short:
-longrun alone is ~10 min on these two cores (12 of 18 min on the owner rig) and the other
+do not run the full profile in the sandbox. It is ~25 min against ~3 min for short:
+longrun alone is ~18 min on these two cores (6 of 22 min on the owner rig) - it runs the
+1500 Myr hot start three times, because acceptance 3 is read on a three-seed ensemble mean
+(0.7.1: the continental share spreads ~7 points between seeds) - and the other
 three histories ~3.5 min; anything that reaches a GPU here runs on SwiftShader, a CPU
 rasterizer, so device numbers are slower and relative-only. full is the owner-rig gate:
 run short while iterating, run_full_test.py (double-click on Windows) on a real machine - it writes
@@ -87,6 +89,12 @@ contract, thresholds, module map and staging. the increments:
 0.7.0-plan-live-resolution.md - conservative state transfer for a live world: inventory, material
 	and ledger rules, the transaction. js/resolution.js is its kernel; 0.7.0-review.md reviews it
 	and lists the open volume-residual decision.
+0.7.1-review-continental-area.md - why acceptance 3 went red: the continental share at 1500 Myr
+	spreads ~7 points between seeds, so tests/longrun.js now reads the design band on a three-seed
+	ensemble mean with a declared spread bound; the ~5-point level change against the 2026-09-17
+	field is attributed to the sediment accommodation limit removing the blanket that shielded the
+	felsic crust. The measured candidates (collision barrier form, basin bypass, erosion intake)
+	are recorded there, none shipped. experiments/continental-probe.js is the measurement harness.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):

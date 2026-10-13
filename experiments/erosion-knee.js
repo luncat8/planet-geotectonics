@@ -8,12 +8,14 @@
 const Grid = require('../js/geodesics.js'), State = require('../js/state.js'), Sim = require('../js/sim.js');
 const Params = require('../js/params.js');
 
-const SEED = 7, EPOCH = 100;
+const EPOCH = 100;
 const flag = (name, value) => {
 	const arg = process.argv.find(a => a.startsWith('--' + name + '='));
 	return arg === undefined ? value : +arg.slice(name.length + 3);
 };
-const LEVEL = flag('level', 5), MYR = flag('myr', 1500), DT = flag('dt', 0.1);
+// The seed is a flag, not a constant: the 1500 Myr continental share spreads over ~7 points
+// between seeds (0.7.1), so a candidate ranked on seed 7 alone is not ranked at all.
+const SEED = +flag('seed', 7), LEVEL = flag('level', 5), MYR = flag('myr', 1500), DT = flag('dt', 0.1);
 
 function parse(spec) {
 	const cfg = {};
@@ -87,7 +89,7 @@ function run(cfg) {
 		meanCm: middleN ? middleSum / middleN : s.meanSpeed / 10000,
 		plates: s.plateCount, peakKm: peakKm, capKm: capKm,
 		landKm: relSum / relN, share2: r.share2, share10: hiSum / hiN, share20: r.share20,
-		sedKm: sedSum / sedN, splits: s.splits, merges: s.merges,
+		sedKm: sedSum / sedN / 1000, splits: s.splits, merges: s.merges,
 		fel: (s.massFel0 + s.producedFel - s.massFel) / s.massFel,
 		maf: (s.massMaf0 + s.producedMaf - s.subductedMaf - s.massMaf) / s.massMaf,
 		seconds: (performance.now() - start) / 1000
