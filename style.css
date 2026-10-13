@@ -20,6 +20,8 @@ p { font-size: 14px; line-height: 1.7; color: #aab9bd; margin: 10px 0 0; }
 .map-bottom { font-size: 9px; }
 canvas { display: block; cursor: grab; touch-action: none; user-select: none; }
 canvas[hidden] { display: none; }
+.regrid { display: inline-flex; gap: 6px; align-items: center; }
+.regrid[hidden] { display: none; }
 canvas:active { cursor: grabbing; }
 /* These backing canvases are 2:1; cap width at 120vh instead of clamping canvas height. */
 .map-stage { position: relative; width: min(100%, 120vh); aspect-ratio: 2 / 1; margin-inline: auto; }

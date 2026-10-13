@@ -1,7 +1,9 @@
 // The GUI's own invariants - the ones no simulation test can see, and the ones that broke
 // silently before:
-//   1. the Resolution select rebuilds the world (grid, state, renderer, engine, badge, the
-//      map-top cell line, the copy header) instead of only relabelling it;
+//   1. the Resolution select on a fresh or GPU world rebuilds the world (grid, state, renderer,
+//      engine, badge, the map-top cell line, the copy header); on a running CPU world it offers
+//      Keep world (the conservative transfer: clock and crust carried, the old world kept when
+//      the transfer throws) or Fresh world (the rebuild), and moves nothing by itself;
 //   2. a rebuild never runs under an in-flight GPU transfer, which would size the new arenas
 //      against the old world's numbers;
 //   3. a checkpoint carries its own level and seed, and Load follows it instead of failing;
@@ -174,7 +176,7 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 const MODULES = ['env', 'geodesics', 'heightfield', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
+	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'resolution', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
 	'data/plate-crosswalk', 'earth', 'render'];
 
@@ -450,9 +452,16 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	assert.equal(Env.gpu({ info: { vendor: 'google', description: 'Google SwiftShader LVP' } }, false), 'software swiftshader');
 	assert.equal(Env.gpu(null), 'none');
 
-	// --- the Resolution select rebuilds the world, it does not relabel it -----------------
+	// --- the Resolution select offers a live re-grid; Fresh world is the rebuild it used to be --
 	el('level').value = '6';
 	el('level').dispatch('change');
+	assert.equal(el('badge').textContent, 'CPU · L5', 'the offer does not move the world');
+	assert.equal(el('level').value, '6', 'the select shows the offered level');
+	assert.equal(el('regrid').hidden, false, 'a running CPU world is offered the live re-grid');
+	assert.equal(el('regrid-keep').textContent, 'Keep world at L6');
+	assert.equal(el('regrid-fresh').textContent, 'Fresh world at L6');
+	el('regrid-fresh').dispatch('click');
+	assert.equal(el('regrid').hidden, true, 'a rebuild withdraws the offer');
 	assert.equal(el('badge').textContent, 'CPU · L6', 'the badge follows the grid, not the select');
 	assert.equal(el('grid-info').textContent, 'EQUIRECTANGULAR / 40,962 CELLS / 112 KM');
 	assert.equal(page.Params.level, 6, 'Params.level tracks the world that is built');
@@ -1062,6 +1071,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 	// The view outlives the world: a rebuild must not reset the camera.
 	pEl('level').value = '6';
 	pEl('level').dispatch('change');
+	pEl('regrid-fresh').dispatch('click');
 	panPage.pump(1);
 	assert.equal(pEl('badge').textContent, 'CPU · L6');
 	const l6mirror = plateOf(world(6, 7));
@@ -1726,6 +1736,7 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		// A new world is a new grid, and the records name its cells: the lookup is rebuilt.
 		page3.el('level').value = '6';
 		page3.el('level').dispatch('change');
+		page3.el('regrid-fresh').dispatch('click');
 		await page3.tick();
 		page3.pump(2, 9700);
 		assert.match(page3.el('probe').textContent, /Continuous heightmap: \d+% of the lookup/,
@@ -1744,7 +1755,55 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(r3.releases, 1, 'the session released its allocations');
 	}
 
-	console.log('PASS gui: L5/L6/L7 select rebuilds the world (badge, cell line, copy header, device reuse,'
+	// Last on purpose: a second loadPage replaces the page globals (GpuSim, Resolution), so the
+// sections above that drive the outer page's engine must run first.
+	// --- Keep world: a running CPU world moves to another level, clock and crust carried ----
+	// The transfer is the only write to the page: a failing transfer must leave the L5 world,
+	// its clock and its renderer exactly as they were, and a later Keep must succeed on it.
+	{
+		const kept = loadPage('');
+		const clock = (text) => text.split('\n').pop().replace(/ · CPU · L\d$/, '');
+		for (let i = 0; i < 3; i++) { kept.el('step').click(); kept.pump(2, 4000 + i * 100); }
+		const clock0 = clock(kept.copy());
+		assert.ok(/^t 0\.3 Myr$/.test(clock0), 'three steps at dt 0.1: ' + clock0);
+		kept.el('level').value = '6';
+		kept.el('level').dispatch('change');
+		assert.equal(kept.el('regrid').hidden, false, 'the offer is shown');
+		const realTransfer = globalThis.Resolution.transfer;
+		globalThis.Resolution.transfer = function () { throw new Error('boom'); };
+		kept.el('regrid-keep').dispatch('click');
+		globalThis.Resolution.transfer = realTransfer;
+		assert.equal(kept.el('badge').textContent, 'CPU · L5', 'a failed transfer keeps the old world');
+		assert.equal(kept.el('grid-info').textContent, 'EQUIRECTANGULAR / 10,242 CELLS / 223 KM');
+		assert.ok(/^Keep world failed \(boom\); the L5 world is unchanged\.$/.test(kept.el('probe').textContent),
+			'and says so: ' + kept.el('probe').textContent);
+		assert.equal(clock(kept.copy()), clock0, 'a failed transfer advances no clock');
+		assert.equal(kept.el('regrid').hidden, true, 'the failed offer is withdrawn, not left armed');
+		kept.el('level').value = '6';
+		kept.el('level').dispatch('change');
+		const ledgerBefore = kept.el('ledger-count').textContent;
+		kept.el('regrid-keep').dispatch('click');
+		assert.equal(kept.el('badge').textContent, 'CPU · L6', 'the badge follows the re-gridded world');
+		assert.equal(kept.el('grid-info').textContent, 'EQUIRECTANGULAR / 40,962 CELLS / 112 KM');
+		assert.equal(kept.el('level').value, '6');
+		assert.equal(kept.Params.level, 6, 'Params.level tracks the world that is running');
+		assert.equal(kept.el('regrid').hidden, true);
+		assert.ok(/^Re-gridded L5 → L6 at 0\.3 Myr: 10\d{3} → 40\d{3} columns · crust residual [\d.]+% booked to regrid · \d+ gaps · the clock and RNG are unchanged, the ledger keeps its ids\.$/.test(kept.el('probe').textContent),
+			'the probe names the transfer: ' + kept.el('probe').textContent);
+		assert.equal(clock(kept.copy()), clock0, 'the clock and the step count are carried');
+		assert.ok(worldLine(kept.copy()).startsWith('engine cpu · L6 ·'), worldLine(kept.copy()));
+		assert.equal(kept.el('ledger-count').textContent, ledgerBefore, 'the ledger keeps its count');
+		kept.el('step').click();
+		kept.pump(2, 5000);
+		assert.ok(/^t 0\.4 Myr · CPU · L6$/.test(kept.copy().split('\n').pop()), 'the sim runs on the new grid');
+		// Keep on the same level is not a transfer: it is a no-op, and the offer never appears.
+		kept.el('level').value = '6';
+		kept.el('level').dispatch('change');
+		assert.equal(kept.el('regrid').hidden, true, 'the level already shown offers nothing');
+	}
+
+console.log('PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh on a running CPU world'
+		+ ' (Keep carries the clock and crust, a failed transfer keeps the old world), badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
 		+ page.Perf.SLOTS + ' slots in place and is the copy control, the bench can measure every setting the page offers,'
 		+ ' and a pan turns the view under a running sim (probe agrees with the paint, the dead zone keeps the click,'

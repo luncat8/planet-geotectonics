@@ -1930,3 +1930,29 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	with zero. Validate at the correction boundary and exclude unknowns before either sum.
 	Test mixed unknown/measurement input against the measurement alone, not just an empty
 	observation list. Separately test measured zero so the fix cannot discard real zeros.
+
+## a re-lattice cannot conserve a field and a ledger by the same rule (0.7.0 review, 2026-10-13)
+
+	count-share mass (h_t = A0ref_s h_s / (share A0ref_t)) conserves volume by construction, but
+	for L5->L6 the footprint ratio is 4 while a column's share is 2-7 cell centres, so a split
+	child's thickness follows the tessellation: a +-50 % stripe. an area-weighted mean keeps each
+	child on its parent's value, and then the volume it does not carry has to be booked somewhere.
+	measured: 0.5 % on a fresh world, 3.9 % on a stepped L5->L6 world. write the ledger residual
+	into the plan as a number with a budget, and decide the field question separately.
+
+## a second page load replaces the globals the first page's engine uses (gui test, 2026-10-13)
+
+	tests/gui.js loads ui.js against globals (GpuSim, Resolution, Render3D). a second loadPage in
+	the same process overwrites them, so a later section that drives the first page's engine gets
+	the second page's fake device: "gpu.inits 0 !== 1" with no other clue. put a test that opens a
+	second page last in the async body, after every section that uses the first page.
+
+## pkill -f matches the shell that runs it (sandbox, 2026-10-13)
+
+	`pkill -f "tests/run-all.js"` inside a bash -c command matches that bash command line too and
+	kills the tool call (exit -1, no output). kill by pid (`ps -eo pid,args | grep node`).
+
+## requiring a suite runner runs the suite (2026-10-13)
+
+	`node -e "require('tests/run-all.js')"` executes every test in the spawned children and hangs the
+	tool call. to check syntax, use `node --check file.js`.

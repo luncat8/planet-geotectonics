@@ -53,6 +53,8 @@
 	var levelLabel = levelInput.parentNode, speedLabel = speedInput.parentNode;
 	var time = document.getElementById('time'), status = document.getElementById('gaps'), probe = document.getElementById('probe');
 	var prospectPanel = document.getElementById('prospect'), prospectLedger = null, prospectClickSerial = 0;
+	var regridBar = document.getElementById('regrid'), regridKeep = document.getElementById('regrid-keep');
+	var regridFresh = document.getElementById('regrid-fresh'), regridLevel = 0;
 	var campaignButton = document.getElementById('campaign'), campaignProgress = document.getElementById('campaign-progress');
 	var campaignKind = document.getElementById('deposit-kind'), campaignExport = document.getElementById('export-discovered');
 	var coreDepth = document.getElementById('core-depth'), coreExport = document.getElementById('export-core');
@@ -893,6 +895,7 @@
 	// Lagrangian on one grid, so a different level is a different world and there is nothing to
 	// carry over. `after` runs once the engine is ready on the new world.
 	function rebuildWorld(level, seed, start, after) {
+		hideRegrid();
 		prospectClickSerial++;
 		Params.level = level;
 		grid = new Grid(level, seed).build();
@@ -940,6 +943,81 @@
 			dirty = true;
 			if (after) after();
 		});
+	}
+	// Resolution changes on a running CPU world are offered, not performed: the select keeps
+	// the new level, and Keep world (the live transfer) or Fresh world (the rebuild) is the
+	// explicit action. The GPU engine still rebuilds until its device path lands (0.7.0 slice 4).
+	function keepAllowed() {
+		return !gpu.on && engineInput.value === 'cpu' && state.frame > 0 && !reconLive;
+	}
+	function offerRegrid(level) {
+		regridLevel = level;
+		regridKeep.textContent = 'Keep world at L' + level;
+		regridFresh.textContent = 'Fresh world at L' + level;
+		regridBar.hidden = false;
+		paintSlow();   // the slow flag names the level the select shows, as the rebuild did
+		probe.textContent = 'L' + grid.level + ' → L' + level + ': Keep world carries the crust, the ledger and the pins; Fresh world starts over.';
+	}
+	function hideRegrid() {
+		regridLevel = 0;
+		regridBar.hidden = true;
+	}
+	function regridText(from, report) {
+		var residual = (report.volumeError.fel * 100).toFixed(2);
+		return 'Re-gridded L' + from + ' → L' + report.levelTo + ' at ' + report.time.toFixed(1) + ' Myr: '
+			+ report.columnsIn + ' → ' + report.columnsOut + ' columns · crust residual ' + residual
+			+ '% booked to regrid · ' + report.gaps + ' gaps · the clock and RNG are unchanged, the ledger keeps its ids.';
+	}
+	// Only the commit writes the page. Everything before it runs on the side, so a throw
+	// leaves the running world, its renderer and its ledger exactly as they were.
+	function keepWorldAt(level) {
+		hideRegrid();
+		if (!keepAllowed() || level === grid.level) return;
+		setPlaying(false); runTarget = Infinity;
+		var from = grid.level, next, moved;
+		try {
+			next = new Grid(level, state.seed).build();
+			moved = Resolution.transfer(state, next);
+			Resolution.ledger(prospectLedger, grid, next);
+		} catch (error) {
+			probe.textContent = 'Keep world failed (' + error.message + '); the L' + from + ' world is unchanged.';
+			return;
+		}
+		commitRegrid(next, moved.state, moved.report, from);
+	}
+	function commitRegrid(next, world, report, from) {
+		prospectClickSerial++;
+		cancelCampaign();
+		grid = next; state = world;
+		Params.level = grid.level;
+		earthScore = null;
+		syncAdjust();
+		renderer = new Renderer(canvas, state);
+		renderer.setView(viewQ);
+		Deposits.release();      // catalogue scratch and cache were sized to the old grid.V
+		v3dLookup = null;        // the height lookup's records name cells of the old grid
+		waterDirty = true;
+		levelInput.value = String(grid.level);
+		paintCampaignControls();
+		refreshLedgerMarkers();
+		refreshLedgerRows();
+		paintGrid();
+		paintSlow();
+		rebootV3d();
+		Perf.reset();
+		resetViewStats();
+		paintBadge();
+		dirty = true;
+		probe.textContent = regridText(from, report);
+	}
+	function changeLevel(level) {
+		hideRegrid();
+		// The CPU engine is the calibrated L5 path (design 0.1.5 §1); it runs L6-L7 too, at a
+		// few frames per second, and saying so once beats looking like a hang.
+		var slow = level > 5 && engineInput.value === 'cpu';
+		rebuildWhenIdle(level, +seedInput.value, startInput.value, slow ? function () {
+			probe.textContent = 'L' + level + ' on the CPU engine runs at a few frames/s; L6-L7 are the WebGPU path.';
+		} : null);
 	}
 	function rebuildWhenIdle(level, seed, start, after) {
 		discardCampaignForRebuild();
@@ -1143,13 +1221,18 @@
 		// the list and the pin follow the ledger here rather than at the next click.
 		refreshLedgerRows();
 	}
-	function discardCampaignForRebuild() {
+	// A campaign samples cells of the grid it started on, so every grid change cancels it. A
+	// live re-grid keeps the ledger and its pins (their ids are carried); a rebuild drops both.
+	function cancelCampaign() {
 		campaignRequest++;
 		if (campaignJob && campaignJob.running) Instruments.cancelCampaign(campaignJob);
 		campaignJob = null; campaignPreparing = false; campaignView = null;
 		campaignRefreshArmed = false; markersDirty = false;
 		lastCoreState = null; lastCoreCell = -1; lastCoreSection = null; lastInstrumentText = '';
 		coreExport.disabled = true;
+	}
+	function discardCampaignForRebuild() {
+		cancelCampaign();
 		// The ledger itself belongs to the world the rebuild replaces; drop every view built
 		// on it, so no frame can paint stale discoveries while the boot is still in flight.
 		selectedDeposit = null; ledgerMarkers = null; markerHitsN = 0;
@@ -1251,6 +1334,7 @@
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
 	// and at the event cadence inside GpuSim.play, so no per-frame readback happens.
 	function bootEngine(done) {
+		hideRegrid();
 		var doneSlow = function () { paintSlow(); rebootV3d(); done(); };
 		if (engineInput.value === 'gpu') {
 			if (!navigator.gpu) {
@@ -1393,18 +1477,16 @@
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); return; }
 		rebuildWhenIdle(grid.level, +seedInput.value, startInput.value);
 	});
-	// A new resolution is a new world: same seed and start, rebuilt from scratch, because the
-	// crust lives on columns of one particular grid and nothing carries across grids.
+	// A new resolution on a fresh or non-CPU world is a new world: same seed and start, rebuilt
+	// from scratch. A running CPU world is offered the live transfer instead (keepWorldAt).
 	levelInput.addEventListener('change', function () {
 		if (!seedInput.checkValidity()) { seedInput.reportValidity(); levelInput.value = String(grid.level); return; }
 		var level = +levelInput.value;
-		// The CPU engine is the calibrated L5 path (design 0.1.5 §1); it runs L6-L7 too, at a
-		// few frames per second, and saying so once beats looking like a hang.
-		var slow = level > 5 && engineInput.value === 'cpu';
-		rebuildWhenIdle(level, +seedInput.value, startInput.value, slow ? function () {
-			probe.textContent = 'L' + level + ' on the CPU engine runs at a few frames/s; L6-L7 are the WebGPU path.';
-		} : null);
+		if (level !== grid.level && keepAllowed()) { offerRegrid(level); return; }
+		changeLevel(level);
 	});
+	regridKeep.addEventListener('click', function () { keepWorldAt(regridLevel); });
+	regridFresh.addEventListener('click', function () { if (regridLevel) changeLevel(regridLevel); });
 	document.getElementById('save').addEventListener('click', function () {
 		if (gpu.on && gpu.ready) {
 			GpuSim.download(state).then(saveBlob);

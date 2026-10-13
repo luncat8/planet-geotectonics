@@ -30,7 +30,8 @@ var Resolution = (function () {
 		{ group: 'clock', cls: 'world', note: 'never stepped by a transfer', fields: ['t', 'frame', 'rng', 'seed', 'lastEvent', 'ckptDue', 'ckptCap', 'ckptBytes'] },
 		{ group: 'thermal', cls: 'world', fields: ['Tm', 'Tm0', 'cooling', 'hotStart', 'mantleScale', 'prescribedOmega', 'rotationHistory', 'fixedOmega', 'epoch0', 'reconEpoch'] },
 		{ group: 'mantle', cls: 'world', note: 'the mantle field is the same field', fields: ['plumeCount', 'plumePos', 'plumeBirth', 'plumeLife', 'plumeStr', 'waveDir0', 'waveAxis', 'waveDir', 'wavePeriod', 'waveFreq', 'wavePhase', 'waveAmp'] },
-		{ group: 'counters', cls: 'world', fields: ['spawns', 'deaths', 'overlaps', 'splits', 'merges', 'typeChanges', 'meanSpeed', 'maxSpeed', 'gaps', 'maxClimb', 'finite', 'rigidError', 'quatError'] },
+		{ group: 'counters', cls: 'world', fields: ['spawns', 'deaths', 'overlaps', 'splits', 'merges', 'typeChanges', 'meanSpeed', 'maxSpeed'] },
+		{ group: 'diagnostics', cls: 're-derived', note: 'written by the raster and Diag.check on the target', fields: ['gaps', 'maxClimb', 'finite', 'rigidError', 'quatError'] },
 		{ group: 'history', cls: 'world', note: 'per-frame scalars, level-independent', fields: ['histT', 'histMeanV', 'histMaxV', 'histGaps', 'histPlates', 'histChanges', 'histCols', 'histI', 'histN'] },
 		{ group: 'ledger', cls: 'world', note: 'volumes, carried then re-checked', fields: ['producedFel', 'producedMaf', 'erodedFel', 'erodedMaf', 'subductedMaf', 'subductedSed', 'subductedArea', 'massFel', 'massMaf', 'massSed', 'massFel0', 'massMaf0', 'massSed0', 'regridFel', 'regridMaf', 'regridSed'] },
 		{ group: 'elevationFrame', cls: 're-derived', note: 'from the columns, never carried', fields: ['z', 'wet', 'gradZ', 'slope', 'low'] },
@@ -568,6 +569,8 @@ var Resolution = (function () {
 			// new frame must match the entry that already names it rather than becoming a second
 			// discovery (Instruments.findEntry consumes the stamp on a re-anchor).
 			var priorTolerance = Math.cos(Math.min(Math.PI, 1.5 * srcGrid.nbrDist[0] / ResolutionParams.radius));
+			var gainUnion = 0, absorbed = 0;
+			for (c = 0; c < Vt; c++) if (coverage[c] !== inherited[c]) gainUnion++;
 			for (var e = 0; e < found.length; e++) {
 				var entry = found[e], dir = entry.direction;
 				if (entry.priorTolerance === undefined || priorTolerance < entry.priorTolerance) entry.priorTolerance = priorTolerance;
@@ -583,7 +586,7 @@ var Resolution = (function () {
 				// A record sits on a cell that was surveyed by definition, and the anchor projection
 				// can land just outside the image of the mask's own cell on a rim. The mask absorbs
 				// the entry rather than the entry moving off its own direction.
-				coverage[cell] = 1;
+				if (!coverage[cell]) { coverage[cell] = 1; absorbed++; }
 				if (cell !== entry.cell) moved++;
 				entry.cell = cell;
 				entry.surveyCell = cell;
@@ -591,14 +594,16 @@ var Resolution = (function () {
 				addIndex(ledger.byRecordCell, entry.cell, entry);
 				addIndex(ledger.bySurveyCell, entry.surveyCell, entry);
 			}
-			var gain = 0;
-			for (c = 0; c < Vt; c++) if (coverage[c] !== inherited[c]) gain++;
 			ledger.coverage = coverage;
 			ledger.cells = new Uint32Array(Vt);
 			ledger.cellsN = 0;
 			for (c = 0; c < Vt; c++) if (coverage[c]) ledger.cells[ledger.cellsN++] = c;
 			ledger.sampleSeen = new Uint32Array(Vt);
-			return { entries: found.length, moved: moved, cells: ledger.cellsN, coverageGain: gain };
+			// coverageGain is every cell the mask gained: the union's own growth plus the rim
+			// records that absorbed a cell (each one is a surveyed record, so it is a claim the
+			// survey already made, not a new one).
+			return { entries: found.length, moved: moved, cells: ledger.cellsN, coverageGain: gainUnion + absorbed,
+				gainUnion: gainUnion, absorbed: absorbed };
 		}
 	};
 })();

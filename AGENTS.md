@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 38 kernel, rig and GUI tests, ~2.5 min here
+node tests/run-all.js		short profile (default): 39 kernel, rig and GUI tests, ~3 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
@@ -84,6 +84,9 @@ contract, thresholds, module map and staging. the increments:
 0.6.4-review.md - review of the discovery-ledger commit: four defects, their reproductions and
 	the tests that hold them.
 0.7-proposed.md - roadmap; 0.6.x is deposits, live resolution targets 0.7.0.
+0.7.0-plan-live-resolution.md - conservative state transfer for a live world: inventory, material
+	and ledger rules, the transaction. js/resolution.js is its kernel; 0.7.0-review.md reviews it
+	and lists the open volume-residual decision.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):

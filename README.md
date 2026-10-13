@@ -35,6 +35,12 @@ Open `index.html` directly in a browser.
   hot-start and map-start initial states.
 - Checkpoints: a ring of full states every 20 Myr, plus save/load to one validated binary
   blob, so a run can be resumed from a file.
+- Live resolution (0.7.0, CPU): a running CPU world can move to another level without a rebuild.
+  The Resolution select offers **Keep world** (a conservative transfer of the columns, the
+  mobile sediment and the ledgers onto the new frame, with the clock, RNG and deposit ids carried)
+  or **Fresh world** (the rebuild). A failed transfer leaves the running world untouched. The
+  field volume residual is booked to `regrid*` and reported; `0.7.0-review.md` §4 lists the open
+  decision on it. The GPU engine still rebuilds until its device path lands.
 - Metallogeny: six saturating potentials per column (VMS, mafic, arc, orogenic, basin, placer)
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
@@ -210,7 +216,7 @@ class table (§10 of `0.6.1-plan-deposit-catalogue.md`) and
 ## Test
 
 ```
-node tests/run-all.js            short profile: 38 tests except the four histories (~2 min)
+node tests/run-all.js            short profile: 39 tests except the four histories (~3 min)
 node tests/run-all.js --full     the gate: adds kinematics, ores, alloc and longrun (~15 min)
 node tests/run-all.js --release  --full plus the 4.5 Gyr profile and the strict 60 fps proxy
 ```

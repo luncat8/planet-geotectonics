@@ -327,7 +327,13 @@ console.log('L6->L5: forced', down.r.forced, '· volume error', down.r.volumeErr
 	assert.deepEqual(ledger.found.map((e) => e.id), ids, 'ids changed');
 	assert.deepEqual(ledger.found.map((e) => (e.anchorKey || []).join(',')), anchors, 'anchors changed');
 	assert.equal(r.entries, ids.length, 'entries');
-	assert.equal(r.coverageGain, 0, 'the finer frame gained no coverage');
+	// Every gained cell is accounted for: the mask's own union growth, plus one cell per rim
+	// record that the re-lattice placed outside the inherited mask. On this fixture the union
+	// adds nothing and the one gained cell is a record's own cell (its anchor projects across
+	// a cell edge), so the coverage claim the survey already made is kept rather than dropped.
+	assert.equal(r.coverageGain, r.gainUnion + r.absorbed, 'gained cells are not accounted for');
+	assert.equal(r.gainUnion, 0, 'the finer frame union gained cells no record put there');
+	assert.ok(r.absorbed <= r.entries, 'more cells absorbed than records');
 	assert.ok(ledger.cellsN >= before, 'coverage shrank');
 	assert.equal(ledger.cellsN, r.cells, 'cells list');
 	for (const key of Object.keys(ledger.byRecordCell)) {
@@ -373,7 +379,7 @@ console.log('L6->L5: forced', down.r.forced, '· volume error', down.r.volumeErr
 		+ ', moved ' + r.moved + '/' + back.moved + ', coverage gain ' + r.coverageGain + '/' + back.coverageGain);
 }
 
-console.log('PASS resolution: inventory is complete, the transfer conserves every family and covers every cell,'
+console.log('PASS resolution: inventory is complete, the transfer books each family volume residual and covers every cell,'
 	+ ' the plate frame and the clock are exact, the source is untouched, the shard map aggregates and splits,'
 	+ ' anchors drift by a bounded number of source cells, the round trip stays within the field budget,'
 	+ ' and a session ledger keeps its records across the re-lattice');
