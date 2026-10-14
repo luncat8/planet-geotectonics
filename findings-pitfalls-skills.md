@@ -2012,3 +2012,37 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	the volume solver's fractional `sea.levelM`, which cannot be represented. pin the coercion in
 	the shared helper and validator (`Math.round` after shared quantization), not independently in
 	the writer and reader.
+
+## a span the checksum cannot see is not a run (0.8.1, 2026-10-13)
+
+	the v2 sKm field quantizes to six significant digits, so at a 40,030 km arc the finest
+	distinguishable span step is ~0.1 km. a great-circle walk that grazes a Voronoi corner can
+	clip a cell for less than that, and seal then sees two run starts collapse to one value:
+	"sKm is not increasing at 147" from a healthy world. the fix belongs in the writer, not the
+	shared codec: derive the minimum representable span from the arc (`1.5 * 10^(floor(log10
+	arc) - 5)`, the 1.5 covering the round-to-nearest edge) and let the walker absorb any
+	shorter run into the run that follows. cells meeting at a Voronoi vertex are pairwise ring
+	neighbours, so the merged transition stays legal, the dropped run's arc joins the next
+	start, and sKm[0] = 0 survives a first-run graze by construction. do not widen the codec
+	tolerance for it; a reader that accepts equal starts cannot interpolate them anyway.
+
+## a one-shot status string loses to the derived repaint (0.8.1, 2026-10-13)
+
+	writing a reason into a status line before calling the routine repaint that recomputes that
+	line silently erases the reason ("needs the 2D map" became "Origin set." again on the next
+	async boot completion). either order the assignment after the repaint or, better, make the
+	condition itself part of the status derivation - a `v3d.on` branch in the status painter
+	keeps the reason correct across every later repaint for free. the same applies to deactivation
+	hooks: deactivate when the 3D actually takes the map (boot success), not when the toggle is
+	flipped - a failed boot never left the 2D map, so the tool should survive it.
+
+## installGlobals replaces navigator per page load, and the engine boot rides inside loadPage (gui test, 2026-10-13)
+
+	setting `globalThis.navigator.gpu = ...` before `loadPage('?engine=gpu')` does nothing:
+	installGlobals assigns the fresh page's own `navigator` over it, the boot finds no adapter
+	and silently falls back to the CPU engine, and the test fails later with a puzzling
+	"Second point is too close to the origin" (the gpu canvas was never sized, so the click
+	geometry is 0/0). the engine boot starts inside loadPage, so the device globals must land
+	even earlier - inside the `afterRaster` hook, which runs at the boot raster before
+	GpuSim.init. the render-only 3D pages differ: their adapter request is async after load, so
+	`page.api.navigator.gpu = ...` after loadPage works there.

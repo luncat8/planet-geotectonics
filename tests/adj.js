@@ -262,15 +262,21 @@ const world = (level, seed) => {
 
 // --- 7. The page: the controls write, and the copy header records ---------------------------
 // The page's own script set: render3d.js ships with it (the 3D view), so the stub gets the
-// module the same way js/ui.js will, through the global.
+// module the same way js/ui.js will, through the global. The shared slice codec and the
+// cutter load before ui.js (index.html order, 0.8.1).
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
-	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'render'];
+	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'render',
+	'resolution', 'slice'];
+const PORTS = ['slice-format'];
 const indexHtml = read('index.html');
 function loadPage(search) {
 	const api = makeDom(indexHtml);
 	api.location.search = search || '';
 	installGlobals(api, { Render3D: Render3D });
+	for (const file of PORTS) {
+		vm.runInThisContext(read('port/' + file + '.js'), { filename: 'port/' + file + '.js' });
+	}
 	for (const file of MODULES) {
 		vm.runInThisContext(read('js/' + file + '.js'), { filename: 'js/' + file + '.js' });
 	}

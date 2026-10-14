@@ -121,7 +121,7 @@ assert.ok(/cursor: copy/.test(rowsCss), 'the whole strip reads as a copy control
 rule('.perf .rows.copied');
 rule('.perf .rows.copy-failed');
 const stageCss = rule('.map-stage');
-const stageCanvasCss = rule('.map-stage > canvas:not(#markers)');
+const stageCanvasCss = rule('.map-stage > canvas:not(#markers):not(#slice-overlay)');
 assert.ok(/width: min\(100%, 120vh\)/.test(stageCss) && /aspect-ratio: 2 \/ 1/.test(stageCss),
 	'the map stage stays 2:1 and fits inside the 60vh height budget without squeezing its canvases');
 assert.ok(!/max-height/.test(rule('canvas')) && /width: 100%/.test(stageCanvasCss)
@@ -140,6 +140,21 @@ assert.deepEqual(options(indexHtml, 'core-depth'), ['500', '2000', '5000', 'base
 const markerCss = rule('#markers');
 assert.ok(/position: absolute/.test(markerCss) && /pointer-events: none/.test(markerCss),
 	'the marker overlay tracks the map without stealing local clicks');
+// The section cutter's own surface (0.8.1): an explicit tool toggle with Clear/Copy/Save,
+// a status line, and an overlay canvas that stays visual-only like the markers.
+assert.match(indexHtml, /id="section-toggle" type="checkbox">Cut section/,
+	'the section tool is a clearly labelled map-tool toggle');
+for (const id of ['section-clear', 'section-copy', 'section-save', 'section-status', 'section-manual'])
+	assert.ok(new RegExp('id="' + id + '"').test(indexHtml), 'index.html has #' + id);
+assert.match(indexHtml, /id="slice-overlay" hidden/, 'the section overlay ships hidden');
+const sliceCss = rule('#slice-overlay');
+assert.ok(/position: absolute/.test(sliceCss) && /pointer-events: none/.test(sliceCss) && /z-index: 3/.test(sliceCss),
+	'the section overlay tracks the map above the markers without stealing clicks');
+assert.ok(/src="port\/slice-format\.js"/.test(indexHtml) && /src="js\/slice\.js"/.test(indexHtml)
+	&& indexHtml.indexOf('js/resolution.js') < indexHtml.indexOf('port/slice-format.js')
+	&& indexHtml.indexOf('port/slice-format.js') < indexHtml.indexOf('js/slice.js')
+	&& indexHtml.indexOf('js/slice.js') < indexHtml.indexOf('js/ui.js'),
+	'the shared codec and the cutter load after resolution.js and before ui.js');
 assert.deepEqual(options(indexHtml, 'ledger-sort'), ['found', 'size', 'contained', 'depth', 'confidence', 'kind'],
 	'the discovery list sorts over the six readable keys of the ledger');
 assert.match(indexHtml, /id="ledger-list" class="ledger-list" hidden/, 'the discovery list ships empty and hidden');
@@ -173,12 +188,15 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 // --- 3. the page, running ----------------------------------------------------------------
 // The index.html script order, minus the GPU files and ui.js itself. The rotation model
 // loads before plates.js because Plates.steer resolves Rotations at load time (0.4.6c).
+// The shared codec (port/slice-format.js) loads before js/slice.js, which resolves
+// SlicePack, Diag, Params and Resolution as page globals (0.8.1).
+const PORTS = ['slice-format'];
 const MODULES = ['env', 'geodesics', 'heightfield', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'resolution', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
-	'data/plate-crosswalk', 'earth', 'render'];
+	'data/plate-crosswalk', 'earth', 'render', 'slice'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the
@@ -333,6 +351,9 @@ function loadPage(search, afterRaster) {
 	api.location.search = search || '';
 	const gpu = fakeGpu();
 	installGlobals(api, { GpuSim: gpu, GpuRenderer: FakeRenderer, Render3D: FakeRender3D, FileReader: FakeReader });
+	for (const file of PORTS) {
+		vm.runInThisContext(read('port/' + file + '.js'), { filename: 'port/' + file + '.js' });
+	}
 	for (const file of MODULES) {
 		vm.runInThisContext(read('js/' + file + '.js'), { filename: 'js/' + file + '.js' });
 	}
@@ -1802,6 +1823,196 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(kept.el('regrid').hidden, true, 'the level already shown offers nothing');
 	}
 
+	// --- the section cutter (0.8.1): tool ownership, capture, transport, world changes ----
+	{
+		const sPage = loadPage('');
+		const sEl = sPage.el, sMap = sEl('map');
+		const sClick = (x, y) => sMap.dispatch('click', { clientX: x, clientY: y, currentTarget: sMap });
+		// Ships inert: the tool is off, the transports are disabled, the overlay is hidden.
+		assert.equal(sEl('section-toggle').checked, false, 'the section tool ships off');
+		assert.equal(sEl('section-copy').disabled, true, 'Copy ships disabled');
+		assert.equal(sEl('section-save').disabled, true, 'Save ships disabled');
+		assert.equal(sEl('section-clear').disabled, true, 'Clear ships disabled');
+		assert.equal(sEl('slice-overlay').hidden, true, 'the section overlay ships hidden');
+		sClick(460, 250);
+		assert.match(sEl('probe').textContent, /^Cell \d+/, 'with the tool off, a click probes');
+		const probeBefore = sEl('probe').textContent, prospectBefore = sEl('prospect').textContent;
+		// Tool on: the section owns the click - no probe, no survey, no core log.
+		sEl('section-toggle').checked = true;
+		sEl('section-toggle').dispatch('change');
+		sClick(200, 260);
+		assert.equal(sEl('probe').textContent, probeBefore, 'a section click never probes');
+		assert.equal(sEl('prospect').textContent, prospectBefore, 'and never surveys or logs a core');
+		assert.match(sEl('section-status').textContent, /^Origin set\./, 'the origin asks for its second point');
+		assert.equal(sEl('slice-overlay').hidden, false, 'the pending origin draws on the map');
+		assert.ok(sEl('slice-overlay').strokes >= 1, 'the open origin handle is stroked');
+		sClick(200, 260);
+		assert.match(sEl('section-status').textContent, /too close to the origin or its antipode/,
+			'a coincident second point is refused and the origin is kept');
+		sClick(760, 190);
+		assert.match(sEl('section-status').textContent,
+			/^Section · \d+ runs · 40,030 km · t 0\.0 Myr · path [0-9a-f]{8} · pack [0-9a-f]{8} · captured \d\d:\d\d UTC$/,
+			'the completed cut reports its runs, span, snapshot and identity: ' + sEl('section-status').textContent);
+		assert.equal(sEl('section-copy').disabled || sEl('section-save').disabled, false, 'a validated pack enables transport');
+		assert.ok(sEl('slice-overlay').strokes >= 2 && sEl('slice-overlay').fills >= 2,
+			'the cut line is painted: a halo and stroke for the line, filled handles at both ends');
+		// Copy carries exactly one validated pack through the page's clipboard helper.
+		sEl('section-copy').click();
+		await sPage.tick();
+		const copiedSection = sPage.api.document.copied[sPage.api.document.copied.length - 1];
+		assert.ok(copiedSection && copiedSection.startsWith('{"format":"pgt-slice-pack"'), 'Copy carried the pack JSON');
+		const sectionPack = globalThis.SlicePack.decode(copiedSection);
+		assert.equal(sectionPack.format, 'pgt-slice-pack');
+		assert.equal(sectionPack.version, 2);
+		assert.equal(sectionPack.source.level, 5, 'the pack names its source resolution');
+		assert.equal(sectionPack.source.gridSeed, 7);
+		assert.equal(sectionPack.source.simSeed, 7);
+		assert.equal(sectionPack.source.pack, 'procedural-map', 'a map start names the procedural provenance');
+		assert.equal(sectionPack.source.rotModel, 'procedural');
+		assert.equal(sectionPack.source.tMyr, 0, 'the fresh world ships at t 0');
+		assert.ok(sectionPack.license.indexOf('no Earth data') >= 0, 'the license names the synthetic start');
+		assert.ok(sectionPack.n >= 2 && sectionPack.n <= 1024, 'the run count is sane');
+		assert.match(sEl('section-status').textContent, /Copied pgt-slice-pack v2 · /);
+		// A refused clipboard write shows the text instead of claiming success.
+		const honestCopy = globalThis.Clipboard.writeText;
+		let copyRefusals = 0;
+		globalThis.Clipboard.writeText = () => { copyRefusals++; return Promise.resolve(false); };
+		sEl('section-copy').click();
+		await sPage.tick();
+		globalThis.Clipboard.writeText = honestCopy;
+		assert.equal(copyRefusals, 1, 'the refusal went through the clipboard helper');
+		assert.equal(sEl('section-manual').hidden, false, 'the manual area opens');
+		assert.equal(sEl('section-manual').value.startsWith('{"format":"pgt-slice-pack"'), true,
+			'the manual area holds the pack JSON');
+		assert.match(sEl('section-status').textContent, /copy manually/, 'the status names the manual path');
+		// Save downloads the same artifact under its identity-bearing name.
+		let sectionBlob = null;
+		const makeBlob2 = URL.createObjectURL;
+		URL.createObjectURL = (blob) => { sectionBlob = blob; return 'blob:section-test'; };
+		try {
+			sEl('section-save').click();
+			await sPage.tick();
+			assert.ok(sectionBlob, 'Save creates a download');
+			const savedSection = JSON.parse(await sectionBlob.text());
+			assert.equal(savedSection.checksum, sectionPack.checksum, 'Save carries the same pack checksum for one snapshot');
+			const savedLink = sPage.api.document.made.filter((e) => e.tagName === 'A').pop();
+			assert.match(savedLink.download, /^pgt-slice-L5-seed7-t0-circle-[0-9a-f]{8}-[0-9a-f]{8}\.json$/,
+				'the file name carries the world, the path and the pack: ' + savedLink.download);
+			assert.match(sEl('section-status').textContent, /^Saved pgt-slice-/);
+		} finally { URL.createObjectURL = makeBlob2; }
+		// A pan is never a section click: the release click stays suppressed.
+		const statusAfterSave = sEl('section-status').textContent;
+		const clearsBeforeMove = sEl('slice-overlay').clears, strokesBeforeMove = sEl('slice-overlay').strokes;
+		sMap.dispatch('pointerdown', { button: 0, pointerId: 4, clientX: 300, clientY: 200, currentTarget: sMap });
+		sMap.dispatch('pointermove', { pointerId: 4, clientX: 360, clientY: 230, currentTarget: sMap });
+		sMap.dispatch('pointerup', { pointerId: 4, currentTarget: sMap });
+		sMap.dispatch('click', { clientX: 360, clientY: 230, currentTarget: sMap });
+		assert.ok(!/^Origin set/.test(sEl('section-status').textContent), 'a pan never restarts the cut');
+		sPage.pump(1);
+		assert.ok(sEl('slice-overlay').clears > clearsBeforeMove && sEl('slice-overlay').strokes > strokesBeforeMove,
+			'the overlay repaints on a view change');
+		// Tool off keeps the cut: probes answer again, the line and report stay.
+		sEl('section-toggle').checked = false;
+		sEl('section-toggle').dispatch('change');
+		sClick(600, 300);
+		assert.notEqual(sEl('probe').textContent, probeBefore, 'the tool off restores the probe path');
+		assert.match(sEl('section-status').textContent, /^Section · /, 'a completed cut survives its tool being off');
+		assert.equal(sEl('slice-overlay').hidden, false, 'the line stays on the map');
+		// Clear drops the whole cut.
+		sEl('section-clear').click();
+		assert.equal(sEl('section-copy').disabled && sEl('section-save').disabled && sEl('section-clear').disabled, true,
+			'Clear leaves nothing to transport');
+		assert.equal(sEl('slice-overlay').hidden, true, 'the overlay hides with the cut');
+		assert.match(sEl('section-status').textContent, /^No section\./);
+		// A click after a completed cut restarts as a fresh origin.
+		sEl('section-toggle').checked = true;
+		sEl('section-toggle').dispatch('change');
+		sClick(300, 200);
+		assert.match(sEl('section-status').textContent, /^Origin set\./, 'a new cut begins from the next click');
+		sClick(600, 350);
+		assert.match(sEl('section-status').textContent, /^Section · /, 'the second cut completes');
+		// A level rebuild keeps the geographic line but captures the new world fresh.
+		const pathKept = /path ([0-9a-f]{8})/.exec(sEl('section-status').textContent)[1];
+		sEl('level').value = '6';
+		sEl('level').dispatch('change');
+		await sPage.tick();
+		assert.match(sEl('section-status').textContent, /^Section · \d+ runs · /, 'the rebuilt world recaptured the section');
+		assert.equal(/path ([0-9a-f]{8})/.exec(sEl('section-status').textContent)[1], pathKept,
+			'the geographic line is preserved across the rebuild');
+		sEl('section-copy').click();
+		await sPage.tick();
+		const rebuiltPack = globalThis.SlicePack.decode(
+			sPage.api.document.copied[sPage.api.document.copied.length - 1]);
+		assert.equal(rebuiltPack.source.level, 6, 'the recaptured pack names the new world');
+		assert.equal(rebuiltPack.n >= 2, true, 'and carries its runs');
+
+		// The 3D view steps aside for no one: an active section is released with a reason.
+		const page3d = loadPage('');
+		page3d.api.navigator.gpu = {
+			requestAdapter: () => Promise.resolve({ requestDevice: () => Promise.resolve({ of: 'render-only' }) })
+		};
+		page3d.el('section-toggle').checked = true;
+		page3d.el('section-toggle').dispatch('change');
+		page3d.el('map').dispatch('click', { clientX: 200, clientY: 260, currentTarget: page3d.el('map') });
+		page3d.el('v3d').checked = true;
+		page3d.el('v3d').dispatch('change');
+		await page3d.tick();
+		assert.equal(page3d.el('section-toggle').checked, false, '3D turns an active section off');
+		assert.equal(page3d.el('section-toggle').disabled, true, 'and disables the toggle while 3D holds the map');
+		assert.match(page3d.el('section-status').textContent, /needs the 2D map/);
+		assert.equal(page3d.el('slice-overlay').hidden, true, 'no overlay on the 3D view');
+		page3d.el('v3d').checked = false;
+		page3d.el('v3d').dispatch('change');
+		await page3d.tick();
+		assert.equal(page3d.el('section-toggle').disabled, false, 'leaving 3D re-offers the tool');
+		assert.match(page3d.el('section-status').textContent, /^Origin set\./, 'the pending origin survived the 3D trip');
+		assert.equal(page3d.el('slice-overlay').hidden, false, 'the overlay comes back with the map');
+
+		// The GPU engine path: the capture drains a fresh mirror, and a capture overtaken by a
+		// newer cut or world never writes - its serial no longer names the live section.
+		const gPage = loadPage('?engine=gpu', function () {
+			globalThis.navigator.gpu = { getPreferredCanvasFormat: () => 'bgra8unorm' };
+		});
+		await gPage.tick();
+		const gEl = gPage.el, gMap = gEl('mapgpu');
+		const gClick = (x, y) => gMap.dispatch('click', { clientX: x, clientY: y, currentTarget: gMap });
+		gEl('section-toggle').checked = true;
+		gEl('section-toggle').dispatch('change');
+		gClick(200, 260);
+		gClick(760, 190);
+		await gPage.tick();
+		assert.match(gEl('section-status').textContent, /drained GPU snapshot/, 'the GPU capture names its drain');
+		assert.equal(gPage.gpu.downloads, 1, 'the capture downloaded the mirror once');
+		// Hold the next capture's download open on purpose.
+		let release = null;
+		const realDownload = gPage.gpu.download;
+		gPage.gpu.download = function () {
+			gPage.gpu.download = realDownload;
+			return new Promise((resolve) => { release = resolve; });
+		};
+		gClick(300, 220);
+		gClick(640, 330);
+		assert.equal(gEl('section-copy').disabled, true, 'transport stays disabled while the drain is in flight');
+		// A newer cut overtakes the held one before its mirror lands.
+		gClick(400, 150);
+		gClick(550, 300);
+		await gPage.tick();
+		const finalPath = /path ([0-9a-f]{8})/.exec(gEl('section-status').textContent)[1];
+		assert.ok(release, 'the held download was taken');
+		release();
+		await gPage.tick();
+		assert.equal(/path ([0-9a-f]{8})/.exec(gEl('section-status').textContent)[1], finalPath,
+			'the overtaken capture never overwrote the newer section');
+		assert.equal(gEl('section-copy').disabled, false, 'the live capture enables transport');
+		const copiesAfterSuppression = gPage.api.document.copied.length;
+		gEl('section-copy').click();
+		await gPage.tick();
+		assert.equal(gPage.api.document.copied.length, copiesAfterSuppression + 1, 'Copy transports exactly once');
+		const gpuPack = globalThis.SlicePack.decode(gPage.api.document.copied[copiesAfterSuppression]);
+		assert.equal(gpuPack.source.level, 5);
+		assert.equal(gpuPack.n >= 2, true, 'the GPU pack carries its runs');
+	}
+
 console.log('PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh on a running CPU world'
 		+ ' (Keep carries the clock and crust, a failed transfer keeps the old world), badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
@@ -1824,5 +2035,12 @@ console.log('PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh o
 		+ ' heightmap, builds its lookup in row bands, caches it per world and switches modes'
 		+ ' without a rebuild, and off restores the map;'
 		+ ' the reconstruct slider shows only on an Earth start with a model, the steered header'
-		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly');
+		+ ' names the mode, a scrub is display-only and its release restores the live paint exactly;'
+		+ ' and the section cutter owns its clicks while on (a pan never cuts, the probe and'
+		+ ' survey paths answer when off), an origin survives a refused second point and a 3D'
+		+ ' trip, a completed cut reports runs/span/snapshot/identity, Copy and Save transport'
+		+ ' one validated pack (clipboard refusal falls back to manual text), the 3D view'
+		+ ' deactivates the tool with the reason, a level rebuild keeps the line and recaptures'
+		+ ' the world, and a GPU capture drains a fresh mirror while an overtaken capture'
+		+ ' never writes');
 })().catch((error) => { console.error(error); process.exit(1); });

@@ -25,8 +25,12 @@ canvas[hidden] { display: none; }
 canvas:active { cursor: grabbing; }
 /* These backing canvases are 2:1; cap width at 120vh instead of clamping canvas height. */
 .map-stage { position: relative; width: min(100%, 120vh); aspect-ratio: 2 / 1; margin-inline: auto; }
-.map-stage > canvas:not(#markers) { width: 100%; height: auto; max-height: none; }
+.map-stage > canvas:not(#markers):not(#slice-overlay) { width: 100%; height: auto; max-height: none; }
 #markers { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; max-height: none;
+	pointer-events: none; cursor: default; }
+/* The great-circle section overlay (0.8.1): same positioned layer as the markers, one level
+   above them, visual only - the pointer events stay on the map canvases beneath it. */
+#slice-overlay { position: absolute; inset: 0; z-index: 3; width: 100%; height: 100%; max-height: none;
 	pointer-events: none; cursor: default; }
 .perf { position: relative; color: #80d7b9;
 	font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
@@ -69,6 +73,16 @@ canvas:active { cursor: grabbing; }
 .campaign-controls select { min-width: 130px; }
 .campaign-progress { flex: 1 1 100%; color: #aab9bd; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-variant-numeric: tabular-nums; }
+/* Section cutter (0.8.1): one compact row of actions plus a status line in the monospace
+   voice of the campaign progress; the manual-copy fallback area stays collapsed until a
+   clipboard write is actually refused. */
+#section-tools { flex: 1 1 100%; }
+#section-tools .check { padding: 6px 0; }
+#section-tools button { padding: 6px 10px; min-height: 0; font-size: 12px; }
+.section-status { flex: 1 1 100%; color: #aab9bd; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-variant-numeric: tabular-nums; }
+.section-manual { flex: 1 1 100%; min-height: 0; padding: 8px; max-height: 14em; overflow: auto; resize: vertical;
+	font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
 .inspectors { display: grid; gap: 12px; min-width: 0; }
 .inspectors > div { min-width: 0; }
 #prospect { width: 100%; max-width: 100%; margin: 10px 0 0; padding: 10px; max-height: 24em; overflow: auto; border: 1px solid #2b3540; border-radius: 6px;

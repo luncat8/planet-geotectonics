@@ -19,6 +19,7 @@
 				<canvas id="mapgpu" hidden aria-label="Equirectangular map of moving plates (WebGPU); drag to pan"></canvas>
 				<canvas id="map3d" width="2048" height="1024" hidden aria-label="3D planet view; drag to orbit, wheel to zoom"></canvas>
 				<canvas id="markers" hidden aria-label="Discovered deposit map overlay"></canvas>
+				<canvas id="slice-overlay" hidden aria-label="Great-circle section overlay"></canvas>
 			</div>
 			<div class="perf" id="perf"><div class="rows" id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report" title="Click to copy the performance report"><span>performance counter idle</span></div></div>
 		</section>
@@ -69,6 +70,14 @@
 						<button id="export-discovered" disabled>Export deposits</button>
 					</div>
 					<small id="campaign-progress" class="campaign-progress" role="status" aria-live="polite">No regional campaign. Local clicks survey only the selected cell footprint.</small>
+				</fieldset>
+				<fieldset id="section-tools"><legend>Section · great-circle cut</legend>
+					<label class="check" title="Section tool: click an origin and a second point on the 2D map; the full closed great-circle section through both is cut on the world as it stands. Dragging still pans, and a drag never becomes a cut point"><input id="section-toggle" type="checkbox">Cut section</label>
+					<button id="section-clear" disabled title="Remove the current section and its export report">Clear</button>
+					<button id="section-copy" disabled title="Copy the validated pgt-slice-pack v2 JSON for the current section">Copy pack</button>
+					<button id="section-save" disabled title="Download the validated pgt-slice-pack v2 JSON for the current section">Save pack</button>
+					<small id="section-status" class="section-status" role="status" aria-live="polite">No section. Enable the tool, then click an origin and a second point on the 2D map.</small>
+					<textarea id="section-manual" class="section-manual" hidden readonly aria-label="Section pack JSON, selectable for manual copy"></textarea>
 				</fieldset>
 			</section>
 			<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div class="inspectors"><div><h2>Column inspector</h2><label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p></div><div><h2>Prospecting report</h2><pre id="prospect" aria-live="polite">Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.</pre><div class="ledger-tools"><label for="ledger-sort">Discovery ledger · sort<select id="ledger-sort"><option value="found" selected>found order</option><option value="size">size</option><option value="contained">contained metal</option><option value="depth">top depth</option><option value="confidence">confidence</option><option value="kind">kind</option></select></label><button id="ledger-sort-dir" title="Toggle the sort direction">↓ low first</button><small id="ledger-count">0 found</small></div><div id="ledger-list" class="ledger-list" hidden></div></div></div></section>
@@ -126,6 +135,8 @@
 	<script src="js/render3d.js"></script>
 	<script src="js/render.js"></script>
 	<script src="js/resolution.js"></script>
+	<script src="port/slice-format.js"></script>
+	<script src="js/slice.js"></script>
 	<script src="js/ui.js"></script>
 </body>
 </html>

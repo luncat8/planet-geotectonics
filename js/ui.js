@@ -62,6 +62,17 @@
 	var markerCanvas = document.getElementById('markers'), markerContext = markerCanvas.getContext('2d');
 	var campaignPreparing = false, campaignRequest = 0, campaignJob = null, campaignView = null, campaignReadback = null;
 	var campaignRefreshArmed = false, markersDirty = false;
+	// Section cutter (0.8.1): two clicks draw the full great-circle section, one captured
+	// pack answers Copy and Save. `path` stays full precision - the codec quantises only its
+	// own copy at seal - and `serial` cancels stale GPU export callbacks across rebuilds.
+	var sliceCanvas = document.getElementById('slice-overlay'), sliceContext = sliceCanvas.getContext('2d');
+	var sliceToggle = document.getElementById('section-toggle'), sliceClear = document.getElementById('section-clear');
+	var sliceCopy = document.getElementById('section-copy'), sliceSave = document.getElementById('section-save');
+	var sliceStatus = document.getElementById('section-status'), sliceManual = document.getElementById('section-manual');
+	var section = { active: false, a: null, b: null, path: null, result: null, serial: 0,
+		generation: 0, exporting: false, dirs: null, dirsN: 0, dirsGen: -1 };
+	var sliceDirty = true;
+	var slicePointer = new Float64Array(3), sliceWorldDir = new Float64Array(3), sliceProjected = new Float64Array(2);
 	// The discovery overlay paints from the campaign view when one exists and from the
 	// session ledger otherwise: a local find is on the map before any regional sweep. The hit
 	// cache mirrors what was actually painted (projected x, y and the record per marker), so a
@@ -365,6 +376,9 @@
 		(gpu.on && gpu.ready ? gpuCanvas : canvas).hidden = false;
 		layerGroup.classList.remove('off');
 		paintDepositMarkers();
+		paintSectionControls();
+		sliceDirty = true;
+		paintSliceOverlay();
 	}
 	// The session's init options, read when the device is finally in hand - a mesh or
 	// detail change made while the adapter promise was in flight lands on the session
@@ -396,6 +410,9 @@
 			} else {
 				r3d.exag = v3dDisp;
 				v3d.r3d = r3d; v3d.on = true;
+				// The 3D took the map slot: an active section steps aside here, not at the
+				// toggle - a boot that fails never leaves the 2D map.
+				if (section.active) setSectionActive(false);
 				map3d.hidden = false; canvas.hidden = true; gpuCanvas.hidden = true;
 				markerCanvas.hidden = true;
 				layerGroup.classList.add('off');
@@ -434,7 +451,7 @@
 			return;
 		}
 		// An in-flight GPU transfer may be sizing buffers this boot would borrow.
-		whenGpuIdle(function () { bootV3dNow(function () { dirty = true; }); });
+		whenGpuIdle(function () { bootV3dNow(function () { dirty = true; paintSectionControls(); sliceDirty = true; }); });
 	}
 	// Called from bootEngine's completion: the engine settled on some device, so a 3D
 	// that was on (or was prefilled on) re-inits against the new world. Release first -
@@ -856,9 +873,10 @@
 	}
 	applyView();
 	// The map-top line carries the resolution the design quotes (0.1.5 §1): the cell count and
-	// the edge of an equal-area cell, 223 / 112 / 56 km at L5 / L6 / L7.
+	// the edge of an equal-area cell, 223 / 112 / 56 km at L5 / L6 / L7. The same number is
+	// the section cutter's v2 cell budget, so it is computed once here.
 	function paintGrid() {
-		var km = Math.sqrt(4 * Math.PI * Params.radius * Params.radius / grid.V) / 1000;
+		var km = Slice.cellKmFor(grid);
 		gridInfo.textContent = 'EQUIRECTANGULAR / ' + grid.V.toLocaleString() + ' CELLS / '
 			+ Math.round(km) + ' KM';
 	}
@@ -941,6 +959,7 @@
 		resetViewStats();
 		bootEngine(function () {
 			dirty = true;
+			sectionWorldChanged();
 			if (after) after();
 		});
 	}
@@ -1009,6 +1028,7 @@
 		paintBadge();
 		dirty = true;
 		probe.textContent = regridText(from, report);
+		sectionWorldChanged();
 	}
 	function changeLevel(level) {
 		hideRegrid();
@@ -1329,6 +1349,335 @@
 		link.download = 'discovered-deposits-' + Math.round(campaignView.epochMyr) + 'myr.json';
 		link.click(); URL.revokeObjectURL(link.href);
 	});
+	// --- Section cutter (0.8.1): interaction, snapshot discipline and transport -------------
+	// The effective display water, never a hidden Params.sea shortcut: volume mode names the
+	// level solved for the bathymetry being exported (re-solved when a step marked it dirty),
+	// level mode the slider's own value.
+	function sectionSea() {
+		if (waterActive !== 'volume') return { mode: 'level', levelM: Params.sea, volScale: Params.seaVolScale };
+		var data = waterDirty ? Water.fromElevations(state.z, +seaVolInput.value) : waterData;
+		return { mode: 'volume', levelM: data ? data.level : 0, volScale: +seaVolInput.value };
+	}
+	// Start/pack/epoch provenance from the selected start, not inferred from a dense plate id.
+	function sectionProvenance() {
+		var start = startInput.value;
+		if (!isEarthStart(start)) return { pack: 'procedural-' + start, epochMa: 0, rotModel: 'procedural', built: '' };
+		var pk = Earth.pick(grid.level, start);
+		return { pack: pk ? pk.name : 'earth', epochMa: pk ? pk.epoch : 0, rotModel: 'PALEOMAP', built: '' };
+	}
+	function sectionLicense() {
+		var start = startInput.value;
+		if (!isEarthStart(start))
+			return 'Synthetic world · planet-geotectonics ' + start + ' start · no Earth data';
+		var pk = Earth.pick(grid.level, start);
+		return 'Earth start ' + (pk ? pk.name : 'earth') + ' · ' + (pk ? pk.source : 'PALEOMAP');
+	}
+	function sectionPathChecksum() {
+		if (!section.path) return '';
+		try { return SlicePack.pathChecksum(section.path); }
+		catch (error) { return ''; }
+	}
+	function paintSectionStatus() {
+		if (!sliceStatus) return;
+		// While the 3D view holds the map the tool cannot run; the status says so instead of
+		// inviting clicks that would probe. Pending work is kept for the return to 2D.
+		if (v3d.on) {
+			sliceStatus.textContent = 'The section tool needs the 2D map; the 3D view has no cut.'
+				+ (section.path ? ' The pending section is kept for the 2D map.'
+					: section.a ? ' The pending origin is kept for the 2D map.' : '');
+			return;
+		}
+		if (!section.path) {
+			sliceStatus.textContent = section.a
+				? 'Origin set. Click a second point the section must run through.'
+				: 'No section. Enable the tool, then click an origin and a second point on the 2D map.';
+			return;
+		}
+		var text = 'Section · path ' + sectionPathChecksum().slice(0, 8) + ' · '
+			+ Math.round(section.path.arcKm).toLocaleString('en-US') + ' km';
+		if (section.result) {
+			var built = section.result.pack.source.built;
+			text = 'Section · ' + Slice.report(section.result)
+				+ (section.result.gpu ? ' · drained GPU snapshot' : '')
+				+ ' · captured ' + (built ? built.slice(11, 16) : '?') + ' UTC';
+		}
+		if (reconLive)
+			text += ' · export disabled: the Reconstruct scrub holds a display pose; release it first';
+		sliceStatus.textContent = text;
+	}
+	function paintSectionControls() {
+		var ready = !!section.path && !!section.result && !section.exporting && !reconLive;
+		sliceClear.disabled = !section.a && !section.path;
+		sliceCopy.disabled = !ready;
+		sliceSave.disabled = !ready;
+		sliceToggle.disabled = v3d.on;
+		paintSectionStatus();
+	}
+	function setSectionActive(on) {
+		if (on && v3d.on) on = false;
+		section.active = on;
+		sliceToggle.checked = on;
+		sliceDirty = true;
+		paintSectionControls();
+		paintSliceOverlay();
+	}
+	// The overlay is visual only: it never writes the renderer's texture, viewLookup, state or
+	// the marker hit table. The circle is sampled in world directions once per path (and per
+	// canvas width change), then projected through the live view each repaint, with a stroke
+	// split wherever consecutive x values jump half a canvas - the map's seam.
+	function paintSliceOverlay() {
+		sliceDirty = false;
+		var base = gpu.on && gpu.ready ? gpuCanvas : canvas;
+		var width = base.width || grid.lookupW, height = base.height || grid.lookupH;
+		if (sliceCanvas.width !== width) sliceCanvas.width = width;
+		if (sliceCanvas.height !== height) sliceCanvas.height = height;
+		// Drawn state, not tool state: a pending origin or a full line stays visible while the
+		// tool is off (clicks just probe again); only the 3D view hides the overlay.
+		var show = !v3d.on && !!(section.path || section.a);
+		sliceCanvas.hidden = !show;
+		sliceContext.clearRect(0, 0, width, height);
+		if (!show) return;
+		if (section.path) {
+			var want = Math.max(512, Math.min(4096, width));
+			if (!section.dirs || section.dirsN !== want || section.dirsGen !== section.generation) {
+				var dirs = new Float64Array(want * 3);
+				for (var i = 0; i < want; i++) {
+					SlicePack.directionAt(section.path, section.path.arcKm * i / want, slicePointer);
+					dirs[i * 3] = slicePointer[0];
+					dirs[i * 3 + 1] = slicePointer[1];
+					dirs[i * 3 + 2] = slicePointer[2];
+				}
+				section.dirs = dirs;
+				section.dirsN = want;
+				section.dirsGen = section.generation;
+			}
+			var points = section.dirs, n = section.dirsN, prevX = 0, first = true;
+			sliceContext.beginPath();
+			for (var at = 0; at <= n; at++) {
+				var p = at % n;
+				MapView.project(sliceProjected, points[p * 3], points[p * 3 + 1], points[p * 3 + 2], viewQ, width, height);
+				var x = sliceProjected[0], y = sliceProjected[1];
+				if (first || Math.abs(x - prevX) > width / 2) sliceContext.moveTo(x, y);
+				else sliceContext.lineTo(x, y);
+				prevX = x;
+				first = false;
+			}
+			sliceContext.lineWidth = 4;
+			sliceContext.strokeStyle = 'rgba(10, 16, 20, 0.55)';
+			sliceContext.stroke();
+			sliceContext.lineWidth = 1.5;
+			sliceContext.strokeStyle = '#ffe3a3';
+			sliceContext.stroke();
+		}
+		function handle(dir, open) {
+			MapView.project(sliceProjected, dir[0], dir[1], dir[2], viewQ, width, height);
+			var x = sliceProjected[0], y = sliceProjected[1], r = 4;
+			sliceContext.beginPath();
+			sliceContext.moveTo(x, y - r);
+			sliceContext.lineTo(x + r, y);
+			sliceContext.lineTo(x, y + r);
+			sliceContext.lineTo(x - r, y);
+			sliceContext.closePath();
+			if (open) {
+				sliceContext.lineWidth = 1.5;
+				sliceContext.strokeStyle = '#ffe3a3';
+				sliceContext.stroke();
+			} else {
+				sliceContext.fillStyle = '#ffe3a3';
+				sliceContext.fill();
+			}
+			// The seam twin, like the markers painter: a handle at the edge shows on both sides.
+			if (x < r || x > width - r) {
+				sliceContext.save();
+				sliceContext.translate(x < r ? width : -width, 0);
+				sliceContext.beginPath();
+				sliceContext.moveTo(x, y - r);
+				sliceContext.lineTo(x + r, y);
+				sliceContext.lineTo(x, y + r);
+				sliceContext.lineTo(x - r, y);
+				sliceContext.closePath();
+				if (open) sliceContext.stroke();
+				else sliceContext.fill();
+				sliceContext.restore();
+			}
+		}
+		// An origin without its second point stays an open marker: "select a second point".
+		handle(section.a, !section.path);
+		if (section.path && section.b) handle(section.b, false);
+	}
+	// A primary click while the tool is active selects the section's first or second point;
+	// drags keep panning through the shared dead zone and never land here (pan.suppressClick).
+	function sectionClick(event, target) {
+		pointerDirection(event, target, slicePointer);
+		Quat.rotateInv(sliceWorldDir, 0, viewQ, 0, slicePointer, 0);
+		var l = Math.hypot(sliceWorldDir[0], sliceWorldDir[1], sliceWorldDir[2]) || 1;
+		sliceWorldDir[0] /= l;
+		sliceWorldDir[1] /= l;
+		sliceWorldDir[2] /= l;
+		if (section.path) {
+			// a click after a completed cut starts the next one: this click is its origin
+			section.a = new Float64Array(3);
+			section.a.set(sliceWorldDir);
+			section.b = null;
+			section.path = null;
+			section.result = null;
+			paintSectionControls();
+			paintSliceOverlay();
+			return;
+		}
+		if (!section.a) {
+			section.a = new Float64Array(3);
+			section.a.set(sliceWorldDir);
+			paintSectionControls();
+			paintSliceOverlay();
+			return;
+		}
+		var through = new Float64Array(3);
+		through.set(sliceWorldDir);
+		var next;
+		try {
+			next = Slice.circleThrough(section.a, through, Slice.radiusKm(), Slice.cellKmFor(grid));
+		} catch (error) {
+			// coincident or antipodal: keep the origin, name the problem, export nothing
+			sliceStatus.textContent = 'Second point is too close to the origin or its antipode; '
+				+ 'the origin is kept. Click a distinct point.';
+			return;
+		}
+		section.b = through;
+		section.path = next;
+		section.generation++;
+		paintSectionControls();
+		captureSection();
+		sliceDirty = true;
+		paintSliceOverlay();
+	}
+	// One capture path for completion, Copy and Save (plan §5): the pack always reflects the
+	// world as it stands when the capture starts, never an older serial's snapshot. CPU is
+	// synchronous; GPU pauses playback, drains the in-flight batch/readback, downloads the
+	// mirror and only then walks and writes. A rebuild, engine switch, new export or path edit
+	// bumps the serial and cancels the stale callback; it never writes for a swapped world.
+	function captureSection(after) {
+		if (!section.path || reconLive) return;
+		var world = state, path = section.path, serial = ++section.serial;
+		var wasPlaying = playing, gpuExport = !!(gpu.on && gpu.ready);
+		section.result = null;
+		paintSectionControls();
+		function write() {
+			if (state !== world || serial !== section.serial) return;
+			var failed = null;
+			try {
+				var provenance = sectionProvenance();
+				provenance.built = new Date().toISOString();
+				var result = Slice.pack(world, path, sectionSea(), provenance, sectionLicense());
+				result.gpu = gpuExport;
+				section.result = result;
+			} catch (error) {
+				failed = error;
+			}
+			paintSectionControls();
+			// Named after the repaint: the recomputed status would hide the failure.
+			if (failed) {
+				sliceStatus.textContent = 'Section export failed: ' + failed.message;
+				console.error('Section pack failed', failed);
+			}
+			if (after && serial === section.serial && state === world) after(failed ? null : section.result);
+		}
+		if (!gpuExport) {
+			write();
+			return;
+		}
+		if (playing) setPlaying(false);
+		section.exporting = true;
+		paintSectionControls();
+		whenGpuIdle(function () {
+			var transfer = campaignJob && campaignJob.running && campaignJob.state === world
+				? Promise.resolve() : campaignReadback || GpuSim.download(world);
+			Promise.resolve(transfer).then(function () {
+				if (serial === section.serial) section.exporting = false;
+				write();
+				// restore the prior play state only while the same world still owns the request
+				if (state === world && serial === section.serial && wasPlaying && !playing) setPlaying(true);
+		}, function (error) {
+			if (serial === section.serial) section.exporting = false;
+			paintSectionControls();
+			if (state === world && serial === section.serial)
+				sliceStatus.textContent = 'Section export failed: GPU readback failed: ' + error.message;
+		});
+		});
+	}
+	// Copy and Save always capture fresh, so a pack can never be older than the press, and
+	// they transport only a pack that passed the shared validator.
+	function sectionFileName(pack) {
+		return 'pgt-slice-L' + pack.source.level + '-seed' + pack.source.simSeed + '-t'
+			+ Math.round(pack.source.tMyr) + '-circle-' + SlicePack.pathChecksum(pack.path).slice(0, 8)
+			+ '-' + pack.checksum.slice(0, 8) + '.json';
+	}
+	function sectionTransport(mode) {
+		if (section.exporting || !section.path) return;
+		captureSection(function (result) {
+			if (!result) return;
+			var text;
+			try {
+				text = SlicePack.encode(result.pack);
+			} catch (error) {
+				sliceStatus.textContent = 'Section transport failed: ' + error.message;
+				return;
+			}
+			if (mode === 'save') {
+				var blob = new Blob([text], { type: 'application/json' }), link = document.createElement('a');
+				link.href = URL.createObjectURL(blob);
+				link.download = sectionFileName(result.pack);
+				link.click();
+				URL.revokeObjectURL(link.href);
+				sliceStatus.textContent = 'Saved ' + link.download + '.';
+				return;
+			}
+			Clipboard.writeText(text).then(function (ok) {
+				if (ok) {
+					sliceStatus.textContent = 'Copied pgt-slice-pack v2 · ' + Slice.report(result)
+						+ '. Paste it into the section application.';
+					return;
+				}
+				// The clipboard refused the write: show the text and say so - never a fake copy.
+				sliceManual.value = text;
+				sliceManual.hidden = false;
+				sliceManual.select();
+				sliceStatus.textContent = 'The clipboard refused the write. Select the text below and copy manually.';
+			});
+		});
+	}
+	function clearSection() {
+		section.a = null;
+		section.b = null;
+		section.path = null;
+		section.result = null;
+		section.serial++;
+		section.exporting = false;
+		sliceManual.hidden = true;
+		sliceManual.value = '';
+		sliceDirty = true;
+		paintSectionControls();
+		paintSliceOverlay();
+	}
+	// A new world (rebuild, keep-world transfer, engine switch) keeps the geographic path but
+	// owes a fresh capture: the old report names a snapshot that no longer exists.
+	function sectionWorldChanged() {
+		section.serial++;
+		section.result = null;
+		section.exporting = false;
+		sliceManual.hidden = true;
+		sliceDirty = true;
+		paintSectionControls();
+		paintSliceOverlay();
+		if (section.path) captureSection();
+	}
+	sliceToggle.addEventListener('change', function () { setSectionActive(sliceToggle.checked); });
+	sliceClear.addEventListener('click', clearSection);
+	sliceCopy.addEventListener('click', function () { sectionTransport('copy'); });
+	sliceSave.addEventListener('click', function () { sectionTransport('save'); });
+	paintSectionControls();
+	paintSliceOverlay();
+
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
@@ -1400,7 +1749,7 @@
 		resetViewStats();
 		whenGpuIdle(function () {
 			(wasGpu ? GpuSim.download(state) : Promise.resolve()).then(function () {
-				bootEngine(function () { dirty = true; switching = false; });
+				bootEngine(function () { dirty = true; switching = false; sectionWorldChanged(); });
 			}, function () { switching = false; });
 		});
 	});
@@ -1543,9 +1892,11 @@
 					// model ids - game lets the mantle drive), and Checkpoint.load leaves the
 					// flags and the rotRec tables untouched.
 					syncAdjust();
-					probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
-						+ state.t.toFixed(1) + ' Myr.';
+				probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
+					+ state.t.toFixed(1) + ' Myr.';
 					waterDirty = true;   // the loaded world's bathymetry feeds the next volume solve
+					// The blob replaced the world the rebuild's own recapture saw: owe another.
+					sectionWorldChanged();
 					if (gpu.on && gpu.ready) {
 						GpuSim.uploadState(state).then(function () { dirty = true; });
 					} else {
@@ -1725,6 +2076,12 @@
 	}
 	function mapClick(event) {
 		if (pan.suppressClick) { pan.suppressClick = false; return; }
+		// The section tool resolves first, on the single click listener: no second competing
+		// path, and probes, pins and surveys only run when it is off.
+		if (section.active && !v3d.on) {
+			sectionClick(event, event.currentTarget);
+			return;
+		}
 		probeClick(event);
 	}
 	// With "Info follows pointer" on, hovering keeps the inspector on the cell under the
@@ -2008,6 +2365,7 @@
 		}
 	}
 		if (markersDirty || viewMoved) paintDepositMarkers();
+		if (sliceDirty || viewMoved) paintSliceOverlay();
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {
 			Perf.v3dText = v3d.on && v3d.r3d ? v3d.r3d.tsLine() : '';

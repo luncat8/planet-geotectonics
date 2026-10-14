@@ -4,9 +4,11 @@ const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
 for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
-'render3d', 'heightfield', 'gpu/d1diff']) {
+'render3d', 'heightfield', 'gpu/d1diff', 'resolution']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../port/slice-format.js'), 'utf8'), context, { filename: 'slice-format' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/slice.js'), 'utf8'), context, { filename: 'slice' });
 vm.runInContext(`
 var state = new State(new Grid(2, 7).build(), 7);
 Sim.raster(state);
@@ -36,6 +38,18 @@ if (!dump.classes.length || !dump.totals) throw new Error('deposit json carries 
 var blob = Checkpoint.save(state);
 Checkpoint.load(state, blob);
 Sim.raster(state);
+// The cutter's classic-script chain (0.8.1): the shared codec loads before js/slice.js, and
+// the page-order globals (SlicePack, Resolution, Slice) resolve without module machinery.
+var slicePath = Slice.circleThrough(new Float64Array([1, 0, 0.2]), new Float64Array([-0.4, 0.9, -0.1]),
+	Slice.radiusKm(), Slice.cellKmFor(state.grid));
+var sliceRuns = Slice.walk(state.grid, slicePath, Resolution.nearestCell);
+if (sliceRuns.n < 2) throw new Error('the classic-script cutter walk produced no runs');
+var slicePack = Slice.pack(state, slicePath, { mode: 'level', levelM: 0, volScale: 1 },
+	{ pack: 'procedural-map', epochMa: 0, rotModel: 'procedural', built: '2026-10-13T12:00:00.000Z' },
+	'classic-script smoke');
+if (SlicePack.validate(slicePack.pack) !== '') throw new Error('the classic-script pack does not validate');
+if (SlicePack.decode(SlicePack.encode(slicePack.pack)).checksum !== slicePack.pack.checksum)
+	throw new Error('the classic-script pack does not round-trip');
 `, context);
 assert.equal(context.state.frame, 200);
 assert.equal(context.image.data.length, 1024 * 512 * 4);
