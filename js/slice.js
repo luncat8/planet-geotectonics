@@ -12,7 +12,7 @@ var SliceResolution = typeof module !== 'undefined' && module.exports ? require(
 var Slice = (function () {
 	// Release provenance (0.8.1 plan §5.1): update both in the release change that ships them.
 	var REPO = 'luncat8/planet-geotectonics';
-	var COMMIT = '0000000000000000000000000000000000000000';
+	var COMMIT = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 	// Walk tolerances. The smallest ring-edge distance measures 220.4 / 110.2 / 55.1 km at
 	// L5 / L6 / L7, so one third of it keeps every probe step well inside a single cell and a
 	// transition bracket never spans more than the two cells it separates. A path that only

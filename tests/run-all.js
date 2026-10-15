@@ -18,7 +18,7 @@ const SHORT = [
 	'port', 'slice-format', 'browser-scripts', 'deposits', 'core', 'instruments', 'resolution', 'slice', 'gui', 'grid', 'quat', 'mantle', 'plates', 'edges', 'forces',
 	'determinism', 'water', 'raster', 'conveyor', 'rift', 'isostasy', 'erosion', 'adj', 'collapse', 'split',
 	'checkpoint', 'view-dir', 'rotations', 'gpml-plates', 'earth', 'paleo', 'sediment', 'reconstruct', 'heightfield',
-	'perf', 'clipboard',
+	'slice-bake', 'perf', 'clipboard',
 	'wgsl-struct', 'gpu-play', 'gpu-readback', 'gpu-d1diff', 'gpu-parity-ui', 'render3d'
 ];
 const names = full ? SHORT.concat(HISTORIES) : SHORT;

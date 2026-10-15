@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 41 kernel, protocol, rig and GUI tests, ~3 min here
+node tests/run-all.js		short profile (default): 43 kernel, protocol, rig and GUI tests, ~3 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
@@ -105,6 +105,12 @@ contract, thresholds, module map and staging. the increments:
 	map overlay, CPU/GPU snapshot discipline and manual Copy/Save transport.
 0.8.2-plan-slice-bake.md - deterministic Node Earth-start section bakes through the real Earth
 	loader and the same v2 writer; provenance and fixture-corpus rules.
+0.8.2-review.md - implementation review of that bake: tools/earth/bake_section.js, its one
+	generation path, provenance honesty, the measured per-level cost and the handoff the
+	counterpart's bundle restore consumes. archive/0.8.2-report.md is the development log with
+	the commands, the identities and the corpus table; data/sections/ holds the two reviewed
+	example packs (generated, provenance in data/sections/SOURCES.md) that tests/slice-bake.js
+	reproduces byte-for-byte.
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
 0.8.0-slice-agent-prompt.md - standing handoff prompt for the planet-tectonics-2d-slice agent:
@@ -136,6 +142,9 @@ archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemente
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.
 experiments/logs/ - keep useful; run_full_test.py / run_gpu_parity.py write their logs here
+out/ - git-ignored scratch for generated artifacts (0.8.2 section bakes and anything else
+	derived). A reviewed example is committed under data/sections/ with its provenance in
+	data/sections/SOURCES.md instead, so it can be a fixture rather than a leftover.
 
 run_bench.py, run_full_test.py, run_gpu_parity.py - double-clickable runners (page bench, the
 full node profile, the headless GPU parity ensemble)
