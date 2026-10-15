@@ -41,12 +41,19 @@ Open `index.html` directly in a browser.
   or **Fresh world** (the rebuild). A failed transfer leaves the running world untouched. The
   field volume residual is booked to `regrid*` and reported; `0.7.0-review.md` §4 lists the open
   decision on it. The GPU engine still rebuilds until its device path lands.
-- Slice exchange foundation (0.8.0, globe side): `port/slice-format.js` defines the strict,
-  file-safe `pgt-slice-pack` v2 contract, canonical full/path identities, path geometry and the
-  raw-before-typed-array validation that v1 lacked. `PORT.json` SHA-256-gates the shared codec and
-  its all-boundaries/gap fixture under both Node and classic scripts. The section repository's v2
-  cutover and fixture reconstruction still gate completion, so there is intentionally no cutter
-  control or live-link claim yet; see `0.8.0-review.md`.
+- Slice exchange (0.8.0-0.8.2, globe side): `port/slice-format.js` defines the strict, file-safe
+  `pgt-slice-pack` v2 contract, canonical full/path identities, path geometry and the
+  raw-before-typed-array validation that v1 lacked, and `PORT.json` SHA-256-gates the shared codec
+  and its all-boundaries/gap fixture under both Node and classic scripts. On the 2D map the
+  **Cut section** tool takes two clicks, walks the great circle one cell-run at a time and exports
+  the snapshot as a validated v2 pack through Copy or Save (a clipboard refusal shows the text
+  instead of claiming a copy); a rebuild, engine switch or newer export always recaptures, and a
+  GPU capture drains a fresh mirror first. `node tools/earth/bake_section.js` writes the same pack
+  deterministically from a fresh Earth or paleo start for reproducible examples and fixtures, with
+  the source pack, input epoch, preset-derived rotation model and licence named in the payload.
+  Reviewed examples live in `data/sections/`. The exchange is one-way and manual by design: there
+  is no live link and no section-to-globe feedback; see `0.8.0-review.md`, `0.8.1-review.md`,
+  `0.8.2-review.md` and the gates in `0.8.3-plan-slice-bridge.md`.
 - Metallogeny: six saturating potentials per column (VMS, mafic, arc, orogenic, basin, placer)
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
