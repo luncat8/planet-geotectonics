@@ -150,7 +150,49 @@ for (const field of ['sKm', 'zM', 'hFelM', 'hMafM', 'hSedM', 'ageMyr', 'fert', '
 assert.deepEqual(JSON.parse(JSON.stringify(pack.plates)), JSON.parse(JSON.stringify(reference.plates)),
 	'the plate table matches a direct write');
 
-// --- 4. the CLI surface --------------------------------------------------------------------
+// --- 4. the committed example corpus --------------------------------------------------------
+// data/sections/ holds the reviewed examples (0.8.2 plan §5). The arguments are read back out
+// of each pack itself - start, level, seed, preset and circle - and the bake is repeated under
+// the provenance the file records, so a silent change in the Earth loader, the walker or the
+// writer turns this red instead of leaving a stale example behind.
+const corpusDir = path.join(root, 'data/sections');
+for (const name of fs.readdirSync(corpusDir).filter(file => file.endsWith('.json')).sort()) {
+	const file = path.join(corpusDir, name);
+	const committed = fs.readFileSync(file, 'utf8');
+	const stored = SP.decode(committed);
+	assert.equal(SP.validate(stored), '', name + ' is a valid v2 pack');
+	const starts = ['earth'].concat(Object.keys(Earth.history));
+	const start = starts.find(value => Earth.pick(stored.source.level, value)
+		&& Earth.pick(stored.source.level, value).name === stored.source.pack);
+	assert.ok(start, name + ' names a start this tree can resolve (' + stored.source.pack + ')');
+	const reproduced = bakeSection.bake({
+		start: start, level: stored.source.level, seed: stored.source.simSeed,
+		preset: stored.source.rotModel === 'PALEOMAP' ? 'realistic' : 'game',
+		circle: [stored.path.lat0, stored.path.lon0, stored.path.az0],
+		built: stored.source.built, commit: stored.source.commit
+	});
+	assert.equal(SP.encode(reproduced.result.pack), committed,
+		name + ' is byte-identical to a fresh bake of its own recorded arguments');
+}
+
+// The modern example is the plan's first corpus item: a full circle that crosses ocean,
+// continent, at least one boundary and the antimeridian seam.
+const modern = SP.decode(fs.readFileSync(path.join(corpusDir, 'earth-l5-gc0.json'), 'utf8'));
+const fullArc = 2 * Math.PI * Slice.radiusKm();
+assert.ok(Math.abs(modern.path.arcKm - fullArc) < 1e-6 * fullArc,
+	'the example is a closed great circle (stored to six significant digits)');
+assert.ok(modern.host.some(host => host === 1) && modern.host.some(host => host >= 2),
+	'the example crosses oceanic and continental crust');
+assert.ok(modern.bnd.some(bnd => bnd !== 0), 'the example crosses at least one plate boundary');
+let seam = false;
+const probe = new Float64Array(2);
+for (let s = 0; s < modern.path.arcKm && !seam; s += modern.path.arcKm / 720) {
+	SP.latLonAt(modern, s, probe);
+	seam = Math.abs(probe[1]) > 179;
+}
+assert.ok(seam, 'the example crosses the antimeridian seam');
+
+// --- 5. the CLI surface --------------------------------------------------------------------
 const work = fs.mkdtempSync(path.join(os.tmpdir(), 'pgt-bake-'));
 const target = path.join(work, 'section.json');
 const cli = (args) => spawnSync(process.execPath, [path.join(root, 'tools/earth/bake_section.js')].concat(args), { encoding: 'utf8' });

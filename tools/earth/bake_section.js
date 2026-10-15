@@ -166,14 +166,14 @@ function bake(options) {
 		provenanceFor(pack, options.preset, options.built, options.commit), licenseFor(pack));
 	const invalid = SP.validate(result.pack) || SP.verify(result.pack);
 	if (invalid) throw new RangeError('the baked pack does not validate: ' + invalid);
-	return { result: result, pack: pack, grid: grid, state: state };
+	return { result: result, pack: pack, grid: grid, state: state, text: SP.encode(result.pack) };
 }
 
 // The release-record line: one line a handoff can quote verbatim.
 function summaryLine(options, baked) {
 	const result = baked.result;
 	return 'pgt-slice-pack v2 ' + options.start + ' L' + options.level + ' seed ' + options.seed
-		+ ' t 0 Myr ' + result.runs.n + ' runs ' + Buffer.byteLength(SP.encode(result.pack)) + ' B\n'
+		+ ' t 0 Myr ' + result.runs.n + ' runs ' + Buffer.byteLength(baked.text) + ' B\n'
 		+ 'path ' + result.pathChecksum + ' pack ' + result.checksum;
 }
 
@@ -188,7 +188,7 @@ function reportFor(options, baked, ms) {
 		source: { pack: source.pack, epochMa: source.epochMa, tMyr: source.tMyr, rotModel: source.rotModel,
 			level: source.level, gridSeed: source.gridSeed, simSeed: source.simSeed,
 			license: result.pack.license, attribution: baked.pack.source },
-		output: { runs: result.runs.n, bytes: Buffer.byteLength(SP.encode(result.pack)), ms: ms },
+		output: { runs: result.runs.n, bytes: Buffer.byteLength(baked.text), ms: ms },
 		identity: { pathChecksum: result.pathChecksum, checksum: result.checksum },
 		validation: { validate: SP.validate(result.pack), verify: SP.verify(result.pack) }
 	};
@@ -196,19 +196,17 @@ function reportFor(options, baked, ms) {
 
 function writeOutput(options, baked, ms) {
 	const target = path.resolve(options.out);
-	if (path.dirname(target) === path.join(root, 'js/data'))
+	if (target.startsWith(path.join(root, 'js/data') + path.sep))
 		throw new RangeError('refusing to write into js/data/; use an ignored out/ or a chosen directory');
 	if (fs.existsSync(target) && fs.statSync(target).size > 0 && !options.force)
 		throw new RangeError(target + ' is not empty; pass --force to overwrite it');
-	const text = SP.encode(baked.result.pack);
 	fs.mkdirSync(path.dirname(target), { recursive: true });
-	fs.writeFileSync(target, text);
+	fs.writeFileSync(target, baked.text);
 	if (options.report) {
 		const reportTarget = path.resolve(options.report);
 		fs.mkdirSync(path.dirname(reportTarget), { recursive: true });
 		fs.writeFileSync(reportTarget, JSON.stringify(reportFor(options, baked, ms), null, 1) + '\n');
 	}
-	return text;
 }
 
 function main(argv) {

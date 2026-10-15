@@ -1363,7 +1363,12 @@
 		var start = startInput.value;
 		if (!isEarthStart(start)) return { pack: 'procedural-' + start, epochMa: 0, rotModel: 'procedural', built: '' };
 		var pk = Earth.pick(grid.level, start);
-		return { pack: pk ? pk.name : 'earth', epochMa: pk ? pk.epoch : 0, rotModel: 'PALEOMAP', built: '' };
+		// The preset decides whether the pack's poles are held at all: realistic keeps them
+		// (and steers an epoch pack that carries model codes), game hands the rotations to
+		// the procedural mantle, so naming both 'PALEOMAP' would overclaim - the same rule
+		// tools/earth/bake_section.js applies.
+		return { pack: pk ? pk.name : 'earth', epochMa: pk ? pk.epoch : 0,
+			rotModel: presetInput.value === 'realistic' ? 'PALEOMAP' : 'procedural', built: '' };
 	}
 	function sectionLicense() {
 		var start = startInput.value;

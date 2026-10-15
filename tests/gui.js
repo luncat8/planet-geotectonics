@@ -2013,6 +2013,24 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(gpuPack.n >= 2, true, 'the GPU pack carries its runs');
 	}
 
+	// An Earth start names its own pack and epoch, and the preset decides whether the
+	// rotation model is claimed: game hands the rotations to the procedural mantle.
+	for (const [preset, model] of [['game', 'procedural'], ['realistic', 'PALEOMAP']]) {
+		const ePage = loadPage('?start=earth&preset=' + preset);
+		const eEl = ePage.el, eMap = eEl('map');
+		eEl('section-toggle').checked = true;
+		eEl('section-toggle').dispatch('change');
+		eMap.dispatch('click', { clientX: 200, clientY: 260, currentTarget: eMap });
+		eMap.dispatch('click', { clientX: 760, clientY: 190, currentTarget: eMap });
+		eEl('section-copy').click();
+		await ePage.tick();
+		const earthPack = globalThis.SlicePack.decode(ePage.api.document.copied[ePage.api.document.copied.length - 1]);
+		assert.equal(earthPack.source.pack, 'earth', preset + ': the resolved Earth pack is named');
+		assert.equal(earthPack.source.epochMa, 0, preset + ': the modern pack has no input epoch');
+		assert.equal(earthPack.source.rotModel, model, preset + ': the preset decides the rotation model');
+		assert.ok(earthPack.license.indexOf('Earth start earth · ') === 0, preset + ': the license carries the attribution');
+	}
+
 console.log('PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh on a running CPU world'
 		+ ' (Keep carries the clock and crust, a failed transfer keeps the old world), badge, cell line, copy header, device reuse,'
 		+ ' in-flight transfer waited for), load follows the blob\'s level, the strip holds '
@@ -2042,5 +2060,6 @@ console.log('PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh o
 		+ ' one validated pack (clipboard refusal falls back to manual text), the 3D view'
 		+ ' deactivates the tool with the reason, a level rebuild keeps the line and recaptures'
 		+ ' the world, and a GPU capture drains a fresh mirror while an overtaken capture'
-		+ ' never writes');
+		+ ' never writes, and an Earth start names its pack, its epoch and the rotation model'
+		+ ' its preset actually claims');
 })().catch((error) => { console.error(error); process.exit(1); });
