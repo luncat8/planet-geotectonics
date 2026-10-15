@@ -1,0 +1,70 @@
+{
+	"climateRevision": "5d6d5fb9c37033efa05e1021c9fedb5a73a72c7f",
+	"climateGridDirty": false,
+	"climateGridSha256": "7187bf51ec2254ca985f2e1c6db0109ac342a6b8067b89dc9ec668d5b1958a20",
+	"seed": 12345,
+	"angleToleranceRad": 0.000001,
+	"rows": [
+		{
+			"level": 3,
+			"V": 642,
+			"W": 256,
+			"H": 3,
+			"maxAngleRad": 2.78048387540226e-8,
+			"maxDistanceM": 0.17714462770187797,
+			"maxCell": 189,
+			"ringMismatches": 0,
+			"lookupMismatches": 0,
+			"pass": true
+		},
+		{
+			"level": 4,
+			"V": 2562,
+			"W": 256,
+			"H": 11,
+			"maxAngleRad": 4.1335023640508166e-8,
+			"maxDistanceM": 0.2633454356136775,
+			"maxCell": 791,
+			"ringMismatches": 0,
+			"lookupMismatches": 0,
+			"pass": true
+		},
+		{
+			"level": 5,
+			"V": 10242,
+			"W": 256,
+			"H": 41,
+			"maxAngleRad": 4.1335023640508166e-8,
+			"maxDistanceM": 0.2633454356136775,
+			"maxCell": 791,
+			"ringMismatches": 0,
+			"lookupMismatches": 0,
+			"pass": true
+		},
+		{
+			"level": 6,
+			"V": 40962,
+			"W": 256,
+			"H": 161,
+			"maxAngleRad": 4.3238191847565113e-8,
+			"maxDistanceM": 0.27547052026083735,
+			"maxCell": 11747,
+			"ringMismatches": 0,
+			"lookupMismatches": 0,
+			"pass": true
+		},
+		{
+			"level": 7,
+			"V": 163842,
+			"W": 256,
+			"H": 641,
+			"maxAngleRad": 4.603964578412326e-8,
+			"maxDistanceM": 0.29331858329064925,
+			"maxCell": 45855,
+			"ringMismatches": 0,
+			"lookupMismatches": 0,
+			"pass": true
+		}
+	],
+	"pass": true
+}

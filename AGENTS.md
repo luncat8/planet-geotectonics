@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 43 kernel, protocol, rig and GUI tests, ~3 min here
+node tests/run-all.js		short profile (default): 44 kernel, protocol, rig and GUI tests, ~3 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
@@ -141,6 +141,9 @@ ratio, high-detail surface appearance, controlled visual fixtures and owner-GPU 
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as
 artifacts for a fork or reimplementation; archive/ also holds per-session reports, logs and prompts.
 experiments/ - measurement scripts (node), not loaded by the page.
+experiments/grid-compat.js - offline climate-checkout grid audit; explicit checkout path,
+	JSON stdout, no runtime dependency. archive/0.9.0-grid-audit-report.md records measured
+	L3–L7 correspondence and limits; tests/grid-compat.js is the standalone local regression.
 experiments/logs/ - keep useful; run_full_test.py / run_gpu_parity.py write their logs here
 out/ - git-ignored scratch for generated artifacts (0.8.2 section bakes and anything else
 	derived). A reviewed example is committed under data/sections/ with its provenance in
