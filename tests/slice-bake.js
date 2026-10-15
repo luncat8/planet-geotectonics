@@ -8,8 +8,10 @@
 //      the pack's own license, with tMyr = 0 and zero potentials as the honest t=0 state;
 //   4. the CLI refuses every malformed invocation and every refused run leaves no output,
 //      never a misleading success;
-//   5. a generated real pack survives the shared strict reader and refuses a single-byte edit.
-const { assert, Grid, State, Sim } = require('./helpers.js');
+//   5. a generated real pack survives the shared strict reader and refuses a single-byte edit;
+//   6. the committed examples in data/sections/ are what the current writer produces for the
+//      arguments each pack itself records.
+const { assert, Grid, State } = require('./helpers.js');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -17,7 +19,6 @@ const { spawnSync } = require('node:child_process');
 const Earth = require('../js/earth.js');
 const Slice = require('../js/slice.js');
 const SP = require('../port/slice-format.js');
-const Resolution = require('../js/resolution.js');
 const bakeSection = require('../tools/earth/bake_section.js');
 
 const root = path.join(__dirname, '..');
@@ -54,7 +55,6 @@ assert.equal(pack.version, SP.VERSION, 'the bake writes the current contract');
 assert.equal(baked.result.checksum, pack.checksum, 'the reported identity is the pack\'s own');
 assert.equal(baked.result.pathChecksum, SP.pathChecksum(pack.path), 'the reported path identity is derived, not stamped');
 const encoded = SP.encode(pack);
-const text = encoded;
 assert.equal(SP.decode(encoded).checksum, pack.checksum, 'the encoded bake survives the strict reader');
 checkWalk(baked.grid, baked.result.runs, 'baked equator');
 assert.ok(pack.source.tMyr === 0, 'a bake is a fresh world at its start');
@@ -62,11 +62,11 @@ assert.ok(pack.source.tMyr === 0, 'a bake is a fresh world at its start');
 // One byte anywhere in the payload is refused, so a baked pack is a real checksummed
 // artifact. `source.built` is deliberately outside the checksum (it is provenance, and the
 // codec excludes it so a re-stamp cannot change an identity), so the offsets are payload.
-const offsets = [text.indexOf('"plates":[') + 12, text.indexOf('"sKm":[') + 10,
-	text.indexOf('"license":"') + 12, text.length - 40];
+const offsets = [encoded.indexOf('"plates":[') + 12, encoded.indexOf('"sKm":[') + 10,
+	encoded.indexOf('"license":"') + 12, encoded.length - 40];
 for (const at of offsets) {
-	assert.ok(at > 0 && at < text.length, 'a payload offset was found');
-	const broken = text.slice(0, at) + (text[at] === '7' ? '8' : '7') + text.slice(at + 1);
+	assert.ok(at > 0 && at < encoded.length, 'a payload offset was found');
+	const broken = encoded.slice(0, at) + (encoded[at] === '7' ? '8' : '7') + encoded.slice(at + 1);
 	assert.throws(() => SP.decode(broken), /checksum|version|field|range|NaN|missing/i,
 		'a one-byte edit of a baked pack is refused at offset ' + at);
 }
