@@ -100,7 +100,7 @@ contract, thresholds, module map and staging. the increments:
 0.8.0-plan-slice-exchange-foundation.md - coordinated `pgt-slice-pack` v2 contract, checksum /
 	validation repair, byte-identical port manifest and counterpart handoff; no live link.
 0.8.0-review.md - globe-side v2 implementation review: exact artifact identities, raw-before-type
-	validation decisions and tests; counterpart v1 cutover/fixture reconstruction still gates completion.
+	validation decisions and tests; its counterpart cutover gate is closed (see the audit below).
 0.8.1-plan-slice-cutter.md - globe-owned two-click great-circle cutter, pure cell-run writer,
 	map overlay, CPU/GPU snapshot discipline and manual Copy/Save transport.
 0.8.2-plan-slice-bake.md - deterministic Node Earth-start section bakes through the real Earth
@@ -113,9 +113,15 @@ contract, thresholds, module map and staging. the increments:
 	reproduces byte-for-byte.
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
+archive/0.8.3-counterpart-audit-and-gate-status.md - audit of the slice's 0.4.2 Phase B-b bundle
+	restore (their `653f123`): shared `port/` bytes still identical, all three bundles re-baked here
+	byte-for-byte against `archive/0.8.2-report.md` §4, the two schema notes they returned answered
+	(no port bump), and the Phase C gate table - what is open, on which side, and why the globe's
+	0.8.3 is complete as planning and is not the block.
 0.8.0-slice-agent-prompt.md - standing handoff prompt for the planet-tectonics-2d-slice agent:
 	verified globe facts, the slice repo's stale inventory, parallel preparation, the coordinated
-	phase B v2 artifact cutover and the report format; paste as-is.
+	phase B v2 artifact cutover and the report format; paste as-is. Its Phase A and B (B-a cutover,
+	B-b bundle restore) are landed on that side as of their `653f123`; Phase C is not started.
 0.9.0-plan-climate-integration.md - the planet-climate integration plan: comparison verdict and
 	borrow lists, the two-clock design (geological Myr vs climate days/kyr), the field seam both
 	directions, project structure, the file:// multithreading verdict, staged increments and the
