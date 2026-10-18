@@ -78,6 +78,11 @@
 					<button id="section-save" disabled title="Download the validated pgt-slice-pack v2 JSON for the current section">Save pack</button>
 					<small id="section-status" class="section-status" role="status" aria-live="polite">No section. Enable the tool, then click an origin and a second point on the 2D map.</small>
 					<textarea id="section-manual" class="section-manual" hidden readonly aria-label="Section pack JSON, selectable for manual copy"></textarea>
+					<label for="core-log-file">Import section observation <input id="core-log-file" type="file" accept=".json,application/json"></label>
+					<textarea id="core-log-text" class="section-manual" rows="4" aria-label="Paste pgt-core-log v2 JSON" placeholder="Paste pgt-core-log v2 JSON here"></textarea>
+					<button id="core-log-import" type="button">Import pasted log</button>
+					<small id="core-log-status" role="status" aria-live="polite">Import validates against the current section export; stale logs require confirmation.</small>
+					<pre id="core-log-panel" aria-live="polite">No imported section observations.</pre>
 				</fieldset>
 			</section>
 			<section class="notes"><div><h2>07 / CPU release</h2><p>The calibrated CPU path runs the complete L5 history with no build step. Choose a hot start and “Run to target” for the 4.5 Gyr stability history; the run uses the same deterministic frame kernels, checkpoints and layer renderer as interactive play.</p><p class="muted">Every million years the plate table is rebuilt: dead columns compact, quiet boundaries suture, and a damaged corridor pulled open by the mantle becomes a new plate. Six saturating potentials preserve the metallogenic record at ridges, plumes, arcs, collision belts and sediment basins. Static edge coefficients and bounded-vector kernels leave more of the frame budget for that coupled crust cycle, while the performance strip reports every kernel twice a second. L5 is the calibrated CPU resolution; L6 (40,962 cells) and L7 (163,842 cells) are the WebGPU path, and the Resolution select rebuilds the world at whichever level you pick.</p></div><div class="inspectors"><div><h2>Column inspector</h2><label class="check"><input id="follow" type="checkbox" checked>Info follows pointer</label><p id="probe">Click the map to inspect a column.</p></div><div><h2>Prospecting report</h2><pre id="prospect" aria-live="polite">Select an instrument, then click one map cell to survey it. Hover only updates the column inspector; it never adds survey coverage.</pre><div class="ledger-tools"><label for="ledger-sort">Discovery ledger · sort<select id="ledger-sort"><option value="found" selected>found order</option><option value="size">size</option><option value="contained">contained metal</option><option value="depth">top depth</option><option value="confidence">confidence</option><option value="kind">kind</option></select></label><button id="ledger-sort-dir" title="Toggle the sort direction">↓ low first</button><small id="ledger-count">0 found</small></div><div id="ledger-list" class="ledger-list" hidden></div></div></div></section>
@@ -136,7 +141,9 @@
 	<script src="js/render.js"></script>
 	<script src="js/resolution.js"></script>
 	<script src="port/slice-format.js"></script>
+	<script src="port/core-log-format.js"></script>
 	<script src="js/slice.js"></script>
+	<script src="js/core-log.js"></script>
 	<script src="js/ui.js"></script>
 </body>
 </html>

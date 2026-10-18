@@ -69,6 +69,9 @@
 	var sliceToggle = document.getElementById('section-toggle'), sliceClear = document.getElementById('section-clear');
 	var sliceCopy = document.getElementById('section-copy'), sliceSave = document.getElementById('section-save');
 	var sliceStatus = document.getElementById('section-status'), sliceManual = document.getElementById('section-manual');
+	var coreLogFile = document.getElementById('core-log-file'), coreLogText = document.getElementById('core-log-text');
+	var coreLogImport = document.getElementById('core-log-import'), coreLogStatus = document.getElementById('core-log-status');
+	var coreLogPanel = document.getElementById('core-log-panel'), coreLogTable = CoreLog.createTable();
 	var section = { active: false, a: null, b: null, path: null, result: null, serial: 0,
 		generation: 0, exporting: false, dirs: null, dirsN: 0, dirsGen: -1 };
 	var sliceDirty = true;
@@ -1410,6 +1413,60 @@
 			text += ' · export disabled: the Reconstruct scrub holds a display pose; release it first';
 		sliceStatus.textContent = text;
 	}
+	function coreLogContextStaleReason() {
+		if (!section.result || !section.result.pack) return '';
+		var pack = section.result.pack;
+		if (state && state.t !== pack.source.tMyr) return 'world time changed after the selected export';
+		var seaChanged = waterActive !== pack.sea.mode
+			|| waterActive === 'level' && (Params.sea !== pack.sea.levelM || Params.seaVolScale !== pack.sea.volScale)
+			|| waterActive === 'volume' && (+seaVolInput.value !== pack.sea.volScale
+				|| !!waterData && waterData.level !== pack.sea.levelM || waterDirty);
+		return seaChanged ? 'sea assumptions changed after the selected export' : '';
+	}
+	function selectedCoreLogArtifact() {
+		return section.result && section.result.pack ? CoreLog.artifact(section.result.pack) : null;
+	}
+	function paintCoreLogObservations() {
+		if (!coreLogPanel) return;
+		var current = selectedCoreLogArtifact(), contextStale = coreLogContextStaleReason();
+		var lines = [];
+		for (var i = 0; i < coreLogTable.order.length; i++) {
+			var entry = coreLogTable.entries[coreLogTable.order[i]];
+			lines.push(CoreLog.display(entry, current, contextStale));
+		}
+		coreLogPanel.textContent = lines.join('\n\n') || 'No imported section observations.';
+	}
+	function importCoreLogText(text) {
+		if (!section.result || !section.result.pack) {
+			coreLogStatus.textContent = 'Build a current section export before importing an observation.';
+			return;
+		}
+		var contextStale = coreLogContextStaleReason();
+		if (contextStale) {
+			coreLogStatus.textContent = 'The selected section export is stale (' + contextStale + '); capture a fresh export before filing.';
+			return;
+		}
+		var current = selectedCoreLogArtifact(), result;
+		try {
+			result = CoreLog.importText(coreLogTable, text, current);
+			if (result.status === 'confirmation-required') {
+				if (!window.confirm('This log has the same path but a different full source pack. Archive it as stale? It will never be shown as current.')) {
+					coreLogStatus.textContent = 'Stale observation not imported.';
+					return;
+				}
+				result = CoreLog.importText(coreLogTable, text, current, { confirmStale: true });
+			}
+			if (!result.committed) {
+				coreLogStatus.textContent = 'Observation refused: ' + result.reason;
+				return;
+			}
+			coreLogStatus.textContent = 'Filed ' + result.status + ' pgt-core-log v2 · '
+				+ result.entry.records.length + ' records · ' + result.entry.sourceMetadata.checksum;
+			paintCoreLogObservations();
+		} catch (error) {
+			coreLogStatus.textContent = 'Observation refused; previous filings are unchanged: ' + error.message;
+		}
+	}
 	function paintSectionControls() {
 		var ready = !!section.path && !!section.result && !section.exporting && !reconLive;
 		sliceClear.disabled = !section.a && !section.path;
@@ -1417,6 +1474,7 @@
 		sliceSave.disabled = !ready;
 		sliceToggle.disabled = v3d.on;
 		paintSectionStatus();
+		paintCoreLogObservations();
 	}
 	function setSectionActive(on) {
 		if (on && v3d.on) on = false;
@@ -1680,6 +1738,21 @@
 	sliceClear.addEventListener('click', clearSection);
 	sliceCopy.addEventListener('click', function () { sectionTransport('copy'); });
 	sliceSave.addEventListener('click', function () { sectionTransport('save'); });
+	coreLogImport.addEventListener('click', function () { importCoreLogText(coreLogText.value); });
+	coreLogFile.addEventListener('change', function () {
+		var file = coreLogFile.files && coreLogFile.files[0];
+		if (!file) return;
+		if (typeof file.text === 'function') {
+			file.text().then(function (text) { coreLogText.value = text; importCoreLogText(text); }, function (error) {
+				coreLogStatus.textContent = 'Could not read the selected file: ' + error.message;
+			});
+		} else {
+			var reader = new FileReader();
+			reader.onload = function () { coreLogText.value = String(reader.result || ''); importCoreLogText(coreLogText.value); };
+			reader.onerror = function () { coreLogStatus.textContent = 'Could not read the selected file.'; };
+			reader.readAsText(file);
+		}
+	});
 	paintSectionControls();
 	paintSliceOverlay();
 
@@ -2395,6 +2468,7 @@
 			time.textContent = state.t.toFixed(1) + ' Myr';
 			status.textContent = (state.meanSpeed / 10000).toFixed(2) + ' cm/yr · Tm ' + state.Tm.toFixed(2)
 				+ ' · ' + state.plateCount + ' plates · ' + state.splits + '↔ ' + state.merges + '⇄';
+			paintCoreLogObservations();
 			lastUpdate = now;
 		}
 		requestAnimationFrame(frame);

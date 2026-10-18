@@ -8,7 +8,9 @@ for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'sta
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../port/slice-format.js'), 'utf8'), context, { filename: 'slice-format' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../port/core-log-format.js'), 'utf8'), context, { filename: 'core-log-format' });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/slice.js'), 'utf8'), context, { filename: 'slice' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/core-log.js'), 'utf8'), context, { filename: 'core-log' });
 vm.runInContext(`
 var state = new State(new Grid(2, 7).build(), 7);
 Sim.raster(state);

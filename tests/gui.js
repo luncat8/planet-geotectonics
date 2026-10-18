@@ -144,17 +144,23 @@ assert.ok(/position: absolute/.test(markerCss) && /pointer-events: none/.test(ma
 // a status line, and an overlay canvas that stays visual-only like the markers.
 assert.match(indexHtml, /id="section-toggle" type="checkbox">Cut section/,
 	'the section tool is a clearly labelled map-tool toggle');
-for (const id of ['section-clear', 'section-copy', 'section-save', 'section-status', 'section-manual'])
+for (const id of ['section-clear', 'section-copy', 'section-save', 'section-status', 'section-manual',
+	'core-log-file', 'core-log-text', 'core-log-import', 'core-log-status', 'core-log-panel'])
 	assert.ok(new RegExp('id="' + id + '"').test(indexHtml), 'index.html has #' + id);
 assert.match(indexHtml, /id="slice-overlay" hidden/, 'the section overlay ships hidden');
 const sliceCss = rule('#slice-overlay');
 assert.ok(/position: absolute/.test(sliceCss) && /pointer-events: none/.test(sliceCss) && /z-index: 3/.test(sliceCss),
 	'the section overlay tracks the map above the markers without stealing clicks');
-assert.ok(/src="port\/slice-format\.js"/.test(indexHtml) && /src="js\/slice\.js"/.test(indexHtml)
+assert.equal((indexHtml.match(/src="port\/core-log-format\.js"/g) || []).length, 1,
+	'the shared core-log codec is loaded once');
+assert.ok(/src="port\/slice-format\.js"/.test(indexHtml) && /src="port\/core-log-format\.js"/.test(indexHtml)
+	&& /src="js\/slice\.js"/.test(indexHtml) && /src="js\/core-log\.js"/.test(indexHtml)
 	&& indexHtml.indexOf('js/resolution.js') < indexHtml.indexOf('port/slice-format.js')
-	&& indexHtml.indexOf('port/slice-format.js') < indexHtml.indexOf('js/slice.js')
-	&& indexHtml.indexOf('js/slice.js') < indexHtml.indexOf('js/ui.js'),
-	'the shared codec and the cutter load after resolution.js and before ui.js');
+	&& indexHtml.indexOf('port/slice-format.js') < indexHtml.indexOf('port/core-log-format.js')
+	&& indexHtml.indexOf('port/core-log-format.js') < indexHtml.indexOf('js/slice.js')
+	&& indexHtml.indexOf('js/slice.js') < indexHtml.indexOf('js/core-log.js')
+	&& indexHtml.indexOf('js/core-log.js') < indexHtml.indexOf('js/ui.js'),
+	'both shared codecs load after resolution.js and before their consumers and ui.js');
 assert.deepEqual(options(indexHtml, 'ledger-sort'), ['found', 'size', 'contained', 'depth', 'confidence', 'kind'],
 	'the discovery list sorts over the six readable keys of the ledger');
 assert.match(indexHtml, /id="ledger-list" class="ledger-list" hidden/, 'the discovery list ships empty and hidden');
@@ -190,13 +196,13 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 // loads before plates.js because Plates.steer resolves Rotations at load time (0.4.6c).
 // The shared codec (port/slice-format.js) loads before js/slice.js, which resolves
 // SlicePack, Diag, Params and Resolution as page globals (0.8.1).
-const PORTS = ['slice-format'];
+const PORTS = ['slice-format', 'core-log-format'];
 const MODULES = ['env', 'geodesics', 'heightfield', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'resolution', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
-	'data/plate-crosswalk', 'earth', 'render', 'slice'];
+	'data/plate-crosswalk', 'earth', 'render', 'slice', 'core-log'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const SP = require('../port/slice-format.js');
+const CF = require('../port/core-log-format.js');
 
 const root = path.join(__dirname, '..');
 const manifestPath = path.join(root, 'port/PORT.json');
@@ -19,7 +20,8 @@ assert.equal(manifest.contract, 'pgt-slice-pack-v2');
 assert.deepEqual(manifest.repositories.map(function (entry) { return entry.role; }),
 	['globe-writer', 'section-reader']);
 assert.deepEqual(manifest.files.map(function (entry) { return entry.path; }),
-	['port/slice-format.js', 'port/fixtures/slice-pack-v2.json']);
+	['port/slice-format.js', 'port/fixtures/slice-pack-v2.json',
+		'port/core-log-format.js', 'port/fixtures/core-log-v2.json']);
 assert.ok(!manifest.files.some(function (entry) { return /deposit-(models|economics)/.test(entry.path); }),
 	'stale deposit models are not part of the v2 port');
 
@@ -50,4 +52,15 @@ assert.equal(classic.encode(classicPack), fixtureText);
 assert.equal(nodePack.checksum, '2d3941bda088d8d2');
 assert.equal(SP.pathChecksum(nodePack.path), 'cc5cd21d5ddc5712');
 
-console.log('PASS port: manifest hashes, one-byte drift gate and Node/classic v2 fixture parity');
+const coreText = fs.readFileSync(path.join(root, 'port/fixtures/core-log-v2.json'), 'utf8');
+const core = CF.parse(coreText);
+assert.equal(CF.encode(CF.parse(coreText)), coreText.replace(/\n$/, ''), 'core-log fixture has one canonical spelling');
+assert.equal(core.pathChecksum, SP.pathChecksum(nodePack.path), 'core-log fixture path locks to pack fixture');
+assert.equal(core.packChecksum, nodePack.checksum, 'core-log fixture pack locks to pack fixture');
+assert.equal(core.checksum, '42bb102c7e2e5af5');
+assert.equal(CF.identity(core, { pathChecksum: core.pathChecksum, packChecksum: core.packChecksum, arcKm: core.arcKm }).status, 'current');
+const coreSource = fs.readFileSync(path.join(root, 'port/core-log-format.js'), 'utf8');
+vm.runInContext(coreSource, context, { filename: 'port/core-log-format.js' });
+assert.equal(context.CoreLogFormat.encode(context.CoreLogFormat.parse(coreText)), CF.encode(core));
+
+console.log('PASS port: four-file manifest hashes, fixture lock and Node/classic codec parity');

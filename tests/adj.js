@@ -267,8 +267,8 @@ const world = (level, seed) => {
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
 	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
 	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'render',
-	'resolution', 'slice'];
-const PORTS = ['slice-format'];
+	'resolution', 'slice', 'core-log'];
+const PORTS = ['slice-format', 'core-log-format'];
 const indexHtml = read('index.html');
 function loadPage(search) {
 	const api = makeDom(indexHtml);

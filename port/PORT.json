@@ -26,6 +26,16 @@
 			"path": "port/fixtures/slice-pack-v2.json",
 			"sha256": "ca5e92d72611efad4121f1e1f2816f2b728b3c7ca9f2135d65533ebc1a5bd907",
 			"what": "hand-auditable v2 contract fixture: two live plates, all boundary kinds, fractional sea level, one gap and six potentials"
+		},
+		{
+			"path": "port/core-log-format.js",
+			"sha256": "5b40383ef9789b989b65f906ae916e422490965a6c338b6e7ce67a19163b409a",
+			"what": "byte-identical pgt-core-log v2 schema, canonical checksum, validation and identity law"
+		},
+		{
+			"path": "port/fixtures/core-log-v2.json",
+			"sha256": "56fb124b83eb8e7c062fdd5917186672c49c899160966745abe6196edb2c192b",
+			"what": "valid v2 observation fixture locked to the slice-pack fixture identities"
 		}
 	]
 }
