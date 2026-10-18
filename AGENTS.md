@@ -111,6 +111,7 @@ contract, thresholds, module map and staging. the increments:
 	the commands, the identities and the corpus table; data/sections/ holds the two reviewed
 	example packs (generated, provenance in data/sections/SOURCES.md) that tests/slice-bake.js
 	reproduces byte-for-byte.
+0.8.4-answer.md - mirrored decision: globe-side answer to slice 0.4.4 C-return/C-live proposal (P1–P7, all accept; P4 explicit yes to positional beds), schedule and return package. archive/0.8.4-worklog.md is the backing worklog.
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
 archive/0.8.3-counterpart-audit-and-gate-status.md - audit of the slice's 0.4.2 Phase B-b bundle
