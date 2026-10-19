@@ -112,6 +112,7 @@ contract, thresholds, module map and staging. the increments:
 	example packs (generated, provenance in data/sections/SOURCES.md) that tests/slice-bake.js
 	reproduces byte-for-byte.
 0.8.4-answer.md - mirrored decision: globe-side answer to slice 0.4.4 C-return/C-live proposal (P1–P7, all accept; P4 explicit yes to positional beds), schedule and return package. archive/0.8.4-worklog.md is the backing worklog.
+0.8.5-answer.md - globe-side section adapter: answer to slice 0.9.0 M3 adapter request. Schedules 0.8.5 A0–A4 (manifest metadata repair, slice contract amendments, mounting rehearsal, selected-cut delivery + cut-plane overlay, automated observation ack); the live coupling/clock rung stays gated behind 0.8.4 M3–M5 pair evidence and gate 7. archive/0.8.5-worklog.md is the backing worklog.
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
 archive/0.8.3-counterpart-audit-and-gate-status.md - audit of the slice's 0.4.2 Phase B-b bundle
