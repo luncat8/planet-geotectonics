@@ -6,7 +6,9 @@ planetary tectonics simulator in development. no-build, offline.
 
 ## Run
 
-Open `index.html` directly in a browser.
+Open `index.html` directly in a browser. The globe needs no install or server. To open the
+optional hosted weather panel, keep `planet-climate` as a sibling checkout (the default is
+`../planet-climate/planet/`; `?climate=<base>` overrides it). All scripts remain local.
 
 ## Current implementation: Phase G CPU release
 
@@ -64,6 +66,15 @@ Open `index.html` directly in a browser.
   leaves the globe running; dispose is stop + mount removal, and a reopen restarts cleanly. No
   live rung is open - clipboard/file remain the contract until the 0.8.4 pair gates are decided;
   see `0.8.4-answer.md`, `0.8.5-answer.md` and `archive/0.8.5-report.md`.
+- Hosted weather (0.9.1): **Open climate** lazy-loads the sibling `planet-climate` engine into an
+  isolated iframe, so neither repository's classic-script `Grid` can replace the other's. The
+  geological Myr clock and weather day clock pause independently; the visible parent pumps one
+  bounded climate frame at a time even while the iframe is below the fold. Open and **Refresh
+  surface** are the only globe-to-climate transfers: direction-mapped elevation, coastline and
+  effective sea level are held until the next explicit refresh. Uncovered `state.z = NaN` cells
+  become ocean at climate's named `depthMax`; no weather field forces crust physics in this stage.
+  **Save world / session** writes a `.pgts` containing the untouched binary checkpoint, the eight
+  climate state textures and clocks, and that held surface. Plain `.pgt` files still load and save.
 - Metallogeny: six saturating potentials per column (VMS, mafic, arc, orogenic, basin, placer)
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;

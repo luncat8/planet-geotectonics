@@ -1,0 +1,12 @@
+{
+	"climateRevision": "5d6d5fb9c37033efa05e1021c9fedb5a73a72c7f",
+	"level": 3,
+	"cells": 642,
+	"mappedLandCells": 154,
+	"mappedGapCells": 15,
+	"textureUploads": 2,
+	"sessionBytes": 3188083,
+	"paddedTextureLength": 3072,
+	"checks": "real climate Grid/defaultParams/state codec + real globe State/Checkpoint; no WebGL",
+	"pass": true
+}

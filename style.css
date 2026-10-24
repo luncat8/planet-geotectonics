@@ -97,6 +97,18 @@ canvas:active { cursor: grabbing; }
 .host-status { display: block; margin: 6px 0; color: #aab9bd; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .host-limit { display: block; margin: 0 0 6px; color: #788c99; font-size: 10px; }
 .host-shell { overflow-x: auto; }
+/* Two-clock climate host (0.9.1): the iframe is a local document, not a network embed. Its
+   canvas keeps the globe map's 2:1 equirectangular shape and the status owns the wrapping. */
+#climate-tools { flex: 1 1 100%; }
+#climate-time { color: #86c5df; }
+.climate-panel { padding: 10px 0; border-bottom: 1px solid #2b3540; }
+.climate-panel[hidden] { display: none; }
+.climate-top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+.climate-top span { color: #aab9bd; font-size: 11px; }
+.climate-status { display: block; margin: 6px 0; color: #aab9bd; font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.climate-limit { display: block; margin: 0 0 8px; color: #788c99; font-size: 10px; line-height: 1.5; }
+#climate-frame { display: block; width: min(100%, 120vh); aspect-ratio: 2 / 1; margin-inline: auto;
+	border: 0; background: #04070f; }
 .inspectors { display: grid; gap: 12px; min-width: 0; }
 .inspectors > div { min-width: 0; }
 #prospect { width: 100%; max-width: 100%; margin: 10px 0 0; padding: 10px; max-height: 24em; overflow: auto; border: 1px solid #2b3540; border-radius: 6px;

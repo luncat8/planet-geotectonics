@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const context = vm.createContext({ console, performance });
-for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
+for (const file of ['env', 'geodesics', 'params', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges', 'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'session', 'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'perf', 'clipboard', 'sim', 'render', 'gpu/render-gpu',
 'render3d', 'heightfield', 'gpu/d1diff', 'resolution']) {
 	vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/' + file + '.js'), 'utf8'), context, { filename: file });
 }
@@ -11,6 +11,7 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '../port/slice-format.js'),
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../port/core-log-format.js'), 'utf8'), context, { filename: 'core-log-format' });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/slice.js'), 'utf8'), context, { filename: 'slice' });
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/core-log.js'), 'utf8'), context, { filename: 'core-log' });
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/climate-host.js'), 'utf8'), context, { filename: 'climate-host' });
 vm.runInContext(`
 var state = new State(new Grid(2, 7).build(), 7);
 Sim.raster(state);

@@ -2083,3 +2083,21 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	hardcoded cross-repo load order is the contract, copy the guard behaviour too, and pin
 	the list against the counterpart's real page (columns.html script order) whenever their
 	checkout is reachable, so drift is a red rather than a runtime surprise.
+
+## an offscreen iframe cannot own its visible clock (0.9.1, 2026-10-24)
+
+	chromium can suspend requestAnimationFrame in a below-the-fold file:// iframe even while
+	the parent is visible. an engine's initial manual Planet.loop() then advances once and its
+	self-scheduled successor never runs, which looks like a broken resume flag. pump individual
+	frames from the parent's visible rAF over postMessage, allow only one request in flight,
+	and cancel the successor that Planet.loop() schedules after each manual call. pause remains
+	the child's own params.running; the parent supplies scheduling, not geological time.
+
+## NaN can be a domain marker, not a malformed elevation (0.9.1, 2026-10-24)
+
+	planet-geotectonics deliberately writes state.z = NaN for a temporarily uncovered cell.
+	a blanket Number.isFinite check therefore refuses healthy evolved surfaces on the first
+	manual refresh. preserve NaN through the binary surface packet, report the gap count,
+	and translate it at the consumer boundary to ocean using the climate engine's named
+	depthMax. continue rejecting infinities and wrong dtypes; do not turn the gap into land by
+	an accidental NaN < 0 comparison.

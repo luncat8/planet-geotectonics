@@ -1,0 +1,23 @@
+{
+	"pass": true,
+	"boot": "file:// + WebGL2, web security enabled",
+	"independentPauses": true,
+	"manualSurfaceTMyr": 3.600000000000002,
+	"saved": {
+		"bytes": 7355547,
+		"level": 5,
+		"t": 3.600000000000002,
+		"weatherSeconds": 1140,
+		"surfaceTMyr": 3.600000000000002,
+		"format": "pgt-climate-state"
+	},
+	"restored": {
+		"t": 3.6,
+		"weatherSeconds": 1140,
+		"running": false,
+		"state": "running",
+		"gridIsolated": true
+	},
+	"globeStepAfterClose": true,
+	"browserErrors": 0
+}

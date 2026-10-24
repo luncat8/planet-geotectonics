@@ -40,7 +40,7 @@ see 0.1.5-final-design.md.
 
 ## tests
 
-node tests/run-all.js		short profile (default): 47 kernel, protocol, rig and GUI tests, ~3 min here
+node tests/run-all.js		short profile (default): 51 kernel, protocol, rig and GUI tests, ~3 min here
 node tests/run-all.js --full	adds the four histories: kinematics, ores, alloc, longrun
 node tests/run-all.js --release	--full plus the 4.5 Gyr profile and the strict 60 fps proxy
 python3 -m unittest discover -s tests -p 'test_*.py'	Earth bake preflight (standard library)
@@ -135,6 +135,10 @@ archive/0.8.3-counterpart-audit-and-gate-status.md - audit of the slice's 0.4.2 
 	borrow lists, the two-clock design (geological Myr vs climate days/kyr), the field seam both
 	directions, project structure, the file:// multithreading verdict, staged increments and the
 	keep-compatible rules current work must obey; planning artifact, nothing in 0.8 waits on it.
+	The 0.9.1 host is in climate-host.html, js/climate-host.js (parent lifecycle and bounded
+	frame pump), js/climate-frame.js (isolated engine protocol), js/climate-surface.js
+	(direction-mapped held geometry) and js/session.js (PGTS v1 around the untouched PGT).
+	No climate-to-geology forcing is enabled; the parent page never loads counterpart scripts.
 0.5.0-draft-3d-render.md - draft: 3D planet render.
 0.5.0-plan-3d-render.md - the 3D render plan built on the draft (displaced icosphere, translucent
 water); s13's alternate heightmap-lattice mesh and its analytic normals are in (0.5.5):
@@ -159,6 +163,14 @@ experiments/ - measurement scripts (node), not loaded by the page.
 experiments/grid-compat.js - offline climate-checkout grid audit; explicit checkout path,
 	JSON stdout, no runtime dependency. archive/0.9.0-grid-audit-report.md records measured
 	L3–L7 correspondence and limits; tests/grid-compat.js is the standalone local regression.
+experiments/climate-rehearsal.js - offline 0.9.1 cross-check against an explicit climate
+	checkout: real counterpart Grid/defaultParams/state codec, real globe State/Checkpoint,
+	held gaps, PGTS and padded texture lengths. No WebGL claim; logs/climate-rehearsal.txt.
+experiments/climate-browser.js - optional real-browser file:// gate. PGT_CHROME names the
+	Chromium executable and PGT_PUPPETEER its puppeteer-core install (PGT_SHOT_DIR is optional).
+	Checks WebGL2 boot with web security on, offscreen weather progress, both independent
+	pauses, manual refresh, exact paused PGTS restore, global isolation and close/restart;
+	logs/climate-browser.txt. These are development tools, not page dependencies.
 experiments/host-rehearsal.js - the 0.8.5 A2–A4 rehearsal against the real slice tree
 	in node: argv checkout path (sibling default), SKIP without one. Runs the actual engine
 	bytes through js/section-host.js in a vm-context fake window (the slice's own

@@ -7,7 +7,7 @@
 	<link rel="stylesheet" href="style.css">
 </head>
 <body>
-	<header><div class="clock"><strong id="time">0.0 Myr</strong><span id="gaps">0.00 cm/yr</span></div><span class="badge" id="badge">CPU · L5</span><span id="grid-info">EQUIRECTANGULAR / 10,242 CELLS / 223 KM</span></header>
+	<header><div class="clock"><strong id="time">0.0 Myr</strong><span id="climate-time" hidden>weather off</span><span id="gaps">0.00 cm/yr</span></div><span class="badge" id="badge">CPU · L5</span><span id="grid-info">EQUIRECTANGULAR / 10,242 CELLS / 223 KM</span></header>
 	<main>
 		<section class="map-panel" aria-label="Planet map">
 			<div class="map-top">
@@ -22,6 +22,12 @@
 				<canvas id="slice-overlay" hidden aria-label="Great-circle section overlay"></canvas>
 			</div>
 			<div class="perf" id="perf"><div class="rows" id="perf-rows" role="button" tabindex="0" aria-label="Copy performance report" title="Click to copy the performance report"><span>performance counter idle</span></div></div>
+		</section>
+		<section id="climate-panel" class="climate-panel" aria-label="Hosted climate" hidden>
+			<div class="climate-top"><strong>Weather · planet-climate</strong><span>One geological clock, one weather clock; either can pause alone.</span></div>
+			<small id="climate-status" class="climate-status" role="status" aria-live="polite">Closed. Open climate to run weather independently on a held globe surface.</small>
+			<small class="climate-limit">Offline library host · surface elevation, coast and effective sea level are direction-mapped at Open and Refresh only. No climate-to-geology forcing is enabled in 0.9.1. Save world / session writes a .pgts with both sub-states and the held surface.</small>
+			<iframe id="climate-frame" title="Hosted planet-climate weather map" src="about:blank"></iframe>
 		</section>
 		<section class="controls" aria-label="Simulation controls">
 			<button id="play" class="primary" aria-pressed="false">Play</button><button id="step">Step</button>
@@ -40,7 +46,13 @@
 				<label title="Volume: conserved water as a multiple of the sea-0 volume; the level is solved">Water ×<input id="sea-vol" type="range" min="0" max="4" step="0.05" value="1"><span class="value" id="sea-vol-value">1.00×</span></label>
 				<label title="3D: vertical exaggeration of the relief">Displacement ×<input id="disp" type="range" min="1" max="40" step="0.5" value="10"><span class="value" id="disp-value">10.0×</span></label>
 				<label title="3D: mesh - the icosphere (even facets, no pole rows) or the equirectangular lattice (even texels, pole rows)">Mesh<select id="mesh3d"><option value="ico" selected>Icosphere</option><option value="grid">Heightmap</option></select></label><label title="3D: mesh detail; the mesh is level-independent and rebuilds once on change">3D detail<select id="k3d"><option value="k6">k6 · 41k vertices</option><option value="k7">k7 · 164k</option><option value="k8" selected>k8 · 655k</option><option value="k9">k9 · 2.6M</option></select></label><label title="3D: surface normals - screen-space derivatives (flat per triangle) or per-vertex from the height field">Normals<select id="norm3d"><option value="deriv" selected>Derivative</option><option value="analytic">Analytic</option></select></label><label title="3D: height - nearest-cell samples (the shipped gather) or a continuous heightmap interpolated between cell centres; the heightmap lookup is built once per world (~32 MiB, a few seconds, in the background)">Height<select id="hmod3d"><option value="hex" selected>Cell samples</option><option value="vertex">Continuous heightmap</option></select></label>
-				<button id="save">Save world</button><button id="deposits">Deposits JSON</button>
+				<button id="save">Save world / session</button><button id="deposits">Deposits JSON</button>
+			</fieldset>
+			<fieldset id="climate-tools"><legend>Climate · independent clock</legend>
+				<button id="climate-toggle" type="button" aria-pressed="false" title="Lazy-load the sibling planet-climate engine in an isolated local iframe">Open climate</button>
+				<button id="climate-play" type="button" aria-pressed="false" disabled>Run weather</button>
+				<label for="climate-view">Weather view<select id="climate-view" disabled><option value="0" selected>Low air · temperature</option><option value="1">Ocean · temperature</option><option value="2">Low air · pressure</option><option value="3">Low air · humidity</option><option value="4">Low air · wind</option><option value="5">Ocean · currents</option><option value="6">High air · rain</option><option value="7">Ocean · salinity</option><option value="8">Deep ocean · temperature</option><option value="9">High air · temperature</option><option value="16">Ocean · bathymetry</option><option value="22">Ice · thickness</option><option value="23">Ice · coverage</option></select></label>
+				<button id="climate-refresh" type="button" disabled title="Replace the held climate surface with the globe's current elevation, coast and effective sea level; weather keeps its own clock unless the grid level changes">Refresh surface</button>
 			</fieldset>
 			<fieldset id="startup"><legend>Startup · rebuilds the world</legend>
 				<label>Resolution<select id="level"><option value="5" selected>L5 · 10,242 cells</option><option value="6">L6 · 40,962 cells</option><option value="7">L7 · 163,842 cells</option></select></label><span id="regrid" class="regrid" hidden><button id="regrid-keep" type="button" title="Move the running CPU world to the selected level: the crust is transferred conservatively and the ledger keeps its discoveries">Keep world</button><button id="regrid-fresh" type="button" title="Start a new world at the selected level, discarding this one">Fresh world</button></span>
@@ -48,7 +60,7 @@
 				<label id="preset-label" hidden title="Earth starts only: Realistic holds the real NNR-MORVEL poles (present day) and pins the thermal budget; Game lets the procedural mantle drive the continents. Historical packs have no poles, so Realistic there is a frozen-pole game run">Preset<select id="preset"><option value="realistic" selected>Realistic · real poles</option><option value="game">Game · mantle-driven</option></select></label>
 				<label id="recon-label" hidden title="Reconstruct: put the modern pack at a past epoch using the PALEOMAP rotation model (Mode K). Exact, reversible, display-side - writes no sim parameter.">Reconstruct<input id="recon" type="range" min="0" max="540" step="1" value="0"><span class="value" id="recon-value">0 Ma</span></label>
 				<label>Seed<input id="seed" type="number" min="0" max="4294967295" step="1" value="7"></label><button id="reset">Reset world</button>
-					<label>Load<input id="load" type="file" accept=".pgt,application/octet-stream"></label>
+					<label>Load<input id="load" type="file" accept=".pgt,.pgts,application/octet-stream"></label>
 				</fieldset>
 				<fieldset id="prospect-tools"><legend>Prospecting · one cell per click</legend>
 					<label class="check" title="Outcrop, structure and placer pans; shallow exposure only"><input id="inst-obs" name="inst" value="obs" type="checkbox">Field observation</label>
@@ -120,6 +132,7 @@
 	<script src="js/surface.js"></script>
 	<script src="js/events.js"></script>
 	<script src="js/checkpoint.js"></script>
+	<script src="js/session.js"></script>
 	<script src="js/perf.js"></script>
 	<script src="js/clipboard.js"></script>
 	<script src="js/extract.js"></script>
@@ -159,6 +172,7 @@
 	<script src="port/core-log-format.js"></script>
 	<script src="js/slice.js"></script>
 	<script src="js/core-log.js"></script>
+	<script src="js/climate-host.js"></script>
 	<script src="js/ui.js"></script>
 </body>
 </html>

@@ -265,9 +265,9 @@ const world = (level, seed) => {
 // module the same way js/ui.js will, through the global. The shared slice codec and the
 // cutter load before ui.js (index.html order, 0.8.1).
 const MODULES = ['env', 'geodesics', 'params', 'water', 'quat', 'mantle', 'diag', 'state', 'columns', 'edges',
-	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
+	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'session', 'perf', 'clipboard',
 	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'sim', 'render',
-	'resolution', 'slice', 'core-log'];
+	'resolution', 'slice', 'core-log', 'climate-host'];
 const PORTS = ['slice-format', 'core-log-format'];
 const indexHtml = read('index.html');
 function loadPage(search) {

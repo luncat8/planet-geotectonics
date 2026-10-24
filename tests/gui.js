@@ -199,10 +199,10 @@ for (const [level, V, km] of [[5, 10242, 223], [6, 40962, 112], [7, 163842, 56]]
 const PORTS = ['slice-format', 'core-log-format'];
 const MODULES = ['env', 'geodesics', 'heightfield', 'params', 'water', 'quat', 'data/rot-paleomap', 'rotations',
 	'mantle', 'diag', 'state', 'columns', 'edges',
-	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'perf', 'clipboard',
+	'plates', 'contact', 'column-update', 'surface', 'events', 'checkpoint', 'session', 'perf', 'clipboard',
 	'extract', 'data/deposit-economics', 'deposits', 'core', 'instruments', 'resolution', 'sim', 'data/earth-1deg', 'data/earth-250Ma', 'data/earth-200Ma',
 	'data/earth-150Ma', 'data/earth-100Ma', 'data/earth-065Ma', 'data/earth-040Ma', 'data/earth-020Ma',
-	'data/plate-crosswalk', 'earth', 'render', 'slice', 'core-log'];
+	'data/plate-crosswalk', 'earth', 'render', 'slice', 'core-log', 'climate-host'];
 
 // The fake device side of the engine: records who was initialised with what, and hands the test
 // the play promise so an in-flight transfer can be held open on purpose. `adapter` is what the

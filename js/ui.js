@@ -1928,6 +1928,29 @@
 	if (hostPullLogBtn) hostPullLogBtn.addEventListener('click', hostPullObservation);
 	document.getElementById('host-close').addEventListener('click', hostHide);
 
+	// --- Two-clock climate host (0.9.1) ---------------------------------------------------
+	// The counterpart runs in its own local iframe, so its classic Grid global cannot replace
+	// the globe's. A surface capture uses the same idle + full-mirror discipline as Save and
+	// Prospecting; the elevation copy freezes t/z while the asynchronous iframe boot proceeds.
+	function provideClimateSurface(done, fail) {
+		whenGpuIdle(function () {
+			var capture = function () {
+				try {
+					done({
+						format: 'pgt-climate-surface', version: 1,
+						level: grid.level, V: grid.V,
+						lookupW: grid.lookupW, lookupH: grid.lookupH,
+						lookup: grid.lookup, elevation: new Float64Array(state.z),
+						seaLevel: Params.sea, tMyr: state.t
+					});
+				} catch (error) { fail(error); }
+			};
+			if (gpu.on && gpu.ready) GpuSim.download(state).then(capture, fail);
+			else capture();
+		});
+	}
+	ClimateHost.bind(provideClimateSurface);
+
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)
@@ -2095,17 +2118,35 @@
 	});
 	regridKeep.addEventListener('click', function () { keepWorldAt(regridLevel); });
 	regridFresh.addEventListener('click', function () { if (regridLevel) changeLevel(regridLevel); });
-	document.getElementById('save').addEventListener('click', function () {
+	var saveButton = document.getElementById('save');
+	saveButton.addEventListener('click', function () {
 		if (gpu.on && gpu.ready) {
-			GpuSim.download(state).then(saveBlob);
+			GpuSim.download(state).then(saveBlob, function (error) { probe.textContent = 'Save failed: ' + error.message; });
 			return;
 		}
 		saveBlob();
 		function saveBlob() {
-			var blob = new Blob([Checkpoint.save(state)], { type: 'application/octet-stream' });
-		var link = document.createElement('a');
-		link.href = URL.createObjectURL(blob);
-			link.download = 'planet-' + startInput.value + '-' + Math.round(state.t) + 'myr.pgt';
+			// Capture geology before the asynchronous weather readback: the two clocks remain
+			// independent, and no extra geological step can sneak into this world's blob.
+			var world = Checkpoint.save(state), savedT = state.t;
+			if (ClimateHost.state !== 'running') {
+				download(world, false, savedT);
+				if (ClimateHost.state !== 'closed') probe.textContent = 'Saved geology only; climate is ' + ClimateHost.state + '.';
+				return;
+			}
+			saveButton.disabled = true;
+			ClimateHost.capture().then(function (climate) {
+				download(Session.encode(world, climate), true, savedT);
+			})['catch'](function (error) {
+				probe.textContent = 'Save failed: ' + error.message;
+			}).then(function () { saveButton.disabled = false; });
+		}
+		function download(bytes, joint, savedT) {
+			var blob = new Blob([bytes], { type: 'application/octet-stream' });
+			var link = document.createElement('a');
+			link.href = URL.createObjectURL(blob);
+			link.download = 'planet-' + startInput.value + '-' + Math.round(savedT) + 'myr.'
+				+ (joint ? 'pgts' : 'pgt');
 			link.click();
 			URL.revokeObjectURL(link.href);
 		}
@@ -2131,8 +2172,8 @@
 		var reader = new FileReader();
 		reader.onload = function () {
 			loadInput.value = '';
-			var bytes = new Uint8Array(reader.result), head;
-			try { head = Checkpoint.peek(bytes); }
+			var bytes = new Uint8Array(reader.result), packet, head;
+			try { packet = Session.read(bytes); head = packet.head; }
 			catch (error) { probe.textContent = 'Load failed: ' + error.message; return; }
 			if (!offeredLevel(head.level)) {
 				probe.textContent = 'Load failed: that world is L' + head.level + ', this page offers L5-L7.';
@@ -2143,7 +2184,7 @@
 			// case, not a corrupt file, and "checkpoint level 5" is not an instruction.
 			rebuildWhenIdle(head.level, head.seed, startInput.value, function () {
 				try {
-					Checkpoint.load(state, bytes);
+					Checkpoint.load(state, packet.world);
 					// The blob owns the temperature and the cooling flag; the sliders follow it.
 					// prescribedOmega and rotationHistory are not checkpoint scalars: the
 					// rebuild's Earth.apply re-derived both from the start pack and the preset
@@ -2161,6 +2202,16 @@
 					} else {
 						Sim.raster(state);
 						dirty = true;
+					}
+					if (packet.climate) {
+						var loadedMyr = state.t;
+						probe.textContent += ' Restoring weather…';
+						ClimateHost.restore(packet.climate).then(function () {
+							probe.textContent = 'Loaded L' + head.level + ' seed ' + head.seed + ' at t '
+								+ loadedMyr.toFixed(1) + ' Myr · weather day ' + ClimateHost.weatherDays.toFixed(1) + '.';
+						}, function (error) {
+							probe.textContent = 'Geology loaded, but weather restore failed: ' + error.message;
+						});
 					}
 				} catch (error) {
 					probe.textContent = 'Load failed: ' + error.message;
@@ -2475,6 +2526,9 @@
 
 	function frame(now) {
 		var dt = +dtInput.value, steps = 0;
+		// A visible parent rAF drives the offscreen climate frame with one request in flight;
+		// this schedules weather only and never calls either side's physics from the other.
+		ClimateHost.pump();
 		if (v3dHeight === 'vertex' && v3dInput.checked) driveHeight();
 		var viewMoved = viewVersion !== shownVersion;
 		// Set by the render tail the moment this rAF's play encoder is built with the
@@ -2648,6 +2702,7 @@
 		}
 		if (now - lastUpdate > 150) {
 			time.textContent = state.t.toFixed(1) + ' Myr';
+			ClimateHost.tick(state.t);
 			status.textContent = (state.meanSpeed / 10000).toFixed(2) + ' cm/yr · Tm ' + state.Tm.toFixed(2)
 				+ ' · ' + state.plateCount + ' plates · ' + state.splits + '↔ ' + state.merges + '⇄';
 			paintCoreLogObservations();
