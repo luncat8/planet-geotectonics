@@ -145,12 +145,12 @@ reference sampler), the vertex gather variant in js/render3d.js (both pipelines 
 a live allocation-free mode swap, attachRecords for a lookup that lands later), the Height select
 in index.html/js/ui.js (?hmod=hex|vertex, probe, capture header) driving that build across frames,
 and tests/heightfield.js, tests/render3d.js, tests/gui.js, tests/wgsl-struct.js,
-experiments/heightfield-calibration.js; 0.5.6-review.md reviews them. 0.5.6 is closed:
-correctness on the owner rig (vertex gather readback, plateau, ensemble) and the §14.4
-timing gates measured at ico k8 / 2048x1024 (experiments/logs/webgpu-smoke-2026-10-12-20-43.log:
-gather 0.065 ms, draws 0.79 ms, both modes; gates 0.5 / 5 ms), so the Height default is now
-vertex (Continuous heightmap) with hex on the select and ?hmod=hex; the smoke's gate line
-reports median/max over 8 collects. archive/0.5.6-closeout-report.md records the switch.
+experiments/heightfield-calibration.js; 0.5.6-review.md reviews them. Correctness passed on the
+owner rig (vertex gather readback, plateau, ensemble), and the 2026-10-12 timing run initially
+moved the default to vertex. The later distribution run found vertex gather max 1.049 ms >
+0.5 ms (draws max 2.163 ms < 5 ms), so Cell samples is now the default and Continuous heightmap
+stays an explicit opt-in pending optimization and remeasurement. `archive/0.5.6-owner-rig-followup.md`
+records the evidence and current decision.
 0.5.7-plan-3d-visual-quality.md - deferred, renderer-only review plan for canvas/projection aspect
 ratio, high-detail surface appearance, controlled visual fixtures and owner-GPU acceptance gates.
 archive/0.2-plan.md, archive/0.3-plan.md, archive/0.3.2-tweak-ui.md - implemented plans, kept as

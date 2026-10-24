@@ -152,13 +152,15 @@ Open `index.html` directly in a browser.
   gather matches the CPU oracle to 1e-3 m, the plateau gate holds, the 3-seed ensemble is
   inside bounds, and the §14.4 timing gates are measured at ico k8 / 2048×1024 (gather
   0.065 ms against 0.5 ms, draws 0.79 ms against 5 ms, both height modes;
-  `webgpu-smoke-2026-10-12-20-43.log`), so Continuous heightmap is now the default and
-  Cell samples remains on the select and `?hmod=hex`. The smoke's gate line now reports
-  median and max over 8 collects per mode. Every generated shader source - all four
-  3D variants included - compiles clean under `naga`, and the `hex` variant's SPIR-V is
-  byte-identical to the pre-refactor one. `0.5.6-review.md` reviews all three slices: the
-  containment test that also accepted the antipode, and a calibration seed that varied nothing.
-  `node experiments/heightfield-calibration.js`, log in `experiments/logs/`.
+  `webgpu-smoke-2026-10-12-20-43.log`). The later distribution run
+  `webgpu-smoke-2026-10-24-09-20.log` reports vertex gather max 1.049 ms against the
+  0.5 ms gate (draws max 2.163 ms, within 5 ms), so Cell samples is again the safe default;
+  Continuous heightmap remains available as an explicit `?hmod=vertex` / select opt-in while
+  its gather is optimized and remeasured. The smoke reports median and max over 8 collects per
+  mode. Every generated shader source - all four 3D variants included - compiles clean under
+  `naga`, and the `hex` variant's SPIR-V is byte-identical to the pre-refactor one.
+  `0.5.6-review.md` reviews all three slices; `archive/0.5.6-owner-rig-followup.md` records
+  the corrected default decision and owner-rig measurements. `node experiments/heightfield-calibration.js`, log in `experiments/logs/`.
 - Canvas map with plate, boundary-type, elevation, coverage, sediment, damage and six ore
   views, plus the optional viable-deposit overlay, a column probe and a plate-lineage/split/merge readout. Drag the map to rotate
   the surface; the trackball view has no latitude/longitude clamp and slows horizontal motion
