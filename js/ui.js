@@ -1756,6 +1756,39 @@
 	paintSectionControls();
 	paintSliceOverlay();
 
+	// --- Hosted section (0.8.5 A2): the panel toggle and the lazy host module -------------
+	// js/section-host.js and the slice tree load only on the first open: a page that never
+	// opens the panel pays no boot cost and gains no global (0.8.5-answer §3.1/§6). Panel
+	// visibility stays here; the engine side - loader, ShadowRoot mount, dispose, status -
+	// is SectionHost's own.
+	var hostToggle = document.getElementById('section-host'), hostPanel = document.getElementById('host-panel');
+	var hostStatus = document.getElementById('host-status');
+	function hostSetPanel(open) {
+		hostPanel.hidden = !open;
+		hostToggle.setAttribute('aria-pressed', open ? 'true' : 'false');
+	}
+	function hostShow() {
+		hostSetPanel(true);
+		if (typeof SectionHost !== 'undefined') { SectionHost.open(); return; }
+		hostStatus.textContent = 'Loading the host module…';
+		var script = document.createElement('script');
+		script.addEventListener('load', function () { SectionHost.open(); });
+		script.addEventListener('error', function () {
+			hostStatus.textContent = 'js/section-host.js did not load from the globe tree; the page runs unchanged.';
+		});
+		script.setAttribute('src', 'js/section-host.js');
+		document.head.appendChild(script);
+	}
+	function hostHide() {
+		if (typeof SectionHost !== 'undefined') SectionHost.close();
+		hostSetPanel(false);
+	}
+	hostToggle.addEventListener('click', function () {
+		if (hostPanel.hidden) hostShow();
+		else hostHide();
+	});
+	document.getElementById('host-close').addEventListener('click', hostHide);
+
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
 	// asynchronously, runs the boot raster on the device and then renders straight from
 	// the arenas; the CPU mirror is only pulled back on demand (probe, save, deposits)

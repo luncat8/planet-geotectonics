@@ -2046,3 +2046,40 @@ One-line toggle if the owner ever wants to keep stepping during a CPU drag: drop
 	even earlier - inside the `afterRaster` hook, which runs at the boot raster before
 	GpuSim.init. the render-only 3D pages differ: their adapter request is async after load, so
 	`page.api.navigator.gpu = ...` after loadPage works there.
+
+## a dom-stub script seam tests a chained lazy loader without a browser (0.8.5, 2026-10-24)
+
+	to test a loader that injects classic scripts on demand, model the browser's
+	execute-on-append in the stub: intercept head.appendChild, look the src up in a
+	test-provided url -> source table, run it synchronously (runInThisContext) and dispatch
+	load; an unlisted url dispatches error. record the attempts in order whether or not the
+	table carries them - the injection order and the skip rule are the claims under test,
+	and a miss is the missing-tree case. synchronous dispatch inside appendChild keeps the
+	whole 30-script chain deterministic in one click, and the same seam with the table
+	backed by fs.readFileSync runs the counterpart's real engine bytes in a vm context
+	(experiments/host-rehearsal.js): the repo's own tests stay fake-tree and sibling-free,
+	the cross-check takes an explicit path and SKIPs without it.
+
+## a var global in a shared node realm cannot be deleted: order the groups, or blank it (0.8.5, 2026-10-24)
+
+	runInThisContext of `var X = ...` creates a non-configurable property on globalThis, so
+	`delete globalThis.X` throws in strict mode and a later group cannot un-define what an
+	earlier group's fake tree declared. a group asserting `typeof X === 'undefined'` (the
+	refusal left no engine global) must run before any group that defines X - fresh makeDom
+	pages do NOT reset the realm, only the DOM. to stage "the page lacks X" after X existed,
+	assign `globalThis.X = undefined`: a typeof check reads that as absent, which is exactly
+	what a presence-detecting loader consults. and re-running a module's source over the
+	same var name replaces the closure - the fresh-instance equivalent of a page reload,
+	which is how one realm hosts several "first opens".
+
+## a bundled data file can precede the module that owns its table (0.8.5, 2026-10-24)
+
+	the slice's canonical script order puts the section bundle data files before
+	js/section-pack.js, so a wrapper that registers into SECTION_PACKS runs before the
+	module that "owns" the table is loaded. the real wrappers self-guard
+	(`if (!globalObject.SECTION_PACKS) globalObject.SECTION_PACKS = {}`) - a fake tree
+	modelled on load order rather than on the real files throws mid-chain on the first
+	bundle, and a sequential loader reads any mid-chain throw as a broken tree. when a
+	hardcoded cross-repo load order is the contract, copy the guard behaviour too, and pin
+	the list against the counterpart's real page (columns.html script order) whenever their
+	checkout is reachable, so drift is a red rather than a runtime surprise.

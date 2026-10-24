@@ -2019,6 +2019,63 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.equal(gpuPack.n >= 2, true, 'the GPU pack carries its runs');
 	}
 
+	// --- the hosted section panel (0.8.5 A2): lazy module, absent tree, honest refusal ----
+	{
+		const hPage = loadPage('');
+		const hEl = hPage.el;
+		// Ships closed: the panel is hidden, boot injects nothing and defines no host global.
+		assert.equal(hEl('host-panel').hidden, true, 'the host panel ships hidden');
+		assert.equal(hEl('section-host').attrs['aria-pressed'], 'false', 'the toggle ships unpressed');
+		assert.deepEqual(hPage.api.scriptLoads, [], 'boot injects no script');
+		assert.equal(typeof globalThis.SectionHost, 'undefined', 'boot defines no SectionHost');
+		// The first open injects the host module from the globe's own tree, then the module
+		// walks the slice tree - which is absent in this realm.
+		hPage.api.scripts['js/section-host.js'] = read('js/section-host.js');
+		hEl('section-host').click();
+		assert.equal(hEl('host-panel').hidden, false, 'the click opens the panel');
+		assert.equal(hEl('section-host').attrs['aria-pressed'], 'true', 'and presses the toggle');
+		assert.deepEqual(hPage.api.scriptLoads,
+			['js/section-host.js', '../planet-tectonics-2d-slice/js/params.js'],
+			'the host module loads first, then the tree walk starts at the engine\'s first own script');
+		assert.equal(typeof globalThis.SectionHost, 'object', 'the module created its one global');
+		const status = hEl('host-status').textContent;
+		assert.ok(status.indexOf('../planet-tectonics-2d-slice/js/params.js') >= 0,
+			'the refusal names the failed url: ' + status);
+		assert.ok(status.indexOf('globe page runs unchanged') >= 0, 'and says the globe is untouched');
+		assert.equal(typeof globalThis.COLSIM, 'undefined', 'no slice global was added');
+		// The page's single shared-codec load stands: no port file is ever injected.
+		for (const url of hPage.api.scriptLoads)
+			assert.ok(url.indexOf('port/') < 0, 'no shared port file is injected twice: ' + url);
+		// The globe runs unchanged with the panel open on a refusal.
+		const hostTimeBefore = hEl('time').textContent;
+		hEl('step').click();
+		hPage.pump(2, 4000);
+		assert.notEqual(hEl('time').textContent, hostTimeBefore,
+			'the globe steps and paints with the host panel open on a refusal');
+		// Close hides the panel; a refused tree stays retryable; the toggle closes too.
+		hEl('host-close').click();
+		assert.equal(hEl('host-panel').hidden, true, 'Close hides the panel');
+		assert.equal(hEl('section-host').attrs['aria-pressed'], 'false', 'and releases the toggle');
+		hEl('section-host').click();
+		assert.equal(hEl('host-panel').hidden, false, 'the toggle reopens');
+		assert.ok(hEl('host-status').textContent.indexOf('js/params.js') >= 0, 'and retries the absent tree');
+		hEl('section-host').click();
+		assert.equal(hEl('host-panel').hidden, true, 'the toggle itself closes too');
+	}
+	{
+		// ?slice= rides the page query into the host base. A fresh module instance stands
+		// for the fresh realm a real page load would give it (gui.js shares one realm).
+		const qPage = loadPage('?slice=../../elsewhere');
+		qPage.api.scripts['js/section-host.js'] = read('js/section-host.js');
+		vm.runInThisContext(read('js/section-host.js'), { filename: 'js/section-host.js' });
+		qPage.el('section-host').click();
+		assert.equal(globalThis.SectionHost.sliceBase, '../../elsewhere/',
+			'the query override lands on the host base, slash normalised');
+		assert.ok(qPage.api.scriptLoads.indexOf('../../elsewhere/js/params.js') >= 0,
+			'and the loader injects against it');
+		assert.equal(qPage.el('host-panel').hidden, false, 'the panel opens on the override base');
+	}
+
 	// An Earth start names its own pack and epoch, and the preset decides whether the
 	// rotation model is claimed: game hands the rotations to the procedural mantle.
 	for (const [preset, model] of [['game', 'procedural'], ['realistic', 'PALEOMAP']]) {
@@ -2067,5 +2124,7 @@ console.log('PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh o
 		+ ' deactivates the tool with the reason, a level rebuild keeps the line and recaptures'
 		+ ' the world, and a GPU capture drains a fresh mirror while an overtaken capture'
 		+ ' never writes, and an Earth start names its pack, its epoch and the rotation model'
-		+ ' its preset actually claims');
+		+ ' its preset actually claims; the host panel toggle lazy-injects the host module,'
+		+ ' an absent slice tree refuses by name while the globe steps and paints unchanged,'
+		+ ' no shared port file is ever injected twice, and ?slice= reaches the host base');
 })().catch((error) => { console.error(error); process.exit(1); });

@@ -13,6 +13,8 @@
    refuses an option it does not have (which is why the load path cannot silently select a level
    the page does not offer). */
 
+const vm = require('node:vm');
+
 const VOID = { area: 1, base: 1, br: 1, col: 1, embed: 1, hr: 1, img: 1, input: 1, link: 1,
 	meta: 1, param: 1, source: 1, track: 1, wbr: 1 };
 const TOKEN = /<(\/?)([a-zA-Z0-9]+)((?:\s+[^\s=>/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*(\/?)>|([^<]+)/g;
@@ -20,8 +22,10 @@ const ATTR = /([^\s=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 
 function El(tag, doc) {
 	this.tagName = tag.toUpperCase();
+	this.nodeType = 1;
 	this.ownerDocument = doc;
 	this.attrs = {};
+	this.dataset = {};
 	this.children = [];
 	this.parentNode = null;
 	this.listeners = {};
@@ -119,6 +123,16 @@ El.prototype.getBoundingClientRect = function () {
 };
 El.prototype.setPointerCapture = function (id) { this.captured = id; };
 El.prototype.releasePointerCapture = function (id) { if (this.captured === id) this.captured = undefined; };
+// The ShadowRoot the hosted section mounts into (0.8.5 A2): a plain container parented to
+// its host, invisible to document.getElementById - exactly the isolation a browser gives,
+// which is why the host's own ids stay reachable and the engine's stay scoped.
+El.prototype.attachShadow = function () {
+	if (this.shadowRoot) throw new Error('stub: a shadow root is already attached');
+	var shadow = new El('#shadow-root', this.ownerDocument);
+	shadow.host = this;
+	this.shadowRoot = shadow;
+	return shadow;
+};
 El.prototype.getContext = function (kind) {
 	if (kind !== '2d') return { configure: function () {}, getCurrentTexture: function () { return {}; } };
 	var self = this;
@@ -196,6 +210,7 @@ function makeDom(html) {
 	var root = parse(html, doc);
 	doc.documentElement = root;
 	doc.body = findTag(root, 'BODY');
+	doc.head = findTag(root, 'HEAD');
 	doc.getElementById = function (id) { return root.byId(id); };
 	doc.createElement = function (tag) {
 		var el = new El(tag, doc);
@@ -211,6 +226,11 @@ function makeDom(html) {
 	var raf = [];
 	var api = {
 		document: doc, root: root, raf: raf,
+		// The dynamically-injected-script seam (0.8.5 A2): scripts appended to the head run
+		// from this url -> source table, synchronously and in append order, then fire load;
+		// a url the table does not carry fires error - a browser's execute-on-append, minus
+		// the network. This is what lets the lazy host loader be tested without Chromium.
+		scripts: {}, scriptLoads: [],
 		location: { search: '', href: 'file:///index.html', replaced: null,
 			replace: function (url) { api.location.replaced = url; } },
 		navigator: { userAgent: 'node-dom-stub' },
@@ -227,6 +247,29 @@ function makeDom(html) {
 			}
 			return now;
 		}
+	};
+	var headAppend = doc.head.appendChild;
+	doc.head.appendChild = function (child) {
+		headAppend.call(doc.head, child);
+		if (child.tagName === 'SCRIPT' && child.attrs.src !== undefined) api.runScript(child);
+		return child;
+	};
+	api.runScript = function (el) {
+		var src = el.attrs.src;
+		// Attempts are recorded in order whether or not the table carries the source: the
+		// loader's injection order is the claim under test, and a miss is the missing tree.
+		api.scriptLoads.push(src);
+		if (!Object.prototype.hasOwnProperty.call(api.scripts, src)) {
+			el.dispatch('error', { type: 'error', target: el });
+			return;
+		}
+		try {
+			vm.runInThisContext(api.scripts[src], { filename: src });
+		} catch (error) {
+			el.dispatch('error', { type: 'error', target: el, error: error });
+			return;
+		}
+		el.dispatch('load', { type: 'load', target: el });
 	};
 	return api;
 }

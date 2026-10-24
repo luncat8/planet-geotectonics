@@ -15,7 +15,7 @@ const release = argv.includes('--release');
 const full = release || argv.includes('--full');
 const HISTORIES = ['kinematics', 'ores', 'alloc', 'longrun'];
 const SHORT = [
-	'port', 'slice-format', 'core-log-format', 'core-log', 'browser-scripts', 'deposits', 'core', 'instruments', 'resolution', 'slice', 'gui', 'grid', 'grid-compat', 'quat', 'mantle', 'plates', 'edges', 'forces',
+	'port', 'slice-format', 'core-log-format', 'core-log', 'browser-scripts', 'deposits', 'core', 'instruments', 'resolution', 'slice', 'section-host', 'gui', 'grid', 'grid-compat', 'quat', 'mantle', 'plates', 'edges', 'forces',
 	'determinism', 'water', 'raster', 'conveyor', 'rift', 'isostasy', 'erosion', 'adj', 'collapse', 'split',
 	'checkpoint', 'view-dir', 'rotations', 'gpml-plates', 'earth', 'paleo', 'sediment', 'reconstruct', 'heightfield',
 	'slice-bake', 'perf', 'clipboard',

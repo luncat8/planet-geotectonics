@@ -1,0 +1,371 @@
+full test · 2026-10-24 09:21 · node 22.15.1 · win x86_64
+profile full: 51 tests
+PASS port: four-file manifest hashes, fixture lock and Node/classic codec parity
+ok port 63 ms
+PASS slice-format v2: canonical fixture, complete identities, raw validation and path geometry
+ok slice-format 54 ms
+PASS core-log-format: fixture round trip, 32 refusal classes, parse strictness, identities and classic parity
+ok core-log-format 47 ms
+PASS core-log: current import, foreign refusal, confirm-only stale archive, immutable side table
+ok core-log 42 ms
+PASS classic-script loading and Canvas render API smoke test (not a browser E2E test)
+ok browser-scripts 1235 ms
+PASS deposits: quantized potential, physical anchor identity, stable depth, thresholded local peaks, the Earth-anchored class table, body geometry, contained metal, viability, derived iron, a local click that never scans, and an L5 build in 9 ms
+ok deposits 2916 ms
+PASS core: contiguous anchored beds, water datum, local context features, real catalogue intersections, stable JSON and a basement stop
+ok core 347 ms
+campaign L5 d500+geo+mag chunk median 0.26 ms (1.25 ms target, 12 samples)
+PASS instruments: local footprints, deterministic noise, reach/cover, evidence ladder, lab, hysteresis, rebase and session-only state, the seismic line and the monetary screen
+ok instruments 316 ms
+resolution inventory: 21 groups, 7.6 MB, 0 unclassified
+fresh world: no holes, no forced columns, fel residual 0.50% / 0.47%, every child one of 2 parent thicknesses
+  children on an exact parent value: 100.0%
+L5->L6: volume error 3.90e-2 · anchor drift max 1.07 source cells, kept 0.00% · 10004->40687 columns
+L6->L5: forced 30496 · volume error 2.78e-3
+anchor scale matches the catalogue: -18425,26989,-2412 on cell 0
+round trip: cell thickness RMS 2459.5 m, max 51712.4 m on 10176 cells (35.1% identical, 94.5% within 5%), drift booked to 0.00e+0
+50 steps after the round trip: z RMS 995.5 m, max 20202.9 m; land 23.79% vs 23.97%
+six level changes: worst single residual 3.90%, total ledger drift 4.93%, identity exact
+one anchor bucket is a new catalogue id (the re-lattice states its own drift in the report)
+re-survey after the transfer: 1/1 entries re-anchored, 0 duplicated
+ledger: 1 entries re-laid, cells 11 -> 49 -> 12, moved 1/1, coverage gain 0/1
+PASS resolution: inventory is complete, the transfer books each family volume residual and covers every cell, the plate frame and the clock are exact, the source is untouched, the shard map aggregates and splits, anchors drift by a bounded number of source cells, the round trip stays within the field budget, and a session ledger keeps its records across the re-lattice
+ok resolution 5095 ms
+walk measurements: L5: 7 circles · 17 ms · runs avg 208 max 223 · L6: 7 circles · 21 ms · runs avg 414 max 451 · L7: 7 circles · 38 ms · runs avg 828 max 855
+PASS slice cutter: circle, view round trip, L5-L7 walks, pack semantics, identity, purity
+ok slice 1660 ms
+SKIP the columns.html pin: no slice checkout at Z:\Downloads\planet-tectonics-2d-slice (pass --slice=<path> to run it)
+PASS section host: lazy single global, canonical load with the shared-codec skip, named refusals, shadow mount, banner-honest status, dispose and clean restart
+ok section-host 57 ms
+PASS gui: L5/L6/L7 select rebuilds the world or offers Keep/Fresh on a running CPU world (Keep carries the clock and crust, a failed transfer keeps the old world), badge, cell line, copy header, device reuse, in-flight transfer waited for), load follows the blob's level, the strip holds 6 slots in place and is the copy control, the bench can measure every setting the page offers, and a pan turns the view under a running sim (probe agrees with the paint, the dead zone keeps the click, the sim never waits for the mouse, the view outlives a rebuild, both engines defer a step while the view moves, the copied report records that gate, a GPU batch handed the gate stops at its frame boundary, and paint never recolors); a fine-pointer hover switches the view mode, the controls live in Startup/Adjust groups, the slow-on-CPU warning flags L7 and L6 >1 step/frame, the Adjust sliders pre-fill from the query, report themselves in the copy header and recolor the map without a rebuild, an engine switch mid-run pulls the full mirror and keeps playing, and the sea controls are two sliders enabled by last touch - the level drag recolours, the volume drag solves the level, the pre-fill and the header name the active control, and the probe follows Params.sea; the 3D view ships off (no session, no device), the no-adapter path disables the toggle with the reason, ?v3d/?disp/?k3d/?mesh/?norm pre-fill, the detail list follows the mesh mode, the on path swaps the canvases and greys the layers, the orbit and wheel move only the camera, the knobs apply live, the header and the strip's V3D slot name the session, a mesh or normals change swaps buffers or pipelines on the live session without a world rebuild, the height control ships on the continuous heightmap, builds its lookup in row bands, caches it per world and switches modes without a rebuild, and off restores the map; the reconstruct slider shows only on an Earth start with a model, the steered header names the mode, a scrub is display-only and its release restores the live paint exactly; and the section cutter owns its clicks while on (a pan never cuts, the probe and survey paths answer when off), an origin survives a refused second point and a 3D trip, a completed cut reports runs/span/snapshot/identity, Copy and Save transport one validated pack (clipboard refusal falls back to manual text), the 3D view deactivates the tool with the reason, a level rebuild keeps the line and recaptures the world, and a GPU capture drains a fresh mirror while an overtaken capture never writes, and an Earth start names its pack, its epoch and the rotation model its preset actually claims; the host panel toggle lazy-injects the host module, an absent slice tree refuses by name while the globe steps and paints unchanged, no shared port file is ever injected twice, and ?slice= reaches the host base
+ok gui 15003 ms
+PASS grid L0: 12 cells
+PASS grid L3: 642 cells
+PASS grid L5: 10242 cells
+ok grid 238 ms
+PASS grid-compat: script/export loading, float32 angle, topology/lookup drift, malformed input and CLI refusals
+ok grid-compat 177 ms
+PASS quaternion: analytic rotation after 10,000 steps
+ok quat 42 ms
+PASS mantle: {
+  mean: 49999.99999999993,
+  polDiv: 0.03104279824992634,
+  rigDiv: 0.00002449172371850595,
+  laterRatio: 1.0480424779998438,
+  lowOverHigh: 3.9020630294618533e+28
+}
+ok mantle 152 ms
+PASS plates: rigid-field ω identity and drag-only least squares { compared: 640 } steer: model ω, cap, gated integrate
+ok plates 183 ms
+PASS edges: { boundary: 188, trench: 23, subduct: 88, flicker: 0 }
+ok edges 90 ms
+{
+  thinLoad: 20295.05390151254,
+  thickLoad: 29520.07840220006,
+  ratio: 1.4545454545454546
+}
+PASS forces: collision load grows with continental thickness and stale contacts stay finite
+ok forces 295 ms
+PASS determinism: bit-identical state, reset and dt validation
+ok determinism 1420 ms
+PASS water: monotone hypsometry, conserved volume, NaN gaps and clamps
+ok water 35 ms
+{
+  dt: 0.1,
+  Myr: 1000,
+  iou: 0.96987087517934,
+  gaps: 0,
+  p99: 1,
+  msPerFrame: 0.21396770999999998
+}
+{
+  dt: 0.01,
+  Myr: 100,
+  iou: 0.9661495063469676,
+  gaps: 0,
+  p99: 0,
+  msPerFrame: 0.19514734000000003
+}
+PASS raster: transport, crowded bins, deterministic ties
+ok raster 4266 ms
+{
+  myr: 160,
+  windowMyr: 140,
+  columns: 2548,
+  consumedKm2PerMyr: 642771,
+  analyticKm2PerMyr: 637100,
+  measuredTrenchFluxKm2PerMyr: 578166,
+  measuredRidgeFluxKm2PerMyr: 395529,
+  consumeRatio: 1.0089,
+  spawnRatio: 1.0357,
+  trenchKm: 21872,
+  ridgeKm: 25400,
+  subductedColumns: 512,
+  spawnedColumns: 499,
+  asymmetry: 0.046,
+  mafResidual: 3.305998541068803e-14,
+  felResidual: 2.7018551128204477e-15,
+  drift: 0.0047,
+  arcCells: 93,
+  arcMaxKm: 40.96,
+  gaps: 28
+}
+PASS conveyor: subduction flux, symmetric ridge, exact ledgers, stable column count
+ok conveyor 3272 ms
+{
+  myr: 150,
+  columns: 2538,
+  gaps: 16,
+  interiorHoles: 2,
+  oceanicColumns: 376,
+  spawned: [ 248, 230 ],
+  lost: [ 62, 442 ],
+  hFelByRiftDistanceAt40Myr: [ 8.97, 19.48, 28.28, 35, 35, 35 ],
+  reaches15KmAtCell: 0,
+  undeformedAtCell: 3,
+  felResidual: 6.883163474828502e-16
+}
+PASS rift: 35 -> 8.97 km within 3 cells, oceanic crust forms, no interior gaps
+ok rift 3113 ms
+young ocean { actual: -2600, expected: -2600 }
+old ocean { actual: -5730, expected: -5730 }
+continent { actual: 400, expected: 400 }
+collision plateau { actual: 6234, expected: 6200 }
+rifted margin { actual: -1648, expected: -1650 }
+PASS isostasy: calibrated ocean, continent, collision and rift elevations
+ok isostasy 74 ms
+{
+  coneBeforeKm: 70,
+  coneAfterKm: 69.98083531121134,
+  basinSedKm: 0.019188434708776767,
+  massError: 0
+}
+PASS erosion: cone mass reaches basin, total crust plus mobile conserved, routing settles, deposition stops at the sediment cap with the excess booked to the mantle
+ok erosion 98 ms
+PASS adj: cooling pins Tm and re-anchors on resume, the friction and erosion scales are live (friction 2x is Ea 6 bit for bit), the erosion knee is continuous, quadratic and at its calibrated scale, VERSION 2 carries cooling, and the page sliders write, follow and report
+ok adj 27163 ms
+{
+  plateauCells: 145,
+  peakKm: 68.17163200443245,
+  massError: -2.2351741790771484e-8
+}
+PASS collapse: thick plateau spreads symmetrically and conserves felsic mass, sediment joins the flow under the total-column regime test
+ok collapse 609 ms
+PASS split: corridor opens { capCells: 348, plateCells: 1313, minCells: 25 }
+PASS split: an unforced corridor stays put
+PASS merge: 30 Myr of a dead boundary sutures two plates into one
+PASS merge: an active boundary keeps both plates
+PASS merge: rebasing moves the frame, not the crust { moved: 1249, kept: 1313 }
+PASS merge: a sliver plate is absorbed by the neighbour it touches most
+PASS events: deterministic, ledgers exact, { plates: 14, splits: 1, merges: 3 }
+ok split 11122 ms
+PASS checkpoint: a 300 frame round trip is bit-identical, 251512 bytes
+PASS checkpoint: the ring wraps and a snapshot replays { oldest: 20.000000000000014, newest: 80.09999999999972 }
+PASS checkpoint: nine malformed blobs rejected, live state untouched
+PASS checkpoint: peek reads level/seed/V, and rejects a blob load would reject
+ok checkpoint 1798 ms
+PASS view-dir: wheel wraps once, anchors E/N/W/S, renderer pixels match, 300 cells
+ok view-dir 1136 ms
+PASS rotations: 258 plates, bearings and NNR agreement, 883 stages consistent to 3.4e-6 deg
+ok rotations 58 ms
+PASS gpml-plates: 223 plates today with 93.7% coverage, 85 at 250 Ma with 23.8%, every plate count matching its grid
+ok gpml-plates 369 ms
+  earth 360x180 (PALEOMAP-0Ma (Scotese & Wright 2018) + NNR-MORVEL56 + CRUST1.0 sediment (not GlobSed)) · epoch 0 · datum -460 m · wet 71.55% · land 728 m · ocean -4365 m · rms 60 m
+PASS earth: synthetic decode/wrap/poles/determinism, real-pack hypsometry, datum tie-in, presets, the axial-pole frame and the relative-motion gate
+ok earth 1760 ms
+  earth-250Ma 360x180 (PALEOMAP-PaleoDEM 250Ma (Scotese & Wright 2018)) · epoch 250 · datum 0 m · wet 68.24% · land 939 m · ocean -4095 m · rms 47 m
+  earth-200Ma 360x180 (PALEOMAP-PaleoDEM 200Ma (Scotese & Wright 2018)) · epoch 200 · datum 0 m · wet 63.21% · land 1000 m · ocean -4347 m · rms 36 m
+  earth-150Ma 360x180 (PALEOMAP-PaleoDEM 150Ma (Scotese & Wright 2018)) · epoch 150 · datum 0 m · wet 64.61% · land 960 m · ocean -5047 m · rms 43 m
+  earth-100Ma 360x180 (PALEOMAP-PaleoDEM 100Ma (Scotese & Wright 2018)) · epoch 100 · datum 0 m · wet 69.31% · land 1090 m · ocean -4557 m · rms 56 m
+  earth-065Ma 360x180 (PALEOMAP-PaleoDEM 65Ma (Scotese & Wright 2018)) · epoch 65 · datum 0 m · wet 67.17% · land 956 m · ocean -4548 m · rms 57 m
+  earth-040Ma 360x180 (PALEOMAP-PaleoDEM 40Ma (Scotese & Wright 2018)) · epoch 40 · datum 0 m · wet 65.44% · land 1060 m · ocean -4606 m · rms 63 m
+  earth-020Ma 360x180 (PALEOMAP-PaleoDEM 20Ma (Scotese & Wright 2018)) · epoch 20 · datum 0 m · wet 66.70% · land 1137 m · ocean -4471 m · rms 56 m
+PASS paleo: checkpoint provenance, model codes and poles, steered load and guard, zero-pole guard, raster fidelity, modern IoU scoring, 20 Myr stability (game + steered)
+ok paleo 2122 ms
+  js/data/earth-1deg.js residual max 75.0 m, wet 0.7078
+  js/data/earth-05deg.js residual max 74.9 m, wet 0.7078
+PASS sediment: extract sample, envelope rule, point schema, modern packs fixed
+ok sediment 920 ms
+  modern pack: earth epoch 0 plates 25 columns 10242
+  250 Ma · moved 9109 stuck 1133 IoU 0.3968 land 26.01% vs ref 31.83%
+  200 Ma · moved 9109 stuck 1133 IoU 0.4364 land 26.57% vs ref 37.58%
+  150 Ma · moved 9109 stuck 1133 IoU 0.4849 land 28.08% vs ref 35.93%
+  100 Ma · moved 9109 stuck 1133 IoU 0.5056 land 29.20% vs ref 31.01%
+  65 Ma · moved 9109 stuck 1133 IoU 0.6752 land 29.33% vs ref 33.51%
+  40 Ma · moved 9109 stuck 1133 IoU 0.6979 land 28.86% vs ref 35.56%
+  20 Ma · moved 9109 stuck 1133 IoU 0.7456 land 28.41% vs ref 34.29%
+PASS reconstruct: lossless 250->0->250, t/frame untouched, snapshot+refresh live restore, all seven checkpoints inside their measured IoU band
+ok reconstruct 1397 ms
+heightfield: L5 1024x512 8.0 MiB in 167 ms · max weight error 1.52e-5 · 0 fallbacks · shared-edge agreement 3.64e-12 m of 13044 m range · quantization 1.89e-2 m · plateau pairs 74.8% nearest vs 0.00% continuous · L7 0 fallbacks, 211419 cell indices over 16 bits
+PASS heightfield: 16-byte records, exact constants and sample centres, non-negative weights summing to one, shared-edge agreement on every edge of the triangulation, the 2/65535 quantization budget, gap renormalization and the gap marker, bit-identical rebuilds, cancellation, and no plateaus where the nearest-cell gather has them
+ok heightfield 1161 ms
+PASS slice bake: one writer path, determinism, provenance, CLI refusals, strict reader
+ok slice-bake 2977 ms
+{
+  level: 5,
+  cells: 10242,
+  columns: 9667,
+  msPerStep: 8.37,
+  framesPerSec: 119.5,
+  target: 60
+}
+{
+  events: 0.121,
+  integrate: 0.006,
+  move: 0.222,
+  bin: 0.056,
+  raster: 0.501,
+  mantle: 1.652,
+  edges: 1.167,
+  contact: 0.538,
+  apply: 0.372,
+  column: 1.326,
+  surface: 1.681,
+  forces: 0.246,
+  reduce: 0.118,
+  diag: 0.358
+}
+PASS perf: 119.5 frames/s at L5 (target 60, development floor 40)
+PASS perf strip slots: 6 fixed rows, report() drops the empty ones
+ok perf 3499 ms
+PASS clipboard: async write, file:// textarea fallback (created, readonly, selected, removed), refusal falls back, both-ways failure reported, content-safe class acknowledgement, all three pages load the module
+ok clipboard 1276 ms
+PASS wgsl-struct: 63 kernel sources balanced, entry-pointed, constants defined
+ok wgsl-struct 116 ms
+PASS gpu-play: 25 frames, 2 event cycles both paths, event round trip ships 642/963 columns and no cell or edge buffer, a batch the drag gate stopped resumes into the same run, re-init releases the replaced arenas, K11 is on demand, the dispatch audit is clean at L5-L7
+ok gpu-play 560 ms
+PASS gpu-readback: the world texture carries every draw and every copy, no encoder mixes a layer draw with the canvas blit (the black-frame fix), the canvas keeps the default usage, the draw uniform carries the relief ramp, and release frees the renderer’s allocations
+ok gpu-readback 96 ms
+PASS gpu-d1diff: cross-engine layer diff names inputs/accumulation/solve/trajectory under perturbation, stays quiet on a healthy f32 mirror, and rescales M/rhs by A0[0]
+ok gpu-d1diff 258 ms
+2026-10-24 09:22 · unknown · unknown — ready. Choose a run above, or use ?run=ens&frames=1000&level=5&seed=7
+Tip: headless `python3 run_gpu_parity.py` prints the same log via puppeteer; `file://` needs no rig.
+[parity] frames=1 level=5 seed=7 …
+[ens] ignored — a run is already in flight (see the status line)
+parity: frames=1 level=5 seed=7 wall=102ms
+PASS parity OK for all compared frames
+[result] PASS
+[parity] frames=1 level=5 seed=7 …
+parity: frames=1 level=5 seed=7 wall=60ms
+ERROR: Error: no WebGPU adapter
+    at win.__run (Z:\Downloads\tecto2\tests\gpu-parity-ui.js:87:40)
+    at runAndLog (tests/gpu-parity.html:script:411:18)
+[result] FAIL — parity aborted before any comparison (the error above is the whole report)
+[ensemble] frames=1000 level=5 seed=[7,8,9] …
+ensemble: frames=2 level=5 seed=[7,8,9] wall=60ms
+ensemble: 2 frames, seeds [7,8,9]
+all seeds within predeclared statistical bounds
+PASS ensemble
+[result] PASS
+[batch] level=5 seed=7 …
+batch: 1 frame counts, level=5 seed=7 wall=61ms
+batch-identity: 1 frame counts, seed 7, level 5 (zero tolerance)
+  3 frames: t=0.30000000000000004 frame=3 lastEvent=0 identical
+PASS batch encoders are bit-identical to one-frame encoders
+[result] PASS
+PASS gpu-parity ui: live status with elapsed+phase, buttons locked while in flight, no verdict on abort, ensemble names its seeds
+ok gpu-parity-ui 346 ms
+PASS render3d frame loop: 1000 frames, 0 device allocations, retained {"heap":8,"buffers":-2568}
+PASS render3d: icosphere counts/winding/dedup, orbit clamps, the frame contract (gather, land, water, rim into the 3D target; present alone on the canvas), the live knob uniform, the gap-safe z pack with a reused scratch, a 1000-frame loop that allocates nothing, and release/detail-change destroying exactly what they own
+PASS render3d timestamps: 4-deep ring, two-behind collect, Uint32 decode, tsLine silent until tsValid, map failure disables, release owns the ring
+ok render3d 369 ms
+{
+  dt: 0.1,
+  Myr: 500.0000000000452,
+  cm: 4.081979620642033,
+  maxCm: 10.891897901424159,
+  conv: 1866,
+  div: 1873,
+  trans: 37,
+  rigid: 7.216449660063518e-16,
+  quat: 2.220446049250313e-16,
+  finite: 1,
+  msPerFrame: 10.39040634
+}
+{
+  dt: 0.01,
+  Myr: 49.99999999999862,
+  cm: 4.797888173073124,
+  maxCm: 11.266701007913817,
+  conv: 2084,
+  div: 1854,
+  trans: 76,
+  rigid: 0,
+  quat: 2.220446049250313e-16,
+  finite: 1,
+  msPerFrame: 7.73438782
+}
+PASS kinematics: 16 plates, rigid v, speeds 1–10 cm/yr, mixed boundaries
+ok kinematics 90785 ms
+{
+ "oArcAtTrench": 1,
+ "oArcOnOverrider": 1,
+ "oVmsOnOceanic": 1,
+ "oOroOnContinental": 1,
+ "oBasOnThickSediment": null,
+ "violations": "0/0/0/0/0"
+}
+{
+ "withOrogenicSummit": {
+  "placed": 0.0385,
+  "mobile": 0,
+  "offPath": 0,
+  "onHighGround": 0,
+  "summitZ": 7437
+ },
+ "withoutOrogenicSummit": {
+  "placed": 0,
+  "mobile": 0
+ }
+}
+  t  100  vms  1462 mafic   112 arc   798 orogenic   139 basin    56 placer     9  max 0.995
+  t  200  vms  1291 mafic   170 arc   952 orogenic   220 basin   117 placer    23  max 0.995
+  t  300  vms  1147 mafic   195 arc  1096 orogenic   345 basin   181 placer    33  max 0.994
+  t  400  vms   976 mafic   220 arc  1058 orogenic   495 basin   271 placer    48  max 0.995
+  t  500  vms   743 mafic   254 arc  1054 orogenic   605 basin   323 placer    56  max 0.993
+  t  600  vms   717 mafic   267 arc   963 orogenic   641 basin   336 placer    59  max 0.994
+  t  700  vms   732 mafic   237 arc   890 orogenic   667 basin   328 placer    58  max 0.995
+  t  800  vms   605 mafic   244 arc   937 orogenic   654 basin   346 placer    59  max 0.993
+{
+ "arcOnOverrider": 0.88,
+ "arcNearTrenchNow": 0.366,
+ "vmsOceanicNow": 0.754,
+ "oroContinental": 0.998,
+ "basinSediment": 0.745
+}
+PASS ores: production sites exact, placer rig downslope-only, six bounded potentials, ranked deposits, checkpoint round trip
+ok ores 36406 ms
+PASS retained-memory smoke test: { heap: 153952, buffers: 0 }
+ok alloc 22371 ms
+dt 0.1, hot start, 1500 Myr in 198 s
+PASS core/catalogue: 2783 body intersections agree at the 1500 Myr evolved L5 snapshot
+  t  100 plates  19 cols  9308 cont   6.6% craton  0.00% mean 12.64 cm/yr max 20.00 Tm 1.55 splits   5 merges   2 snapshots 4
+  t  200 plates  20 cols  9369 cont  10.3% craton  0.00% mean 13.58 cm/yr max 20.00 Tm 1.50 splits  15 merges  10 snapshots 9
+  t  300 plates  20 cols  9321 cont  13.5% craton  1.15% mean 12.64 cm/yr max 20.00 Tm 1.46 splits  25 merges  20 snapshots 14
+  t  400 plates  20 cols  9344 cont  12.9% craton  2.33% mean 10.77 cm/yr max 18.53 Tm 1.42 splits  36 merges  31 snapshots 16
+  t  500 plates  20 cols  9325 cont  13.6% craton  2.88% mean 11.36 cm/yr max 20.00 Tm 1.37 splits  45 merges  40 snapshots 16
+  t  600 plates  23 cols  9326 cont  14.8% craton  3.03% mean 10.58 cm/yr max 20.00 Tm 1.33 splits  55 merges  47 snapshots 16
+  t  700 plates  18 cols  9268 cont  13.8% craton  3.31% mean  9.51 cm/yr max 19.61 Tm 1.29 splits  60 merges  57 snapshots 16
+  t  800 plates  14 cols  9390 cont  15.7% craton  3.96% mean  8.68 cm/yr max 17.43 Tm 1.26 splits  63 merges  64 snapshots 16
+  t  900 plates  16 cols  9501 cont  16.2% craton  5.17% mean  7.71 cm/yr max 17.56 Tm 1.22 splits  70 merges  69 snapshots 16
+  t 1000 plates  20 cols  9377 cont  13.7% craton  5.12% mean  7.27 cm/yr max 17.22 Tm 1.19 splits  77 merges  72 snapshots 16
+  t 1100 plates  19 cols  9366 cont  14.9% craton  5.32% mean  6.89 cm/yr max 18.93 Tm 1.16 splits  79 merges  75 snapshots 16
+  t 1200 plates  21 cols  9353 cont  13.6% craton  4.65% mean  6.63 cm/yr max 17.88 Tm 1.12 splits  82 merges  76 snapshots 16
+  t 1300 plates  21 cols  9313 cont  14.6% craton  4.51% mean  7.25 cm/yr max 17.44 Tm 1.09 splits  86 merges  80 snapshots 16
+  t 1400 plates  16 cols  9497 cont  14.3% craton  4.97% mean  6.59 cm/yr max 13.43 Tm 1.06 splits  88 merges  87 snapshots 16
+  t 1500 plates  13 cols  9578 cont  12.4% craton  4.59% mean  6.85 cm/yr max 11.87 Tm 1.04 splits  89 merges  91 snapshots 16
+  seed 7: continental 12.4% cratons 4.59% plates 13 columns 9578 at 1500 Myr
+  seed 8: continental 19.4% cratons 8.35% plates 13 columns 9413 at 1500 Myr
+  seed 11: continental 16.0% cratons 6.44% plates 17 columns 9460 at 1500 Myr
+PASS longrun 1500 Myr: no NaN, invariants exact, plates 6-40, middle epoch 9.57 cm/yr, 89 splits and 91 merges, and continental at 1500 Myr 15.9% as the 3-seed mean (spread 6.9 points; the design band is read on the mean because one seed cannot decide it)
+dt 0.01, 300 Myr in 400 s vs the dt 0.1 run at 300 Myr: {
+  plates: [ 20, 17 ],
+  meanCm: [ 12.64, 11.85 ],
+  continental: [ 0.135, 0.149 ],
+  splits: [ 25, 17 ],
+  merges: [ 20, 16 ]
+}
+PASS longrun: 300 Myr at dt 0.01 matches dt 0.1 at the statistics level
+ok longrun 983462 ms
+PASS all tests (full profile, 51 tests in 1232 s)
+exit 0 · 1232 s

@@ -6,14 +6,14 @@
 		{
 			"role": "globe-writer",
 			"repo": "luncat8/planet-geotectonics",
-			"commit": "ee43f6478de60046298354a87ca5ac89a19d8878",
-			"note": "globe revision where the hashed v2 codec and fixture first landed"
+			"commit": "c1da62fe6b141b57fe130caefe27f3ea796b2bf6",
+			"note": "globe revision where all four shared files first stand byte-identical (the 0.8.4 M1 core-log bump); the 0.8.5 A0 repair commit is its descendant, so a pin to the repair itself would be self-referential"
 		},
 		{
 			"role": "section-reader",
 			"repo": "luncat8/planet-tectonics-2d-slice",
-			"commit": "fd044e19f9281b728ed3f43fdf3c1836a029a472",
-			"note": "reviewed v1 reader baseline; replace its v1 port and fixtures with these v2 artifacts as one cutover"
+			"commit": "5fae205ef16dd1a75857ad68db28d75648b01f19",
+			"note": "the slice v2 cutover (their 0.4.4 M1+M2): the core-log port bump and the section's adoption; all four files byte-identical at this revision"
 		}
 	],
 	"files": [

@@ -54,6 +54,16 @@ Open `index.html` directly in a browser.
   Reviewed examples live in `data/sections/`. The exchange is one-way and manual by design: there
   is no live link and no section-to-globe feedback; see `0.8.0-review.md`, `0.8.1-review.md`,
   `0.8.2-review.md` and the gates in `0.8.3-plan-slice-bridge.md`.
+- Hosted section (0.8.4-0.8.5, globe side): section observations import back through the shared
+  `pgt-core-log` v2 codec (`CoreLog.importText`: current filed, stale only after explicit
+  confirmation, foreign refused, never a kernel input), and the **Host section** button mounts the
+  sibling `planet-tectonics-2d-slice` column engine inside the globe page: the tree lazy-loads on
+  first open (`?slice=<base>` overrides the sibling default), the shared codecs stay a single
+  page load, the engine builds its chrome in an open ShadowRoot from a baked bundle, and the
+  panel reads standalone with the section's own banner fields. A missing tree refuses by name and
+  leaves the globe running; dispose is stop + mount removal, and a reopen restarts cleanly. No
+  live rung is open - clipboard/file remain the contract until the 0.8.4 pair gates are decided;
+  see `0.8.4-answer.md`, `0.8.5-answer.md` and `archive/0.8.5-report.md`.
 - Metallogeny: six saturating potentials per column (VMS, mafic, arc, orogenic, basin, placer)
   scaled by a fertility drawn at birth, accumulated where each geologic factory runs and
   fading on a 500 Myr decay. Arc potential is enriched by whatever that plate is subducting;
