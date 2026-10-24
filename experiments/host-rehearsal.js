@@ -223,9 +223,10 @@ vm.createContext(win);
 // --- the page side: the two shared codecs load once, the host panel exists --------------
 vm.runInContext(fs.readFileSync(path.join(GLOBE, 'port/slice-format.js'), 'utf8'), win, { filename: 'port/slice-format.js' });
 vm.runInContext(fs.readFileSync(path.join(GLOBE, 'port/core-log-format.js'), 'utf8'), win, { filename: 'port/core-log-format.js' });
+vm.runInContext(fs.readFileSync(path.join(GLOBE, 'js/core-log.js'), 'utf8'), win, { filename: 'js/core-log.js' });
 const pageSlicePack = win.SlicePack, pageCoreLogFormat = win.CoreLogFormat;
 check('the page holds both shared codecs before the panel opens',
-	typeof pageSlicePack === 'object' && typeof pageCoreLogFormat === 'object');
+	typeof pageSlicePack === 'object' && typeof pageCoreLogFormat === 'object' && typeof win.CoreLog === 'object');
 
 function panelEl(tag, id) {
 	const el = B.makeElement(tag, B.doc);
@@ -333,6 +334,132 @@ check('a bundle switch remounts from the select through the same entries',
 check('and the status follows the switch, still standalone',
 	statusEl.textContent.indexOf('baked bundle earth-100Ma-gc0') >= 0
 	&& /^standalone/.test(statusEl.textContent), statusEl.textContent);
+
+// --- A3: selected-cut handoff (loadPack), clock (applyClock) and cut-plane overlay ---------
+const { Grid, State, Sim } = require(path.join(GLOBE, 'tests/helpers.js'));
+const Slice = require(path.join(GLOBE, 'js/slice.js'));
+const CoreLog = win.CoreLog;
+const grid5 = new Grid(5, 7).build();
+const state5 = new State(grid5, 7);
+Sim.raster(state5);
+Sim.advance(state5, 0.1, 20);
+const stateSnapshot = {
+	t: state5.t, frame: state5.frame, rng: state5.rng, histI: state5.histI,
+	hFel: Buffer.from(state5.hFel.buffer), hMaf: Buffer.from(state5.hMaf.buffer),
+	hSed: Buffer.from(state5.hSed.buffer), z: Buffer.from(state5.z.buffer)
+};
+const aWorld = new Float64Array([1, 0, 0]), rawB = new Float64Array([0, 0.6, 0.8]);
+const snappedBoundary = Slice.snapSecond(state5, aWorld, rawB, 'boundary');
+const snappedMotion = Slice.snapSecond(state5, aWorld, rawB, 'motion');
+const unsnappedB = Slice.snapSecond(state5, aWorld, rawB, 'none');
+check('snapSecond moves only the second point and none restores it bit-for-bit',
+	unsnappedB[0] === rawB[0] && unsnappedB[1] === rawB[1] && unsnappedB[2] === rawB[2]
+	&& (snappedBoundary[1] !== rawB[1] || snappedMotion[1] !== rawB[1])
+	&& state5.t === stateSnapshot.t && state5.rng === stateSnapshot.rng);
+
+const cutPath = Slice.circleThrough(aWorld, snappedBoundary, Slice.radiusKm(), Slice.cellKmFor(grid5));
+const cutResult = Slice.pack(
+	state5, cutPath,
+	{ mode: 'level', levelM: 0, volScale: 1 },
+	{ pack: 'procedural-map', epochMa: 0, rotModel: 'procedural', built: '2026-10-24T09:00:00.000Z' },
+	'Synthetic world · planet-geotectonics map start · no Earth data'
+);
+const encodedCut = pageSlicePack.encode(cutResult.pack);
+const decodedCut = pageSlicePack.decode(encodedCut);
+check('the cut pack validates and matches the Copy/Save wire checksum',
+	pageSlicePack.validate(cutResult.pack) === '' && decodedCut.checksum === cutResult.checksum,
+	cutResult.pathChecksum.slice(0, 8) + '/' + cutResult.checksum.slice(0, 8));
+
+const handoff = host.loadPack(cutResult.pack, { pathChecksum: cutResult.pathChecksum, tMyr: state5.t, paused: true });
+check('SectionHost.loadPack hands the selected cut to COLSECTION.loadPack and reconstructs it',
+	handoff.ok === true && win.COLSECTION.world === true
+	&& win.COLSECTION.pack.checksum === cutResult.checksum
+	&& win.COLSECTION.origin === 'selected-cut',
+	handoff.pathChecksum.slice(0, 8) + '/' + handoff.checksum.slice(0, 8));
+check('handoff delivers the paused globe clock and the HUD and host status agree',
+	win.COLSECTION.syncPaused === true && /^standalone/.test(host.statusText())
+	&& host.statusText().indexOf('via loadPack') >= 0
+	&& host.statusText().indexOf('globe clock paused') >= 0
+	&& String(host.mount.querySelector('#hud').textContent).indexOf('globe paused') >= 0,
+	host.statusText());
+
+// Atomic refusal on loadPack: corrupt or unplaceable pack keeps the active section intact.
+const corruptPack = JSON.parse(encodedCut);
+corruptPack.zM[0] += 500;
+const refusedCorrupt = host.loadPack(corruptPack);
+check('a corrupted pack handed to loadPack is refused atomically without mutating the running section',
+	refusedCorrupt.ok === false && win.COLSECTION.pack.checksum === cutResult.checksum
+	&& win.COLSECTION.world === true,
+	refusedCorrupt.reason);
+
+// Atomic refusal on applyClock: foreign pathChecksum is refused without mutating the section.
+const refusedClock = host.applyClock({ pathChecksum: '0123456789abcdef', tMyr: state5.t, paused: true }, 'manual');
+check('a clock with a foreign pathChecksum is refused atomically',
+	refusedClock.ok === false && refusedClock.reason.indexOf('pathChecksum') >= 0
+	&& win.COLSECTION.pack.checksum === cutResult.checksum,
+	refusedClock.reason);
+// Restore clean paused clock on the active cut.
+host.applyClock({ pathChecksum: host.activePathChecksum(), tMyr: state5.t, paused: true }, 'manual');
+
+// Cut-plane overlay read and identity-drop rule.
+const ovl = host.overlayFor(cutResult, '');
+check('SectionHost.overlayFor reads the real COLSECTION.overlay() palette and column segments',
+	!!ovl && ovl.packChecksum === cutResult.checksum
+	&& Array.isArray(ovl.palette.lith) && ovl.palette.lith.length === 6
+	&& Array.isArray(ovl.palette.host) && ovl.palette.host.length === 5
+	&& Array.isArray(ovl.segments) && ovl.segments.length > 0 && ovl.segments.length <= 512
+	&& ovl.segments[0].sKm === 0 && ovl.segments[ovl.segments.length - 1].sKm < cutResult.pack.path.arcKm,
+	ovl ? (ovl.segments.length + ' segments · lith[0] ' + ovl.palette.lith[0]) : 'null');
+check('overlayFor enforces the identity-drop rule on stale context or mismatched path/pack',
+	host.overlayFor(cutResult, 'world time changed after the selected export') === null
+	&& host.overlayFor({ pack: cutResult.pack, checksum: '0000000000000000', pathChecksum: cutResult.pathChecksum }, '') === null
+	&& host.overlayFor({ pack: win.SECTION_PACKS['earth-100Ma-gc1'], checksum: cutResult.checksum, pathChecksum: '0000000000000000' }, '') === null);
+
+// --- A4: automated observation return (exportActive -> CoreLog.importText -> note ack) ------
+const logTable = CoreLog.createTable();
+const currentArtifact = CoreLog.artifact(cutResult.pack);
+
+// 1) Foreign refusal: against a different pathChecksum, pullObservation refuses and does NOT call note().
+const foreignArtifact = { pathChecksum: '0123456789abcdef', couplingPathChecksum: 'fedcba9876543210', packChecksum: cutResult.checksum, arcKm: cutResult.pack.path.arcKm };
+const foreignPull = host.pullObservation(logTable, foreignArtifact);
+check('a foreign path observation is refused without mutating the side table or calling COLCORELOG.note',
+	foreignPull.status === 'foreign' && foreignPull.committed === false && foreignPull.noted === false
+	&& logTable.order.length === 0 && win.COLCORELOG.exportActive() !== null,
+	foreignPull.reason);
+
+// 2) Stale confirmation-required: same path + arcKm, different packChecksum.
+const staleArtifact = Object.assign({}, currentArtifact, { packChecksum: '0123456789abcdef' });
+const declinedStale = host.pullObservation(logTable, staleArtifact, { confirm: () => false });
+check('a declined stale observation is not committed and does not call COLCORELOG.note (log stays due)',
+	declinedStale.status === 'confirmation-required' && declinedStale.committed === false
+	&& declinedStale.noted === false && logTable.order.length === 0
+	&& win.COLCORELOG.exportActive() !== null);
+
+// 3) Current observation: matches pathChecksum, packChecksum and arcKm -> commits and calls note().
+const currentPull = host.pullObservation(logTable, currentArtifact, { importedAt: 1000 });
+check('a current observation from exportActive commits into the globe side table and calls COLCORELOG.note',
+	currentPull.status === 'current' && currentPull.committed === true && currentPull.noted === true
+	&& logTable.order.length === 1 && CoreLog.freshness(currentPull.entry, currentArtifact).status === 'current',
+	currentPull.entry ? (currentPull.entry.records.length + ' records · ' + currentPull.entry.sourceMetadata.checksum.slice(0, 8)) : 'no entry');
+check('after COLCORELOG.note, exportActive returns null until columns diverge past the threshold',
+	win.COLCORELOG.exportActive() === null && host.pullObservation(logTable, currentArtifact).status === 'none');
+
+// 4) Reload the cut (which resets sentEver on the section), then confirm-archive against a stale packChecksum on the same path.
+host.loadPack(cutResult.pack, { pathChecksum: cutResult.pathChecksum, tMyr: state5.t, paused: true });
+const confirmedStale = host.pullObservation(logTable, staleArtifact, { confirm: () => true, importedAt: 2000 });
+check('a confirmed stale observation on the same path commits as stale and calls COLCORELOG.note',
+	confirmedStale.status === 'stale' && confirmedStale.committed === true && confirmedStale.noted === true
+	&& win.COLCORELOG.exportActive() === null,
+	confirmedStale.entry ? (confirmedStale.entry.records.length + ' records · ' + confirmedStale.entry.staleReason) : 'no entry');
+
+// 5) No-state-handle invariant across the full A3/A4 adapter path: globe state is untouched.
+check('the adapter path never mutates any globe state buffer, clock or RNG',
+	state5.t === stateSnapshot.t && state5.frame === stateSnapshot.frame && state5.rng === stateSnapshot.rng
+	&& Buffer.compare(Buffer.from(state5.hFel.buffer), stateSnapshot.hFel) === 0
+	&& Buffer.compare(Buffer.from(state5.hMaf.buffer), stateSnapshot.hMaf) === 0
+	&& Buffer.compare(Buffer.from(state5.hSed.buffer), stateSnapshot.hSed) === 0
+	&& Buffer.compare(Buffer.from(state5.z.buffer), stateSnapshot.z) === 0);
+
 host.close();
 
 check('the whole rehearsal ran without an uncaught error',

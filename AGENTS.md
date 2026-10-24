@@ -113,11 +113,13 @@ contract, thresholds, module map and staging. the increments:
 	reproduces byte-for-byte.
 0.8.4-answer.md - mirrored decision: globe-side answer to slice 0.4.4 C-return/C-live proposal (P1–P7, all accept; P4 explicit yes to positional beds), schedule and return package. archive/0.8.4-worklog.md is the backing worklog.
 0.8.5-answer.md - globe-side section adapter: answer to slice 0.9.0 M3 adapter request. Schedules 0.8.5 A0–A4 (manifest metadata repair, slice contract amendments, mounting rehearsal, selected-cut delivery + cut-plane overlay, automated observation ack); the live coupling/clock rung stays gated behind 0.8.4 M3–M5 pair evidence and gate 7. archive/0.8.5-worklog.md is the backing worklog.
-	A0 and A2 (globe-side halves) are landed: archive/0.8.5-report.md records the manifest
-	repair (globe-writer c1da62f, section-reader 5fae205), js/section-host.js (the lazy
-	host: canonical script walk with the shared-codec skip, ShadowRoot mount, named
-	refusals, dispose/restart), its tests/section-host.js and the gui.js panel block.
-	A3/A4 wait on the slice's A1 amendment names (loadPack, exportActive, overlay).
+	A0, A2, A3 and A4 are landed on the globe side against slice fd9cc46 (0.9.0 A0+A1):
+	archive/0.8.5-report.md records the manifest repair (globe-writer c1da62f,
+	section-reader 5fae205), js/section-host.js (lazy host: canonical script walk with the
+	shared-codec skip, ShadowRoot mount, loadPack handoff, paused applyClock, overlayFor
+	identity-drop rule, pullObservation with COLCORELOG.note on commit only), Slice.snapSecond
+	(#section-snap in index.html / js/ui.js), the quad-strip overlay in paintSliceOverlay,
+	tests/section-host.js, tests/slice.js, tests/gui.js and experiments/host-rehearsal.js (34/34).
 0.8.3-plan-slice-bridge.md - backport decisions, a read-only returned-observation design and the
 	explicit gates that defer topology mutation / continuous two-way coupling.
 archive/0.8.3-counterpart-audit-and-gate-status.md - audit of the slice's 0.4.2 Phase B-b bundle
@@ -157,12 +159,14 @@ experiments/ - measurement scripts (node), not loaded by the page.
 experiments/grid-compat.js - offline climate-checkout grid audit; explicit checkout path,
 	JSON stdout, no runtime dependency. archive/0.9.0-grid-audit-report.md records measured
 	L3–L7 correspondence and limits; tests/grid-compat.js is the standalone local regression.
-experiments/host-rehearsal.js - the 0.8.5 A2 mounting rehearsal against the real slice tree
+experiments/host-rehearsal.js - the 0.8.5 A2–A4 rehearsal against the real slice tree
 	in node: argv checkout path (sibling default), SKIP without one. Runs the actual engine
 	bytes through js/section-host.js in a vm-context fake window (the slice's own
 	library-host.js DOM shape) and checks the load order, the shared-codec identity skip,
-	the shadow-scoped mount, frames, dispose and restart. The browser file:// smoke stays
-	the owner-rig gate; this is the sandbox-runnable leg.
+	the shadow-scoped mount, frames, dispose/restart, selected-cut handoff via loadPack,
+	paused applyClock, COLSECTION.overlay() + identity-drop rule, and COLCORELOG.exportActive()
+	-> CoreLog.importText -> COLCORELOG.note() ack discipline (34 checks). The browser file://
+	smoke stays the owner-rig gate; this is the sandbox-runnable leg.
 experiments/logs/ - keep useful; run_full_test.py / run_gpu_parity.py write their logs here
 out/ - git-ignored scratch for generated artifacts (0.8.2 section bakes and anything else
 	derived). A reviewed example is committed under data/sections/ with its provenance in

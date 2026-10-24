@@ -141,9 +141,10 @@ El.prototype.getContext = function (kind) {
 		// lastImage / lastPut let a test read what was actually placed: the pan tests assert
 		// on the painted pixels, not on a counter.
 		putImageData: function (image, dx, dy) { self.puts++; self.lastImage = image; self.lastPut = { dx: dx, dy: dy }; },
-		clearRect: function () { self.clears++; },
+		clearRect: function () { self.clears++; self.fillStyles = []; },
 		beginPath: function () {}, moveTo: function () {}, lineTo: function () {}, closePath: function () {},
-		fill: function () { self.fills++; }, stroke: function () { self.strokes++; },
+		fill: function () { self.fills++; (self.fillStyles = self.fillStyles || []).push(this.fillStyle); },
+		stroke: function () { self.strokes++; },
 		save: function () {}, translate: function () {}, restore: function () {}
 	};
 	return this.context;
@@ -289,7 +290,8 @@ function installGlobals(api, extra) {
 	var values = {
 		document: api.document, location: api.location, navigator: api.navigator,
 		requestAnimationFrame: api.requestAnimationFrame, URLSearchParams: URLSearchParams,
-		console: console, performance: performance, setTimeout: setTimeout, clearTimeout: clearTimeout
+		console: console, performance: performance, setTimeout: setTimeout, clearTimeout: clearTimeout,
+		confirm: function () { return false; }
 	};
 	for (var key in extra) values[key] = extra[key];
 	for (var name in values) {

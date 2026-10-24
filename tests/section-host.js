@@ -44,8 +44,9 @@ assert.ok(!/src="js\/section-host\.js"/.test(indexHtml),
 	'index.html carries no static tag for the host module: it is injected on first open');
 assert.match(indexHtml, /id="section-host"[^>]*aria-pressed="false"/, 'the host toggle ships unpressed');
 assert.match(indexHtml, /id="host-panel"[^>]*hidden/, 'the host panel ships hidden');
-for (const id of ['host-pack', 'host-restart', 'host-close', 'host-status', 'host-shell'])
+for (const id of ['host-pack', 'host-load-cut', 'host-pull-log', 'host-restart', 'host-close', 'host-status', 'host-shell'])
 	assert.ok(indexHtml.indexOf('id="' + id + '"') >= 0, 'the host panel carries #' + id);
+assert.ok(indexHtml.indexOf('id="section-snap"') >= 0, 'the section fieldset carries #section-snap');
 const css = read('style.css');
 for (const sectionId of ['#sGeo', '#sVZoom', '#sHZoom', '#sMsg', '#orePanel', '#orePick', '#hud', '#wrap'])
 	assert.ok(css.indexOf(sectionId + ' ') < 0 && css.indexOf(sectionId + '{') < 0 && css.indexOf(sectionId + ',') < 0,
@@ -55,7 +56,10 @@ assert.ok(/\.host-shell \{ overflow-x: auto; \}/.test(css), 'the shell scrolls t
 // --- the fake slice tree ---------------------------------------------------------------
 // One recorder per group; the sources read it off globalThis at call time.
 function freshRec() {
-	globalThis.hostRec = { builds: [], starts: [], stops: 0, steps: 0, frames: 0 };
+	globalThis.hostRec = {
+		builds: [], starts: [], stops: 0, steps: 0, frames: 0,
+		loadedPacks: [], clocks: [], notes: 0, dueLog: null, overlayData: null
+	};
 	return globalThis.hostRec;
 }
 const ENGINE_GLOBALS = {
@@ -96,8 +100,86 @@ var COLUI = (function () {
 	};
 }());`;
 const SECTION_PACK_SRC = `
-var COLSECTION = { mode: false, syncLive: false, syncStale: false, syncPaused: false };
+var COLSECTION = {
+	mode: false, syncLive: false, syncStale: false, syncPaused: false,
+	pack: null, world: false, bad: false, msg: '', couplingMsg: null,
+	loadPack: function (pack, origin) {
+		var rec = globalThis.hostRec;
+		if (!pack || typeof pack !== 'object' || pack.format !== 'pgt-slice-pack' || pack.version !== 2)
+			throw new Error('not a pgt-slice-pack v2');
+		if (pack.refuseSeed) throw new Error(pack.refuseSeed);
+		this.pack = pack;
+		this.world = true;
+		this.bad = false;
+		this.msg = 'loaded ' + (origin || 'cut');
+		this.syncLive = false;
+		this.syncPaused = false;
+		this.syncStale = false;
+		if (rec) rec.loadedPacks.push({ pack: pack, origin: origin });
+		return pack;
+	},
+	applyClock: function (clock, rung) {
+		var rec = globalThis.hostRec;
+		if (rec) rec.clocks.push({ clock: clock, rung: rung });
+		if (!this.pack || !this.world) {
+			this.bad = true; this.msg = 'clock refused: no reconstructed section is ready'; return;
+		}
+		var wantPath = this.pack.pathChecksum || '4a90d62b21f7b0f4';
+		if (!clock || clock.pathChecksum !== wantPath) {
+			this.bad = true; this.msg = 'clock refused: pathChecksum does not match the active cut'; return;
+		}
+		if (typeof clock.tMyr !== 'number' || !isFinite(clock.tMyr) || clock.tMyr < 0) {
+			this.bad = true; this.msg = 'clock refused: tMyr must be finite and non-negative'; return;
+		}
+		if (!clock.paused && !this.couplingMsg) {
+			this.bad = true; this.msg = 'clock refused: no coupling snapshot has supplied kinematics'; return;
+		}
+		this.bad = false;
+		this.syncLive = true;
+		this.syncPaused = !!clock.paused;
+	},
+	overlay: function () {
+		var rec = globalThis.hostRec;
+		if (rec && rec.overlayData) return rec.overlayData;
+		if (!this.pack || !this.world) return null;
+		return {
+			pathChecksum: this.pack.pathChecksum || '4a90d62b21f7b0f4',
+			packChecksum: this.pack.checksum || '63825f6abdfde871',
+			palette: {
+				lith: ['#cdb991', '#dca58c', '#464b52', '#a59682', '#8c3c2d', '#c3553c'],
+				host: ['#26303c', '#3c5268', '#826e5c', '#9c7860', '#b49e72']
+			},
+			segments: [{ sKm: 0, lith: 0, host: 2 }, { sKm: 20000, lith: 2, host: 1 }]
+		};
+	}
+};
 if (typeof globalThis.SECTION_PACKS === 'undefined') globalThis.SECTION_PACKS = {};`;
+const COLCORELOG_SRC = `
+var COLCORELOG = {
+	build: function () { return null; },
+	json: function (log) { return JSON.stringify(log); },
+	exportActive: function () {
+		var rec = globalThis.hostRec;
+		return rec && rec.dueLog ? rec.dueLog : null;
+	},
+	note: function () {
+		var rec = globalThis.hostRec;
+		if (rec) { rec.notes++; rec.dueLog = null; }
+	}
+};`;
+const COLCOUPLING_SRC = `
+var COLCOUPLING = {
+	CADENCE_MYR: 5,
+	pathChecksum: function (pack) {
+		if (pack && pack.pathChecksum) return pack.pathChecksum;
+		if (pack && pack.path && typeof SlicePack !== 'undefined' && SlicePack.pathChecksum)
+			return SlicePack.pathChecksum(pack.path);
+		return '4a90d62b21f7b0f4';
+	},
+	fromPack: function () { return {}; },
+	apply: function () { return { ok: true }; },
+	last: function () { return null; }
+};`;
 const COLSIM_SRC = `
 var COLSIM = (function () {
 	'use strict';
@@ -121,6 +203,8 @@ var COLSIM = (function () {
 				var pack = globalThis.SECTION_PACKS[target.dataset.pack];
 				if (!pack) throw new Error('COLSIM.start: unknown bundle ' + target.dataset.pack);
 				COLSECTION.mode = true;
+				COLSECTION.pack = pack;
+				COLSECTION.world = true;
 				target.byId('sMsg').textContent = 'loaded source L ' + target.dataset.pack;
 			}
 			globalThis.requestAnimationFrame(frame);
@@ -145,13 +229,15 @@ function fakeTree(base) {
 		scripts[base + rel] = 'var ' + ENGINE_GLOBALS[rel] + ' = { fake: ' + JSON.stringify(rel) + ' };';
 	scripts[base + 'js/ui.js'] = COLUI_SRC;
 	scripts[base + 'js/section-pack.js'] = SECTION_PACK_SRC;
+	scripts[base + 'js/coupling.js'] = COLCOUPLING_SRC;
+	scripts[base + 'js/core-log.js'] = COLCORELOG_SRC;
 	scripts[base + 'js/sim.js'] = COLSIM_SRC;
 	// The bundle files precede js/section-pack.js in the canonical order, and the real
 	// wrappers self-register the same way: guard the table, then add the id.
 	for (const rel in BUNDLES)
 		scripts[base + rel] = 'if (typeof globalThis.SECTION_PACKS === "undefined") globalThis.SECTION_PACKS = {};\n'
 			+ 'globalThis.SECTION_PACKS[' + JSON.stringify(BUNDLES[rel])
-			+ '] = { format: "pgt-slice-pack", version: 2, source: { tMyr: 0 } };';
+			+ '] = { format: "pgt-slice-pack", version: 2, checksum: "63825f6abdfde871", pathChecksum: "4a90d62b21f7b0f4", path: { kind: "circle" }, source: { tMyr: 0 } };';
 	return scripts;
 }
 
@@ -164,6 +250,7 @@ function newPage(search, opts) {
 	if (!opts || opts.ports !== false) {
 		vm.runInThisContext(read('port/slice-format.js'), { filename: 'port/slice-format.js' });
 		vm.runInThisContext(read('port/core-log-format.js'), { filename: 'port/core-log-format.js' });
+		vm.runInThisContext(read('js/core-log.js'), { filename: 'js/core-log.js' });
 	}
 	// The snapshot is taken with the page's own globals installed: the claim is what the
 	// host module adds on top of a booted page, not what the stub adds.
@@ -346,7 +433,122 @@ function newPage(search, opts) {
 	host.open();
 	assert.equal(host.mount, mountNow, 'open while running keeps the one mount');
 	assert.equal(rec.starts.length, startsNow, 'and starts nothing twice');
+
+	// --- 6b. A3 (loadPack, applyClock, overlayFor) and A4 (pullObservation + note ack) ---
+	const selectedCut = {
+		format: 'pgt-slice-pack',
+		version: 2,
+		checksum: '0022e7edaa0ba7d8',
+		pathChecksum: '4a90d62b21f7b0f4',
+		path: { kind: 'circle', arcKm: 40030.2 },
+		source: { tMyr: 120.5 }
+	};
+	const handoff = host.loadPack(selectedCut, { pathChecksum: '4a90d62b21f7b0f4', tMyr: 120.5, paused: true });
+	assert.equal(handoff.ok, true, 'loadPack succeeds on a valid selected cut');
+	assert.equal(handoff.checksum, '0022e7edaa0ba7d8');
+	assert.equal(handoff.pathChecksum, '4a90d62b21f7b0f4');
+	assert.equal(rec.loadedPacks.length, 1, 'COLSECTION.loadPack ran once');
+	assert.equal(rec.loadedPacks[0].origin, 'selected-cut', 'and named the selected-cut origin');
+	assert.equal(rec.clocks.length, 1, 'handoff delivered the paused clock via applyClock');
+	assert.deepEqual(rec.clocks[0].clock, { pathChecksum: '4a90d62b21f7b0f4', tMyr: 120.5, paused: true });
+	status = page.el('host-status').textContent;
+	assert.ok(status.startsWith('standalone'), 'a paused manual clock still leads with standalone: ' + status);
+	assert.ok(status.indexOf('selected cut 4a90d62b/0022e7ed via loadPack') >= 0,
+		'the status names the selected cut identity: ' + status);
+	assert.ok(status.indexOf('globe clock paused') >= 0, 'and reports the paused globe clock');
+
+	// Atomic refusal on loadPack: a corrupt or unplaceable pack leaves the mounted cut intact.
+	const refusedLoad = host.loadPack({ format: 'pgt-slice-pack', version: 2, refuseSeed: 'window wider than wrap' });
+	assert.equal(refusedLoad.ok, false, 'an unplaceable cut is refused');
+	assert.equal(globalThis.COLSECTION.pack, selectedCut, 'and the active section pack is untouched');
+	assert.ok(page.el('host-status').textContent.indexOf('refused: window wider than wrap') >= 0,
+		'the refusal reason is shown on the status line');
+
+	// Atomic refusal on applyClock: foreign pathChecksum or negative tMyr is refused without stopping.
+	const badClock = host.applyClock({ pathChecksum: 'ffffffffffffffff', tMyr: 120.5, paused: true }, 'manual');
+	assert.equal(badClock.ok, false, 'a foreign pathChecksum clock is refused');
+	assert.Match ? null : null;
+	assert.ok(badClock.reason.indexOf('pathChecksum') >= 0, 'the clock refusal names the path mismatch');
+	assert.equal(host.state, 'running', 'the section keeps running');
+
+	// Cut-plane overlay identity-drop rule (0.8.5-answer.md §3.2).
+	const currentResult = { pack: selectedCut, checksum: '0022e7edaa0ba7d8', pathChecksum: '4a90d62b21f7b0f4' };
+	const ovl = host.overlayFor(currentResult, '');
+	assert.ok(ovl && ovl.segments.length === 2, 'overlayFor returns the active overlay when path and pack match');
+	assert.equal(ovl.palette.lith[0], '#cdb991');
+	assert.equal(host.overlayFor(currentResult, 'world time changed after the selected export'), null,
+		'overlayFor drops the strip immediately when the export context becomes stale');
+	assert.equal(host.overlayFor({ pack: selectedCut, checksum: '1111111111111111', pathChecksum: '4a90d62b21f7b0f4' }, ''), null,
+		'overlayFor drops the strip on packChecksum mismatch');
+	assert.equal(host.overlayFor({ pack: selectedCut, checksum: '0022e7edaa0ba7d8', pathChecksum: '2222222222222222' }, ''), null,
+		'overlayFor drops the strip on pathChecksum mismatch');
+
+	// A4 automated observation return: exportActive -> CoreLog.importText -> note() ack only on commit.
+	const coreLogFixture = read('port/fixtures/core-log-v2.json');
+	const parsedLog = globalThis.CoreLogFormat.parse(coreLogFixture);
+	const logTable = globalThis.CoreLog.createTable();
+	const currentArtifact = {
+		pathChecksum: parsedLog.pathChecksum,
+		packChecksum: parsedLog.packChecksum,
+		arcKm: parsedLog.arcKm
+	};
+	// 1) Nothing due -> status 'none', note() never called.
+	rec.dueLog = null;
+	let pull = host.pullObservation(logTable, currentArtifact);
+	assert.equal(pull.status, 'none');
+	assert.equal(pull.committed, false);
+	assert.equal(rec.notes, 0, 'COLCORELOG.note is never called when nothing is due');
+
+	// 2) Foreign log -> refused, note() never called, log stays due.
+	const foreignObj = JSON.parse(coreLogFixture);
+	foreignObj.pathChecksum = '0123456789abcdef';
+	foreignObj.checksum = globalThis.CoreLogFormat.checksum(foreignObj);
+	rec.dueLog = { text: JSON.stringify(foreignObj), pathChecksum: foreignObj.pathChecksum, packChecksum: foreignObj.packChecksum };
+	pull = host.pullObservation(logTable, currentArtifact);
+	assert.equal(pull.status, 'foreign');
+	assert.equal(pull.committed, false);
+	assert.equal(pull.noted, false);
+	assert.equal(rec.notes, 0, 'COLCORELOG.note is never called on a foreign observation');
+	assert.equal(logTable.order.length, 0);
+
+	// 3) Stale log (same path + arcKm, different packChecksum): declined -> not committed, note() NOT called.
+	const staleObj = JSON.parse(coreLogFixture);
+	staleObj.packChecksum = '0123456789abcdef';
+	staleObj.checksum = globalThis.CoreLogFormat.checksum(staleObj);
+	rec.dueLog = { text: JSON.stringify(staleObj), pathChecksum: staleObj.pathChecksum, packChecksum: staleObj.packChecksum };
+	pull = host.pullObservation(logTable, currentArtifact, { confirm: () => false });
+	assert.equal(pull.status, 'confirmation-required');
+	assert.equal(pull.committed, false);
+	assert.equal(pull.noted, false);
+	assert.equal(rec.notes, 0, 'declining confirmation leaves the section un-noted so the log stays due');
+	assert.equal(logTable.order.length, 0);
+
+	// 4) Stale log confirmed -> committed as stale, note() called once.
+	pull = host.pullObservation(logTable, currentArtifact, { confirm: () => true, importedAt: 100 });
+	assert.equal(pull.status, 'stale');
+	assert.equal(pull.committed, true);
+	assert.equal(pull.noted, true);
+	assert.equal(rec.notes, 1, 'confirming stale archive calls COLCORELOG.note once');
+	assert.equal(logTable.order.length, 1);
+
+	// 5) Current log -> committed as current without confirmation, note() called once.
+	rec.dueLog = { text: coreLogFixture, pathChecksum: parsedLog.pathChecksum, packChecksum: parsedLog.packChecksum };
+	pull = host.pullObservation(logTable, currentArtifact, { importedAt: 200 });
+	assert.equal(pull.status, 'current');
+	assert.equal(pull.committed, true);
+	assert.equal(pull.noted, true);
+	assert.equal(rec.notes, 2, 'committing a current log calls COLCORELOG.note once');
+	assert.equal(logTable.order.length, 2);
+
+	// 6) Corrupt wire text -> caught, not committed, note() NOT called.
+	rec.dueLog = { text: '{broken', pathChecksum: parsedLog.pathChecksum, packChecksum: parsedLog.packChecksum };
+	pull = host.pullObservation(logTable, currentArtifact);
+	assert.equal(pull.status, 'invalid');
+	assert.equal(pull.committed, false);
+	assert.equal(rec.notes, 2, 'corrupt wire text never calls COLCORELOG.note');
+
 	host.close();
+	assert.equal(host.overlayFor(currentResult, ''), null, 'closing the host drops the overlay');
 }
 
 // --- 2b. without the page's shared globals the loader injects the codecs itself ---------

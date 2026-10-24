@@ -67,15 +67,18 @@
 	// own copy at seal - and `serial` cancels stale GPU export callbacks across rebuilds.
 	var sliceCanvas = document.getElementById('slice-overlay'), sliceContext = sliceCanvas.getContext('2d');
 	var sliceToggle = document.getElementById('section-toggle'), sliceClear = document.getElementById('section-clear');
+	var sliceSnap = document.getElementById('section-snap');
 	var sliceCopy = document.getElementById('section-copy'), sliceSave = document.getElementById('section-save');
 	var sliceStatus = document.getElementById('section-status'), sliceManual = document.getElementById('section-manual');
 	var coreLogFile = document.getElementById('core-log-file'), coreLogText = document.getElementById('core-log-text');
 	var coreLogImport = document.getElementById('core-log-import'), coreLogStatus = document.getElementById('core-log-status');
 	var coreLogPanel = document.getElementById('core-log-panel'), coreLogTable = CoreLog.createTable();
-	var section = { active: false, a: null, b: null, path: null, result: null, serial: 0,
+	var hostLoadCutBtn = document.getElementById('host-load-cut'), hostPullLogBtn = document.getElementById('host-pull-log');
+	var section = { active: false, a: null, b: null, rawB: null, snap: 'none', path: null, result: null, serial: 0,
 		generation: 0, exporting: false, dirs: null, dirsN: 0, dirsGen: -1 };
 	var sliceDirty = true;
-	var slicePointer = new Float64Array(3), sliceWorldDir = new Float64Array(3), sliceProjected = new Float64Array(2);
+	var slicePointer = new Float64Array(3), sliceWorldDir = new Float64Array(3);
+	var sliceProjected = new Float64Array(2), sliceProjected2 = new Float64Array(2);
 	// The discovery overlay paints from the campaign view when one exists and from the
 	// session ledger otherwise: a local find is on the map before any regional sweep. The hit
 	// cache mirrors what was actually painted (projected x, y and the record per marker), so a
@@ -153,6 +156,7 @@
 		// A recolour, not a view move: `dirty` is the frame loop's draw gate on both engines.
 		Params.sea = +seaInput.value * 1000;
 		dirty = true;
+		if (section.path) sliceDirty = true;
 		paintAdjust();
 	}
 	function solveWater() {
@@ -160,6 +164,7 @@
 		Params.sea = waterData.level; Params.seaVolScale = +seaVolInput.value;
 		waterArmed = false; waterDirty = false;
 		dirty = true;
+		if (section.path) sliceDirty = true;
 		paintAdjust();
 	}
 	function armSeaVolume() { waterActive = 'volume'; waterArmed = true; paintAdjust(); }
@@ -1409,6 +1414,8 @@
 				+ (section.result.gpu ? ' · drained GPU snapshot' : '')
 				+ ' · captured ' + (built ? built.slice(11, 16) : '?') + ' UTC';
 		}
+		if (section.snap && section.snap !== 'none')
+			text += ' · snap ' + section.snap;
 		if (reconLive)
 			text += ' · export disabled: the Reconstruct scrub holds a display pose; release it first';
 		sliceStatus.textContent = text;
@@ -1450,7 +1457,7 @@
 		try {
 			result = CoreLog.importText(coreLogTable, text, current);
 			if (result.status === 'confirmation-required') {
-				if (!window.confirm('This log has the same path but a different full source pack. Archive it as stale? It will never be shown as current.')) {
+				if (typeof confirm !== 'function' || !confirm('This log has the same path but a different full source pack. Archive it as stale? It will never be shown as current.')) {
 					coreLogStatus.textContent = 'Stale observation not imported.';
 					return;
 				}
@@ -1469,10 +1476,14 @@
 	}
 	function paintSectionControls() {
 		var ready = !!section.path && !!section.result && !section.exporting && !reconLive;
+		var hostRunning = typeof SectionHost !== 'undefined' && SectionHost.state === 'running';
 		sliceClear.disabled = !section.a && !section.path;
 		sliceCopy.disabled = !ready;
 		sliceSave.disabled = !ready;
 		sliceToggle.disabled = v3d.on;
+		if (sliceSnap) sliceSnap.disabled = v3d.on;
+		if (hostLoadCutBtn) hostLoadCutBtn.disabled = !(ready && hostRunning);
+		if (hostPullLogBtn) hostPullLogBtn.disabled = !hostRunning;
 		paintSectionStatus();
 		paintCoreLogObservations();
 	}
@@ -1531,6 +1542,34 @@
 			sliceContext.lineWidth = 1.5;
 			sliceContext.strokeStyle = '#ffe3a3';
 			sliceContext.stroke();
+			// Cut-plane quad-strip overlay (0.8.5 A3, §3.2): painted only while the hosted
+			// section's active overlay matches the current non-stale globe section export.
+			var ovl = typeof SectionHost !== 'undefined' && SectionHost.overlayFor
+				? SectionHost.overlayFor(section.result, coreLogContextStaleReason()) : null;
+			if (ovl) {
+				var segs = ovl.segments, lithPalette = ovl.palette.lith;
+				for (var s = 0; s < segs.length; s++) {
+					var seg = segs[s], s0 = seg.sKm, s1 = s + 1 < segs.length ? segs[s + 1].sKm : section.path.arcKm;
+					if (!(s1 > s0)) continue;
+					SlicePack.directionAt(section.path, s0, slicePointer);
+					MapView.project(sliceProjected, slicePointer[0], slicePointer[1], slicePointer[2], viewQ, width, height);
+					SlicePack.directionAt(section.path, s1, slicePointer);
+					MapView.project(sliceProjected2, slicePointer[0], slicePointer[1], slicePointer[2], viewQ, width, height);
+					var x0 = sliceProjected[0], y0 = sliceProjected[1], x1 = sliceProjected2[0], y1 = sliceProjected2[1];
+					if (Math.abs(x1 - x0) > width / 2) continue;
+					var dx = x1 - x0, dy = y1 - y0, dl = Math.hypot(dx, dy);
+					if (!(dl > 1e-6)) continue;
+					var nx = -dy / dl * 3, ny = dx / dl * 3;
+					sliceContext.beginPath();
+					sliceContext.moveTo(x0 + nx, y0 + ny);
+					sliceContext.lineTo(x1 + nx, y1 + ny);
+					sliceContext.lineTo(x1 - nx, y1 - ny);
+					sliceContext.lineTo(x0 - nx, y0 - ny);
+					sliceContext.closePath();
+					sliceContext.fillStyle = lithPalette[seg.lith] || '#ffe3a3';
+					sliceContext.fill();
+				}
+			}
 		}
 		function handle(dir, open) {
 			MapView.project(sliceProjected, dir[0], dir[1], dir[2], viewQ, width, height);
@@ -1582,6 +1621,7 @@
 			section.a = new Float64Array(3);
 			section.a.set(sliceWorldDir);
 			section.b = null;
+			section.rawB = null;
 			section.path = null;
 			section.result = null;
 			paintSectionControls();
@@ -1595,8 +1635,14 @@
 			paintSliceOverlay();
 			return;
 		}
-		var through = new Float64Array(3);
-		through.set(sliceWorldDir);
+		var rawThrough = new Float64Array(3);
+		rawThrough.set(sliceWorldDir);
+		var snapMode = sliceSnap ? sliceSnap.value : 'none';
+		if (snapMode === 'none' && event) {
+			if (event.shiftKey) snapMode = 'boundary';
+			else if (event.altKey) snapMode = 'motion';
+		}
+		var through = Slice.snapSecond(state, section.a, rawThrough, snapMode);
 		var next;
 		try {
 			next = Slice.circleThrough(section.a, through, Slice.radiusKm(), Slice.cellKmFor(grid));
@@ -1606,7 +1652,9 @@
 				+ 'the origin is kept. Click a distinct point.';
 			return;
 		}
+		section.rawB = rawThrough;
 		section.b = through;
+		section.snap = snapMode;
 		section.path = next;
 		section.generation++;
 		paintSectionControls();
@@ -1712,6 +1760,8 @@
 	function clearSection() {
 		section.a = null;
 		section.b = null;
+		section.rawB = null;
+		section.snap = sliceSnap ? sliceSnap.value : 'none';
 		section.path = null;
 		section.result = null;
 		section.serial++;
@@ -1720,6 +1770,25 @@
 		sliceManual.value = '';
 		sliceDirty = true;
 		paintSectionControls();
+		paintSliceOverlay();
+	}
+	function applySectionSnap() {
+		var mode = sliceSnap ? sliceSnap.value : 'none';
+		section.snap = mode;
+		if (!section.a || !section.rawB) { paintSectionControls(); return; }
+		var through = Slice.snapSecond(state, section.a, section.rawB, mode);
+		var next;
+		try {
+			next = Slice.circleThrough(section.a, through, Slice.radiusKm(), Slice.cellKmFor(grid));
+		} catch (error) {
+			return;
+		}
+		section.b = through;
+		section.path = next;
+		section.generation++;
+		paintSectionControls();
+		captureSection();
+		sliceDirty = true;
 		paintSliceOverlay();
 	}
 	// A new world (rebuild, keep-world transfer, engine switch) keeps the geographic path but
@@ -1735,6 +1804,7 @@
 		if (section.path) captureSection();
 	}
 	sliceToggle.addEventListener('change', function () { setSectionActive(sliceToggle.checked); });
+	if (sliceSnap) sliceSnap.addEventListener('change', applySectionSnap);
 	sliceClear.addEventListener('click', clearSection);
 	sliceCopy.addEventListener('click', function () { sectionTransport('copy'); });
 	sliceSave.addEventListener('click', function () { sectionTransport('save'); });
@@ -1756,23 +1826,32 @@
 	paintSectionControls();
 	paintSliceOverlay();
 
-	// --- Hosted section (0.8.5 A2): the panel toggle and the lazy host module -------------
+	// --- Hosted section (0.8.5 A2-A4): panel toggle, lazy host module, cut handoff & ack ----
 	// js/section-host.js and the slice tree load only on the first open: a page that never
 	// opens the panel pays no boot cost and gains no global (0.8.5-answer §3.1/§6). Panel
 	// visibility stays here; the engine side - loader, ShadowRoot mount, dispose, status -
 	// is SectionHost's own.
 	var hostToggle = document.getElementById('section-host'), hostPanel = document.getElementById('host-panel');
 	var hostStatus = document.getElementById('host-status');
+	function onSectionHostChange() {
+		sliceDirty = true;
+		paintSectionControls();
+		paintSliceOverlay();
+	}
+	function hookSectionHost() {
+		if (typeof SectionHost === 'undefined') return;
+		SectionHost.onChange = onSectionHostChange;
+	}
 	function hostSetPanel(open) {
 		hostPanel.hidden = !open;
 		hostToggle.setAttribute('aria-pressed', open ? 'true' : 'false');
 	}
 	function hostShow() {
 		hostSetPanel(true);
-		if (typeof SectionHost !== 'undefined') { SectionHost.open(); return; }
+		if (typeof SectionHost !== 'undefined') { hookSectionHost(); SectionHost.open(); return; }
 		hostStatus.textContent = 'Loading the host module…';
 		var script = document.createElement('script');
-		script.addEventListener('load', function () { SectionHost.open(); });
+		script.addEventListener('load', function () { hookSectionHost(); SectionHost.open(); });
 		script.addEventListener('error', function () {
 			hostStatus.textContent = 'js/section-host.js did not load from the globe tree; the page runs unchanged.';
 		});
@@ -1782,11 +1861,72 @@
 	function hostHide() {
 		if (typeof SectionHost !== 'undefined') SectionHost.close();
 		hostSetPanel(false);
+		sliceDirty = true;
+		paintSectionControls();
+		paintSliceOverlay();
+	}
+	function hostLoadCut() {
+		if (section.exporting || !section.path || reconLive) return;
+		if (typeof SectionHost === 'undefined' || SectionHost.state !== 'running') return;
+		captureSection(function (result) {
+			if (!result || typeof SectionHost === 'undefined' || SectionHost.state !== 'running') return;
+			var bad = SlicePack.validate(result.pack);
+			if (bad) {
+				sliceStatus.textContent = 'Section handoff refused: ' + bad;
+				return;
+			}
+			var out = SectionHost.loadPack(result.pack, {
+				pathChecksum: result.pathChecksum,
+				tMyr: state.t,
+				paused: !playing
+			});
+			if (!out.ok) {
+				sliceStatus.textContent = 'Hosted section refused the pack: ' + out.reason;
+				return;
+			}
+			sliceStatus.textContent = 'Loaded into hosted section · ' + Slice.report(result) + '.';
+			sliceDirty = true;
+			paintSliceOverlay();
+		});
+	}
+	function hostPullObservation() {
+		if (typeof SectionHost === 'undefined' || SectionHost.state !== 'running') return;
+		if (!section.result || !section.result.pack) {
+			coreLogStatus.textContent = 'Build a current section export before importing an observation.';
+			return;
+		}
+		var contextStale = coreLogContextStaleReason();
+		if (contextStale) {
+			coreLogStatus.textContent = 'The selected section export is stale (' + contextStale + '); capture a fresh export before filing.';
+			return;
+		}
+		var outcome = SectionHost.pullObservation(coreLogTable, selectedCoreLogArtifact(), {
+			confirm: function () {
+				return typeof confirm === 'function' && confirm('This log has the same path but a different full source pack. Archive it as stale? It will never be shown as current.');
+			}
+		});
+		if (outcome.status === 'none') {
+			coreLogStatus.textContent = 'No observation is due from the active section.';
+			return;
+		}
+		if (outcome.status === 'confirmation-required' && !outcome.committed) {
+			coreLogStatus.textContent = 'Stale observation not imported.';
+			return;
+		}
+		if (!outcome.committed) {
+			coreLogStatus.textContent = 'Observation refused: ' + outcome.reason;
+			return;
+		}
+		coreLogStatus.textContent = 'Filed ' + outcome.status + ' pgt-core-log v2 · '
+			+ outcome.entry.records.length + ' records · ' + outcome.entry.sourceMetadata.checksum;
+		paintCoreLogObservations();
 	}
 	hostToggle.addEventListener('click', function () {
 		if (hostPanel.hidden) hostShow();
 		else hostHide();
 	});
+	if (hostLoadCutBtn) hostLoadCutBtn.addEventListener('click', hostLoadCut);
+	if (hostPullLogBtn) hostPullLogBtn.addEventListener('click', hostPullObservation);
 	document.getElementById('host-close').addEventListener('click', hostHide);
 
 	// Boot the selected engine on a fresh state. The GPU path builds its kernels
@@ -1876,6 +2016,13 @@
 		playing = value; play.textContent = playing ? 'Pause' : 'Play';
 		play.setAttribute('aria-pressed', String(playing));
 		play.disabled = campaignLocked(); step.disabled = playing || campaignLocked();
+		if (typeof SectionHost !== 'undefined' && SectionHost.state === 'running' && typeof SectionHost.syncClock === 'function') {
+			SectionHost.syncClock({
+				pathChecksum: sectionPathChecksum() || SectionHost.activePathChecksum(),
+				tMyr: state.t,
+				paused: !playing
+			});
+		}
 	}
 	play.addEventListener('click', function () {
 		if (campaignLocked()) return;
@@ -1899,12 +2046,14 @@
 					});
 				}).then(function () {
 					gpu.busy = false; dirty = false; shownVersion = viewVersion;
+					if (section.path) { sliceDirty = true; paintSliceOverlay(); paintCoreLogObservations(); }
 				})['catch'](function (error) {
 					gpu.busy = false; console.error('GPU engine error', error);
 					probe.textContent = 'GPU engine error: ' + error.message;
 				});
 		} else {
 			Sim.step(state, +dtInput.value); dirty = true; waterDirty = true;
+			if (section.path) { sliceDirty = true; paintSliceOverlay(); paintCoreLogObservations(); }
 		}
 	});
 	runToStart.addEventListener('click', function () {
@@ -2476,6 +2625,7 @@
 		}
 	}
 		if (markersDirty || viewMoved) paintDepositMarkers();
+		if (section.path && section.result && state.t !== section.result.pack.source.tMyr) sliceDirty = true;
 		if (sliceDirty || viewMoved) paintSliceOverlay();
 		Perf.frame(now, ran, dt); ran = 0;
 		if (Perf.due(now)) {

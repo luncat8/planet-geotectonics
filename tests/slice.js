@@ -338,6 +338,40 @@ assert.equal(state5.maxClimb, before.maxClimb, 'no climb diagnostics were writte
 for (const key of ['owner', 'z', 'hFel', 'plate', 'edgeType', 'polarity', 'vel', 'omega', 'world', 'climbHistogram'])
 	assert.equal(Buffer.compare(Buffer.from(state5[key].buffer), before[key]), 0, key + ' is untouched by a failed write');
 
+// --- 7. display-side snap modifier (0.8.5 A3) -----------------------------------------------
+// Snap moves only the pending second point before circleThrough, preserves the origin and
+// angular separation, is reversible in one step ('none'), and never touches state.
+assert.deepEqual(Slice.SNAP_MODES, ['none', 'boundary', 'motion']);
+const snapA = new Float64Array([grid5.pos[pinCell * 3], grid5.pos[pinCell * 3 + 1], grid5.pos[pinCell * 3 + 2]]);
+const snapRawB = new Float64Array([0, 0.7071067811865476, 0.7071067811865476]);
+const snapNone = Slice.snapSecond(state5, snapA, snapRawB, 'none');
+assert.deepEqual(Array.from(snapNone), Array.from(snapRawB), 'none returns the unsnapped second point bit-for-bit');
+const snapMotion = Slice.snapSecond(state5, snapA, snapRawB, 'motion');
+const snapBoundary = Slice.snapSecond(state5, snapA, snapRawB, 'boundary');
+const rawDot = snapA[0] * snapRawB[0] + snapA[1] * snapRawB[1] + snapA[2] * snapRawB[2];
+near(snapA[0] * snapMotion[0] + snapA[1] * snapMotion[1] + snapA[2] * snapMotion[2], rawDot, 1e-12,
+	'motion snap preserves the angular separation between origin and second point');
+near(snapA[0] * snapBoundary[0] + snapA[1] * snapBoundary[1] + snapA[2] * snapBoundary[2], rawDot, 1e-12,
+	'boundary snap preserves the angular separation between origin and second point');
+const motionPath = Slice.circleThrough(snapA, snapMotion, R_KM, Slice.cellKmFor(grid5));
+const motionTan = new Float64Array(3);
+SP.tangentAt(motionPath, 0, motionTan);
+const vx0 = state5.vel[pinCell * 3], vy0 = state5.vel[pinCell * 3 + 1], vz0 = state5.vel[pinCell * 3 + 2];
+const va0 = vx0 * snapA[0] + vy0 * snapA[1] + vz0 * snapA[2];
+const vtx0 = vx0 - va0 * snapA[0], vty0 = vy0 - va0 * snapA[1], vtz0 = vz0 - va0 * snapA[2];
+const vtl0 = Math.hypot(vtx0, vty0, vtz0);
+near(Math.abs(motionTan[0] * vtx0 + motionTan[1] * vty0 + motionTan[2] * vtz0) / vtl0, 1, 1e-9,
+	'motion snap aligns the initial circle tangent with the origin cell tangent velocity');
+const boundaryPath = Slice.circleThrough(snapA, snapBoundary, R_KM, Slice.cellKmFor(grid5));
+assert.equal(SP.validate(Slice.pack(state5, boundaryPath, SEA, PROV, LICENSE).pack), '',
+	'a boundary-snapped circle packs and validates cleanly');
+assert.deepEqual(Array.from(Slice.snapSecond(state5, snapA, snapRawB, 'none')), Array.from(snapRawB),
+	're-applying none restores the original unsnapped second point');
+assert.equal(state5.t, before.t, 'snapSecond never touches state.t');
+assert.equal(state5.rng, before.rng, 'snapSecond never touches state.rng');
+for (const key of ['owner', 'z', 'hFel', 'plate', 'edgeType', 'polarity', 'vel', 'omega', 'world', 'climbHistogram'])
+	assert.equal(Buffer.compare(Buffer.from(state5[key].buffer), before[key]), 0, key + ' is untouched by snapSecond');
+
 // Measured walk facts for the release record (no guessed numbers are acceptance evidence).
 console.log('walk measurements: ' + measurements.join(' · '));
-console.log('PASS slice cutter: circle, view round trip, L5-L7 walks, pack semantics, identity, purity');
+console.log('PASS slice cutter: circle, view round trip, L5-L7 walks, pack semantics, identity, purity, snap');

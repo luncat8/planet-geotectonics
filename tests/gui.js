@@ -1937,6 +1937,24 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.match(sEl('section-status').textContent, /^Origin set\./, 'a new cut begins from the next click');
 		sClick(600, 350);
 		assert.match(sEl('section-status').textContent, /^Section · /, 'the second cut completes');
+		// Display-side snap modifier (0.8.5 A3): switching #section-snap to boundary or motion
+		// moves only the second point, recaptures the section, and switching back to none
+		// restores the exact unsnapped path and pack checksum.
+		const unsnappedStatus = sEl('section-status').textContent;
+		const unsnappedPath = /path ([0-9a-f]{8})/.exec(unsnappedStatus)[1];
+		const unsnappedPack = /pack ([0-9a-f]{8})/.exec(unsnappedStatus)[1];
+		sEl('section-snap').value = 'boundary';
+		sEl('section-snap').dispatch('change');
+		assert.match(sEl('section-status').textContent, / · snap boundary$/, 'boundary snap is reported');
+		sEl('section-snap').value = 'motion';
+		sEl('section-snap').dispatch('change');
+		assert.match(sEl('section-status').textContent, / · snap motion$/, 'motion snap is reported');
+		sEl('section-snap').value = 'none';
+		sEl('section-snap').dispatch('change');
+		assert.equal(/path ([0-9a-f]{8})/.exec(sEl('section-status').textContent)[1], unsnappedPath,
+			'returning snap to none restores the exact unsnapped path checksum');
+		assert.equal(/pack ([0-9a-f]{8})/.exec(sEl('section-status').textContent)[1], unsnappedPack,
+			'returning snap to none restores the exact unsnapped pack checksum');
 		// A level rebuild keeps the geographic line but captures the new world fresh.
 		const pathKept = /path ([0-9a-f]{8})/.exec(sEl('section-status').textContent)[1];
 		sEl('level').value = '6';
@@ -2074,6 +2092,142 @@ const ENV_LINE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2} · \S+ · \S+( · gpu \S+ \S+)?
 		assert.ok(qPage.api.scriptLoads.indexOf('../../elsewhere/js/params.js') >= 0,
 			'and the loader injects against it');
 		assert.equal(qPage.el('host-panel').hidden, false, 'the panel opens on the override base');
+	}
+	// --- 0.8.5 A3 & A4 UI integration: Load selected cut, quad-strip overlay & File active observation ---
+	{
+		const aPage = loadPage('');
+		const aEl = aPage.el, aMap = aEl('map');
+		const aClick = (x, y) => aMap.dispatch('click', { clientX: x, clientY: y, currentTarget: aMap });
+		aPage.api.scripts['js/section-host.js'] = read('js/section-host.js');
+		vm.runInThisContext(read('js/section-host.js'), { filename: 'js/section-host.js' });
+		const BASE = '../planet-tectonics-2d-slice/';
+		const SCRIPTS = globalThis.SectionHost.SCRIPTS;
+		globalThis.hostUiRec = { loaded: [], clocks: [], notes: 0, dueLog: null };
+		for (const rel of SCRIPTS.slice(2)) {
+			aPage.api.scripts[BASE + rel] = 'var COL_DUMMY = 1;';
+		}
+		aPage.api.scripts[BASE + 'js/data/section-earth-gc0.js'] =
+			'globalThis.SECTION_PACKS = { "earth-gc0": { format: "pgt-slice-pack", version: 2, checksum: "63825f6abdfde871", path: { kind: "circle", arcKm: 40030.2 }, source: { tMyr: 0 } } };';
+		aPage.api.scripts[BASE + 'js/ui.js'] =
+			'var COLUI = { build: function (h) { var c = h.ownerDocument.createElement("canvas"); c.setAttribute("id", "c"); h.appendChild(c); } };';
+		aPage.api.scripts[BASE + 'js/sim.js'] =
+			'var COLSIM = { start: function () { COLSECTION.mode = true; COLSECTION.pack = SECTION_PACKS["earth-gc0"]; COLSECTION.world = true; }, stop: function () { COLSECTION.mode = false; }, step: function () {} };';
+		aPage.api.scripts[BASE + 'js/coupling.js'] =
+			'var COLCOUPLING = { CADENCE_MYR: 5, pathChecksum: function (p) { return p && p.path && p.path.lat0 !== undefined ? SlicePack.pathChecksum(p.path) : "4a90d62b21f7b0f4"; } };';
+		aPage.api.scripts[BASE + 'js/section-pack.js'] = [
+			'var COLSECTION = {',
+			'  mode: false, syncLive: false, syncStale: false, syncPaused: false, pack: null, world: false, bad: false, msg: "",',
+			'  loadPack: function (pack, origin) {',
+			'    var bad = SlicePack.validate(pack); if (bad) throw new Error(bad);',
+			'    this.pack = pack; this.world = true; this.bad = false;',
+			'    globalThis.hostUiRec.loaded.push({ pack: pack, origin: origin });',
+			'    return pack;',
+			'  },',
+			'  applyClock: function (clock, rung) {',
+			'    globalThis.hostUiRec.clocks.push({ clock: clock, rung: rung });',
+			'    this.bad = false; this.syncLive = true; this.syncPaused = !!clock.paused;',
+			'  },',
+			'  overlay: function () {',
+			'    if (!this.pack || !this.world || !this.pack.path || this.pack.path.lat0 === undefined) return null;',
+			'    return {',
+			'      pathChecksum: SlicePack.pathChecksum(this.pack.path),',
+			'      packChecksum: this.pack.checksum,',
+			'      palette: { lith: ["#cdb991", "#dca58c", "#464b52", "#a59682", "#8c3c2d", "#c3553c"], host: ["#26303c"] },',
+			'      segments: [{ sKm: 0, lith: 0, host: 0 }, { sKm: 500, lith: 1, host: 0 }, { sKm: 1000, lith: 2, host: 0 }, { sKm: 1500, lith: 3, host: 0 }]',
+			'    };',
+			'  }',
+			'};'
+		].join('\n');
+		aPage.api.scripts[BASE + 'js/core-log.js'] = [
+			'var COLCORELOG = {',
+			'  exportActive: function () { return globalThis.hostUiRec.dueLog; },',
+			'  note: function () { globalThis.hostUiRec.notes++; globalThis.hostUiRec.dueLog = null; }',
+			'};'
+		].join('\n');
+
+		assert.equal(aEl('host-load-cut').disabled, true, 'Load selected cut ships disabled before open');
+		assert.equal(aEl('host-pull-log').disabled, true, 'File active observation ships disabled before open');
+		aEl('section-host').click();
+		assert.equal(globalThis.SectionHost.state, 'running', 'the hosted section is running');
+		assert.equal(aEl('host-load-cut').disabled, true, 'Load selected cut stays disabled before a cut exists');
+		assert.equal(aEl('host-pull-log').disabled, false, 'File active observation enables when the host is running');
+
+		// Cut a section on the 2D map.
+		aEl('section-toggle').checked = true;
+		aEl('section-toggle').dispatch('change');
+		aClick(200, 260);
+		aClick(760, 190);
+		assert.equal(aEl('host-load-cut').disabled, false, 'Load selected cut enables when both cut and host are ready');
+		// Before handoff, the hosted section holds earth-gc0 so overlayFor drops the strip (2 handle fills only).
+		assert.deepEqual(aEl('slice-overlay').fillStyles, ['#ffe3a3', '#ffe3a3'],
+			'before handoff, only the two endpoint handles are filled on #slice-overlay');
+
+		// Hand off the selected cut via #host-load-cut.
+		aEl('host-load-cut').click();
+		assert.equal(globalThis.hostUiRec.loaded.length, 1, 'clicking Load selected cut handed the pack to COLSECTION.loadPack');
+		const handedPack = globalThis.hostUiRec.loaded[0].pack;
+		aEl('section-copy').click();
+		await aPage.tick();
+		const copiedPack = globalThis.SlicePack.decode(aPage.api.document.copied[aPage.api.document.copied.length - 1]);
+		assert.equal(handedPack.checksum, copiedPack.checksum,
+			'the pack handed to COLSECTION.loadPack has the exact checksum of Copy/Save');
+		assert.equal(globalThis.hostUiRec.clocks.length, 1, 'handoff delivered the paused clock');
+		assert.equal(globalThis.hostUiRec.clocks[0].clock.paused, true, 'the delivered clock is paused');
+		assert.equal(globalThis.hostUiRec.clocks[0].clock.pathChecksum, SlicePack.pathChecksum(handedPack.path));
+
+		// Now the quad-strip overlay paints the 3 segment lithology colours plus the 2 endpoint handles.
+		assert.deepEqual(aEl('slice-overlay').fillStyles.slice(0, 3), ['#cdb991', '#dca58c', '#464b52'],
+			'the quad-strip overlay paints the section segments with palette.lith colours');
+
+		// Automated observation filing (#host-pull-log):
+		// 1) When nothing is due, note() is not called.
+		aEl('host-pull-log').click();
+		assert.match(aEl('core-log-status').textContent, /No observation is due/);
+		assert.equal(globalThis.hostUiRec.notes, 0);
+
+		// 2) Build a current due log matching the handed cut.
+		const baseLog = JSON.parse(read('port/fixtures/core-log-v2.json'));
+		baseLog.pathChecksum = SlicePack.pathChecksum(handedPack.path);
+		baseLog.packChecksum = handedPack.checksum;
+		baseLog.arcKm = handedPack.path.arcKm;
+		baseLog.tMyr = handedPack.source.tMyr;
+		baseLog.checksum = globalThis.CoreLogFormat.checksum(baseLog);
+		globalThis.hostUiRec.dueLog = {
+			text: JSON.stringify(baseLog),
+			pathChecksum: baseLog.pathChecksum,
+			packChecksum: baseLog.packChecksum
+		};
+		aEl('host-pull-log').click();
+		assert.match(aEl('core-log-status').textContent, /^Filed current pgt-core-log v2 · /);
+		assert.equal(globalThis.hostUiRec.notes, 1, 'COLCORELOG.note was called on current commit');
+		assert.match(aEl('core-log-panel').textContent, /Observed section log · current/);
+
+		// 3) Stale log on the same path: declined confirmation leaves note() uncalled, accepted commits as stale.
+		const staleLog = JSON.parse(JSON.stringify(baseLog));
+		staleLog.packChecksum = '0123456789abcdef';
+		staleLog.checksum = globalThis.CoreLogFormat.checksum(staleLog);
+		globalThis.hostUiRec.dueLog = {
+			text: JSON.stringify(staleLog),
+			pathChecksum: staleLog.pathChecksum,
+			packChecksum: staleLog.packChecksum
+		};
+		const prevConfirm = globalThis.confirm;
+		globalThis.confirm = () => false;
+		aEl('host-pull-log').click();
+		assert.equal(aEl('core-log-status').textContent, 'Stale observation not imported.');
+		assert.equal(globalThis.hostUiRec.notes, 1, 'declining confirmation never calls COLCORELOG.note');
+		globalThis.confirm = () => true;
+		aEl('host-pull-log').click();
+		globalThis.confirm = prevConfirm;
+		assert.match(aEl('core-log-status').textContent, /^Filed stale pgt-core-log v2 · /);
+		assert.equal(globalThis.hostUiRec.notes, 2, 'confirming stale archive calls COLCORELOG.note');
+
+		// 4) Stepping world time immediately drops the quad-strip overlay and marks the filed log stale.
+		aEl('step').click();
+		assert.deepEqual(aEl('slice-overlay').fillStyles, ['#ffe3a3', '#ffe3a3'],
+			'advancing world time immediately drops the quad-strip overlay');
+		assert.match(aEl('core-log-panel').textContent, /world time changed after the selected export/);
+		aEl('host-close').click();
 	}
 
 	// An Earth start names its own pack and epoch, and the preset decides whether the

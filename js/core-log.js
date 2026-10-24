@@ -20,11 +20,55 @@ var CoreLog = (function (CF, SP) {
 		Object.keys(value).forEach(function (key) { freezeDeep(value[key]); });
 		return Object.freeze(value);
 	}
+	function round6(v) {
+		var n = Number(v);
+		if (!Number.isFinite(n) || n === 0) return 0;
+		return Number(n.toPrecision(6));
+	}
+	// The slice engine's COLCOUPLING.pathChecksum(pack) hashes the same rounded path body
+	// without the 'pgt-slice-path-v2\n' domain prefix used by SlicePack.pathChecksum(path).
+	// Computing both for the active cut lets CoreLog accept logs from both the shared fixture
+	// and the live/standalone slice exporter while still refusing any foreign path.
+	function couplingPathChecksum(path) {
+		if (!path || typeof path !== 'object') return '';
+		var body = { kind: path.kind, closes: !!path.closes, arcKm: round6(path.arcKm) };
+		if (path.kind === 'circle') {
+			body.lat0 = round6(path.lat0);
+			body.lon0 = round6(path.lon0);
+			body.az0 = round6(path.az0);
+		} else if (Array.isArray(path.verts)) {
+			body.verts = [];
+			for (var i = 0; i < path.verts.length; i++) {
+				var v = path.verts[i];
+				body.verts.push(Array.isArray(v) ? [round6(v[0]), round6(v[1])] : round6(v));
+			}
+		}
+		var text = JSON.stringify(body), a = 0x811c9dc5, b = 0x9747b28c;
+		for (var j = 0; j < text.length; j++) {
+			var c = text.charCodeAt(j);
+			a = Math.imul(a ^ c, 16777619);
+			b = Math.imul(b ^ c ^ 0x5a, 0x01000195);
+		}
+		return ('0000000' + (a >>> 0).toString(16)).slice(-8)
+			+ ('0000000' + (b >>> 0).toString(16)).slice(-8);
+	}
+	function resolveCurrent(message, current) {
+		if (!current || !message) return current;
+		if (current.couplingPathChecksum && message.pathChecksum === current.couplingPathChecksum) {
+			return {
+				pathChecksum: current.couplingPathChecksum,
+				packChecksum: current.packChecksum,
+				arcKm: current.arcKm
+			};
+		}
+		return current;
+	}
 	function createTable() { return { entries: Object.create(null), order: [] }; }
 	function artifact(pack) {
 		if (!pack || !pack.path) return null;
 		return {
 			pathChecksum: SP.pathChecksum(pack.path),
+			couplingPathChecksum: couplingPathChecksum(pack.path),
 			packChecksum: pack.checksum,
 			arcKm: pack.path.arcKm
 		};
@@ -35,7 +79,7 @@ var CoreLog = (function (CF, SP) {
 		options = options || {};
 		// Parse and validate completely before consulting or mutating the side table.
 		var message = CF.parse(text);
-		var match = CF.identity(message, current);
+		var match = CF.identity(message, resolveCurrent(message, current));
 		if (match.status === 'foreign')
 			return { status: 'foreign', reason: match.reason, committed: false };
 		if (match.status === 'stale' && !options.confirmStale)
@@ -57,8 +101,9 @@ var CoreLog = (function (CF, SP) {
 		if (!entry) return { status: 'foreign', reason: 'no observation' };
 		if (entry.staleReason) return { status: 'stale', reason: entry.staleReason };
 		if (contextStaleReason) return { status: 'stale', reason: contextStaleReason };
-		return CF.identity({ pathChecksum: entry.sourceMetadata.pathChecksum,
-			packChecksum: entry.sourceMetadata.packChecksum, arcKm: entry.sourceMetadata.arcKm }, current);
+		var probe = { pathChecksum: entry.sourceMetadata.pathChecksum,
+			packChecksum: entry.sourceMetadata.packChecksum, arcKm: entry.sourceMetadata.arcKm };
+		return CF.identity(probe, resolveCurrent(probe, current));
 	}
 	function nearest(entry, sKm) {
 		if (!entry || !entry.records.length || !Number.isFinite(sKm)) return null;

@@ -43,6 +43,74 @@ var Slice = (function () {
 	function circleThrough(aWorld, bWorld, rKm, cellKm) {
 		return SliceSP.circleThrough(aWorld, bWorld, rKm === undefined ? radiusKm() : rKm, cellKm);
 	}
+	var SNAP_MODES = ['none', 'boundary', 'motion'];
+	// Display-side snap modifier (0.8.5 A3): moves only the pending second point before
+	// circleThrough, preserving the origin aWorld and the angular separation theta between aWorld
+	// and bWorld. Never mutates state, aWorld or bWorld; 'none' restores bWorld bit-for-bit.
+	function snapSecond(state, aWorld, bWorld, mode) {
+		var al = Math.hypot(aWorld[0], aWorld[1], aWorld[2]);
+		var bl = Math.hypot(bWorld[0], bWorld[1], bWorld[2]);
+		var out = new Float64Array([bWorld[0], bWorld[1], bWorld[2]]);
+		if (!(al > 0) || !(bl > 0)) return out;
+		if (!mode || mode === 'none' || !state || !state.grid) return out;
+		var ax = aWorld[0] / al, ay = aWorld[1] / al, az = aWorld[2] / al;
+		var bx = bWorld[0] / bl, by = bWorld[1] / bl, bz = bWorld[2] / bl;
+		var dotAB = Math.max(-1, Math.min(1, ax * bx + ay * by + az * bz));
+		var sinTheta = Math.sqrt(Math.max(0, 1 - dotAB * dotAB));
+		if (sinTheta < 1e-12) return out;
+		var grid = state.grid, pos = grid.pos, tx = 0, ty = 0, tz = 0;
+		if (mode === 'motion') {
+			var c0 = SliceResolution.nearestCell(grid, ax, ay, az) * 3;
+			var vx = state.vel[c0], vy = state.vel[c0 + 1], vz = state.vel[c0 + 2];
+			var va = vx * ax + vy * ay + vz * az;
+			tx = vx - va * ax; ty = vy - va * ay; tz = vz - va * az;
+			if (Math.hypot(tx, ty, tz) <= 1e-12) {
+				var c1 = SliceResolution.nearestCell(grid, bx, by, bz) * 3;
+				vx = state.vel[c1]; vy = state.vel[c1 + 1]; vz = state.vel[c1 + 2];
+				va = vx * ax + vy * ay + vz * az;
+				tx = vx - va * ax; ty = vy - va * ay; tz = vz - va * az;
+			}
+		} else if (mode === 'boundary') {
+			var bestScore = -Infinity, bestSum = -Infinity, bestC = -1, bestJ = -1;
+			for (var c = 0; c < grid.V; c++) {
+				var base = c * 6, n = grid.ringN[c];
+				for (var k = 0; k < n; k++) {
+					if (!(state.edgeType[base + k] > 0)) continue;
+					var j = grid.ring[base + k];
+					if (j < 0) continue;
+					var mx = pos[c * 3] + pos[j * 3];
+					var my = pos[c * 3 + 1] + pos[j * 3 + 1];
+					var mz = pos[c * 3 + 2] + pos[j * 3 + 2];
+					var ml = Math.hypot(mx, my, mz);
+					if (!(ml > 0)) continue;
+					mx /= ml; my /= ml; mz /= ml;
+					var da = mx * ax + my * ay + mz * az;
+					var db = mx * bx + my * by + mz * bz;
+					var score = da > db ? da : db, sum = da + db;
+					if (score > bestScore || (score === bestScore && sum > bestSum)) {
+						bestScore = score; bestSum = sum; bestC = c; bestJ = j;
+					}
+				}
+			}
+			if (bestC >= 0 && bestJ >= 0) {
+				var nx = pos[bestJ * 3] - pos[bestC * 3];
+				var ny = pos[bestJ * 3 + 1] - pos[bestC * 3 + 1];
+				var nz = pos[bestJ * 3 + 2] - pos[bestC * 3 + 2];
+				var na = nx * ax + ny * ay + nz * az;
+				tx = nx - na * ax; ty = ny - na * ay; tz = nz - na * az;
+			}
+		}
+		var tl = Math.hypot(tx, ty, tz);
+		if (!(tl > 1e-12)) return out;
+		tx /= tl; ty /= tl; tz /= tl;
+		if (tx * bx + ty * by + tz * bz < 0) { tx = -tx; ty = -ty; tz = -tz; }
+		var sx = ax * dotAB + tx * sinTheta;
+		var sy = ay * dotAB + ty * sinTheta;
+		var sz = az * dotAB + tz * sinTheta;
+		var sl = Math.hypot(sx, sy, sz);
+		out[0] = sx / sl; out[1] = sy / sl; out[2] = sz / sl;
+		return out;
+	}
 	function copyPath(path) {
 		return path.kind === 'circle'
 			? { kind: 'circle', closes: true, arcKm: path.arcKm, cellKm: path.cellKm,
@@ -239,9 +307,11 @@ var Slice = (function () {
 		COMMIT: COMMIT,
 		STEP_DIVISOR: STEP_DIVISOR,
 		TOL_KM: TOL_KM,
+		SNAP_MODES: SNAP_MODES,
 		radiusKm: radiusKm,
 		cellKmFor: cellKmFor,
 		circleThrough: circleThrough,
+		snapSecond: snapSecond,
 		walk: walk,
 		pack: pack,
 		report: report
